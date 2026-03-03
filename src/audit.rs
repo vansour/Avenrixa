@@ -1,0 +1,43 @@
+use crate::models::*;
+use tracing::info;
+use uuid::Uuid;
+
+/// 记录审计日志
+pub async fn log_audit(
+    pool: &sqlx::PgPool,
+    user_id: Option<Uuid>,
+    action: &str,
+    target_type: &str,
+    target_id: Option<Uuid>,
+    ip_address: Option<&str>,
+    details: Option<serde_json::Value>,
+) {
+    let audit_log = AuditLog {
+        id: Uuid::new_v4(),
+        user_id,
+        action: action.to_string(),
+        target_type: target_type.to_string(),
+        target_id,
+        details,
+        ip_address: ip_address.map(|s| s.to_string()),
+        created_at: chrono::Utc::now(),
+    };
+
+    match sqlx::query(
+        "INSERT INTO audit_logs (id, user_id, action, target_type, target_id, details, ip_address, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"
+    )
+    .bind(audit_log.id)
+    .bind(audit_log.user_id)
+    .bind(&audit_log.action)
+    .bind(&audit_log.target_type)
+    .bind(audit_log.target_id)
+    .bind(&audit_log.details)
+    .bind(&audit_log.ip_address)
+    .bind(audit_log.created_at)
+    .execute(pool)
+    .await
+    {
+        Ok(_) => info!("Audit log recorded: {} on {}", action, target_type),
+        Err(e) => tracing::error!("Failed to record audit log: {}", e),
+    }
+}
