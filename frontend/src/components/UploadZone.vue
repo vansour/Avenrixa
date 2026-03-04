@@ -3,9 +3,7 @@
     <input ref="fileInput" type="file" accept="image/*" multiple style="display: none" @change="handleSelect" />
     <div v-if="!uploading" class="upload-content">
       <div class="upload-icon">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-        </svg>
+        <Upload :size="36" />
       </div>
       <h3>拖拽图片到这里</h3>
       <p class="subtitle">或者点击选择文件（支持多选）</p>
@@ -18,10 +16,6 @@
     </div>
     <div v-else class="upload-progress">
       <div class="progress-ring">
-        <svg class="progress-svg" viewBox="0 0 100 100">
-          <circle class="progress-bg" cx="50" cy="50" r="45" />
-          <circle class="progress-bar" cx="50" cy="50" r="45" :style="{ strokeDasharray: progressCircumference, strokeDashoffset: progressOffset }" />
-        </svg>
         <span class="progress-percentage">{{ Math.round(progressPercentage) }}%</span>
       </div>
       <div class="progress-info">
@@ -34,6 +28,7 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
+import { Upload } from 'lucide-vue-next'
 
 const props = defineProps<{
   uploading: boolean
@@ -165,12 +160,12 @@ defineExpose({ updateProgress })
   align-items: center;
   justify-content: center;
   transition: all var(--transition-normal) var(--ease-out);
+  color: var(--color-primary);
 }
 
 .upload-icon svg {
   width: 36px;
   height: 36px;
-  color: var(--color-primary);
   transition: transform var(--transition-normal) var(--ease-out);
 }
 
@@ -287,9 +282,8 @@ defineExpose({ updateProgress })
     height: 56px;
   }
 
-  .upload-icon svg {
-    width: 28px;
-    height: 28px;
+  .upload-icon span {
+    font-size: 28px;
   }
 
   .upload-content h3 {
@@ -305,7 +299,7 @@ defineExpose({ updateProgress })
 /* 减少动画模式 */
 @media (prefers-reduced-motion: reduce) {
   .upload-zone:hover .upload-icon,
-  .upload-zone:hover .upload-icon svg {
+  .upload-zone:hover .upload-icon span {
     transform: none;
   }
 

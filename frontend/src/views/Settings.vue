@@ -7,56 +7,19 @@
         <p class="subtitle">配置和管理您的图片托管服务</p>
       </div>
       <div class="header-actions">
-        <div class="user-info">
-          <div class="user-avatar">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-            </svg>
-          </div>
-          <div class="user-details">
-            <span class="username">{{ user?.username }}</span>
-            <span class="role-badge" :class="user?.role || 'user'">
-              {{ user?.role === 'admin' ? '管理员' : '普通用户' }}
-            </span>
-          </div>
-        </div>
+        <UserMenu
+          v-if="user"
+          :user="user"
+          @profile="showProfile = true"
+          @settings="() => {}"
+          @logout="handleLogout"
+        />
         <button @click="router.push('/')" class="btn-nav" :aria-label="'返回主页'">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7m7 7V5a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2v-8z" />
-          </svg>
           返回
         </button>
-        <button v-if="user?.role === 'admin'" @click="router.push('/admin')" class="btn-nav btn-admin" :aria-label="'打开管理面板'">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066-2.573c-.94 1.543-.826 3.31-2.37 2.37zM12 15.75a1.5 1.5 0 100-3 0 1.5 1.5 0 013 0V9a6 6 0 00-6 6H8a6 6 0 00-6 6v6.75zM8.058 16.005a.75.75 0 01.596.07l-.696-5.604a.75.75 0 01.592.962l.696 5.604a.75.75 0 01-.596.07l-.696-5.604a.75.75 0 01-.592-.962l.696-5.604a.75.75 0 01.596-.07z" />
-          </svg>
-          管理面板
-        </button>
-        <button @click="router.push('/settings')" class="btn-nav btn-settings active" :aria-label="'系统设置'">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066-2.573c-.94 1.543-.826 3.31-2.37 2.37zM12 15.75a1.5 1.5 0 100-3 0 1.5 1.5 0 013 0V9a6 6 0 00-6 6H8a6 6 0 00-6 6v6.75zM8.058 16.005a.75.75 0 01.596.07l-.696-5.604a.75.75 0 01.592.962l.696 5.604a.75.75 0 01-.596.07l-.696-5.604a.75.75 0 01-.592-.962l.696-5.604a.75.75 0 01.596-.07z" />
-          </svg>
-          设置
-        </button>
-        <button @click="showProfile = true" class="btn-nav btn-profile" :aria-label="'打开个人资料'">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-          </svg>
-          个人资料
-        </button>
-        <button @click="handleLogout" class="btn-nav btn-logout" :aria-label="'退出登录'">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4 4m4-4H9a6 6 0 00-6 6v4a6 6 0 006 6h8" />
-          </svg>
-          退出
-        </button>
         <button @click="toggleTheme" class="btn-theme" :title="theme === 'dark' ? '切换亮色模式' : '切换暗色模式'" :aria-label="'切换主题'">
-          <svg v-if="theme === 'dark'" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-9M5.64 5.64l.71.71M5.64 18.36l.71.71m14.71-14.71l-.71-.71M18.36 18.36l-.71-.71" />
-          </svg>
-          <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-9M5.64 5.64l.71.71M5.64 18.36l.71.71m14.71-14.71l-.71-.71M18.36 18.36l-.71-.71" />
-          </svg>
+          <Moon v-if="theme === 'dark'" />
+          <Sun v-else />
         </button>
       </div>
     </header>
@@ -72,7 +35,6 @@
             @click="activeSection = section.id"
             :aria-label="section.label"
           >
-            <span class="nav-icon">{{ section.icon }}</span>
             <span class="nav-text">{{ section.label }}</span>
           </button>
         </nav>
@@ -89,11 +51,6 @@
           <!-- 基本设置 -->
           <section v-show="activeSection === 'basic'" class="settings-section active">
             <div class="section-header">
-              <div class="section-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066-2.573c-.94 1.543-.826 3.31-2.37 2.37zM12 15.75a1.5 1.5 0 100-3 0 1.5 1.5 0 013 0V9a6 6 0 00-6 6H8a6 6 0 00-6 6v6.75zM8.058 16.005a.75.75 0 01.596.07l-.696-5.604a.75.75 0 01.592.962l.696 5.604a.75.75 0 01-.596.07l-.696-5.604a.75.75 0 01-.592-.962l.696-5.604a.75.75 0 01.596-.07z" />
-                </svg>
-              </div>
               <h2 class="section-title">基本设置</h2>
             </div>
 
@@ -129,22 +86,15 @@
 
             <div class="section-actions">
               <button @click="saveBasicSettings" class="btn-save" :disabled="saving" :aria-live="saving ? 'polite' : 'off'">
-                <svg v-if="saving" class="spinner-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
+                <LoaderCircle v-if="saving" class="spinner-icon animate-spin" />
                 <span v-else>保存基本设置</span>
               </button>
             </div>
           </section>
 
           <!-- 上传设置 -->
-          <section v-show="activeSection === 'upload'" class="settings-section">
+          <section v-show="activeSection === 'upload'" class="settings-section active">
             <div class="section-header">
-              <div class="section-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-3m-3-1v14m0 0l3-3m-3 0L5 3M9 7h6" />
-                </svg>
-              </div>
               <h2 class="section-title">上传设置</h2>
             </div>
 
@@ -201,22 +151,15 @@
 
             <div class="section-actions">
               <button @click="saveUploadSettings" class="btn-save" :disabled="saving" :aria-live="saving ? 'polite' : 'off'">
-                <svg v-if="saving" class="spinner-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
+                <LoaderCircle v-if="saving" class="spinner-icon animate-spin" />
                 <span v-else>保存上传设置</span>
               </button>
             </div>
           </section>
 
           <!-- 存储设置 -->
-          <section v-show="activeSection === 'storage'" class="settings-section">
+          <section v-show="activeSection === 'storage'" class="settings-section active">
             <div class="section-header">
-              <div class="section-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.79 4 6 6h4c2.21 0 4-1.79 4-4V7M4 7a2 2 0 00-2-2h4a2 2 0 00-2 2v14a2 2 0 002 2H4a2 2 0 00-2-2v-14m2 4h10a2 2 0 002-2v-1.8" />
-                </svg>
-              </div>
               <h2 class="section-title">存储设置</h2>
             </div>
 
@@ -262,22 +205,15 @@
 
             <div class="section-actions">
               <button @click="saveStorageSettings" class="btn-save" :disabled="saving" :aria-live="saving ? 'polite' : 'off'">
-                <svg v-if="saving" class="spinner-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
+                <LoaderCircle v-if="saving" class="spinner-icon animate-spin" />
                 <span v-else>保存存储设置</span>
               </button>
             </div>
           </section>
 
           <!-- 安全设置 -->
-          <section v-show="activeSection === 'security'" class="settings-section">
+          <section v-show="activeSection === 'security'" class="settings-section active">
             <div class="section-header">
-              <div class="section-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                </svg>
-              </div>
               <h2 class="section-title">安全设置</h2>
             </div>
 
@@ -307,9 +243,7 @@
 
             <div class="section-actions">
               <button @click="saveSecuritySettings" class="btn-save" :disabled="saving" :aria-live="saving ? 'polite' : 'off'">
-                <svg v-if="saving" class="spinner-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
+                <LoaderCircle v-if="saving" class="spinner-icon animate-spin" />
                 <span v-else>保存安全设置</span>
               </button>
             </div>
@@ -318,11 +252,6 @@
           <!-- 系统信息 -->
           <section v-show="activeSection === 'system'" class="settings-section">
             <div class="section-header">
-              <div class="section-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              </div>
               <h2 class="section-title">系统信息</h2>
             </div>
 
@@ -353,6 +282,127 @@
               </div>
             </div>
           </section>
+
+          <!-- 系统统计 -->
+          <section v-show="activeSection === 'stats'" class="settings-section active">
+            <div class="section-header">
+              <h2 class="section-title">系统统计</h2>
+            </div>
+
+            <div class="stats-grid">
+              <div class="stat-card">
+                <div class="stat-value">{{ adminStats.total_users }}</div>
+                <div class="stat-label">总用户数</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-value">{{ adminStats.total_images }}</div>
+                <div class="stat-label">总图片数</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-value">{{ formatSize(adminStats.total_storage) }}</div>
+                <div class="stat-label">总存储</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-value">{{ adminStats.total_views }}</div>
+                <div class="stat-label">总浏览量</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-value">{{ adminStats.images_last_24h }}</div>
+                <div class="stat-label">24小时上传</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-value">{{ adminStats.images_last_7d }}</div>
+                <div class="stat-label">7天上传</div>
+              </div>
+            </div>
+          </section>
+
+          <!-- 用户管理 -->
+          <section v-show="activeSection === 'users'" class="settings-section active">
+            <div class="section-header">
+              <h2 class="section-title">用户管理</h2>
+            </div>
+
+            <div class="users-content">
+              <table class="users-table">
+                <thead>
+                  <tr>
+                    <th>用户名</th>
+                    <th>角色</th>
+                    <th>创建时间</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="user in adminUsers" :key="user.id">
+                    <td>{{ user.username }}</td>
+                    <td>
+                      <span :class="['role-badge', user.role]">{{ user.role }}</span>
+                    </td>
+                    <td>{{ formatDate(user.created_at) }}</td>
+                    <td>
+                      <select
+                        v-model="user.role"
+                        @change="updateUserRole(user.id, user.role)"
+                        class="role-select"
+                      >
+                        <option value="user">普通用户</option>
+                        <option value="admin">管理员</option>
+                      </select>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <!-- 审计日志 -->
+          <section v-show="activeSection === 'audit'" class="settings-section active">
+            <div class="section-header">
+              <h2 class="section-title">审计日志</h2>
+            </div>
+
+            <div class="audit-content">
+              <table class="audit-table">
+                <thead>
+                  <tr>
+                    <th>时间</th>
+                    <th>操作</th>
+                    <th>目标类型</th>
+                    <th>IP地址</th>
+                    <th>详情</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="log in auditLogs?.data" :key="log.id">
+                    <td>{{ formatDate(log.created_at) }}</td>
+                    <td>{{ log.action }}</td>
+                    <td>{{ log.target_type }}</td>
+                    <td>{{ log.ip_address || '-' }}</td>
+                    <td class="details-cell">{{ formatDetails(log.details) }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <!-- 数据库备份 -->
+          <section v-show="activeSection === 'backup'" class="settings-section active">
+            <div class="section-header">
+              <h2 class="section-title">数据库备份</h2>
+            </div>
+
+            <div class="backup-content">
+              <p>创建数据库备份文件，备份将保存为 SQL 格式。</p>
+              <button @click="createBackup" class="btn-backup" :disabled="backingUp">
+                {{ backingUp ? '备份中...' : '创建备份' }}
+              </button>
+              <div v-if="lastBackup" class="backup-status success">
+                <span>上次备份: {{ lastBackup.filename }}</span>
+                <span>{{ formatDate(lastBackup.created_at) }}</span>
+              </div>
+            </div>
+          </section>
         </div>
       </main>
     </div>
@@ -366,13 +416,16 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { auth } from '../store/auth'
-import { post } from '../store/api'
+import { LoaderCircle, Moon, Sun } from 'lucide-vue-next'
+import { auth, api } from '../store/auth'
+import { get, post } from '../store/api'
+import UserMenu from '../components/UserMenu.vue'
 import Profile from './Profile.vue'
 import Toast from '../components/Toast.vue'
 import * as CONSTANTS from '../constants'
+import type { AuditLogResponse, AuditLogDetail, Setting } from '../types'
 
 const router = useRouter()
 const user = computed(() => auth.state.user)
@@ -387,11 +440,15 @@ const theme = ref<'light' | 'dark'>(
 
 // 设置分组
 const sections = [
-  { id: 'basic', label: '基本设置', icon: '⚙️' },
-  { id: 'upload', label: '上传设置', icon: '📤' },
-  { id: 'storage', label: '存储设置', icon: '💾' },
-  { id: 'security', label: '安全设置', icon: '🔒' },
-  { id: 'system', label: '系统信息', icon: 'ℹ️' }
+  { id: 'basic', label: '基本设置' },
+  { id: 'upload', label: '上传设置' },
+  { id: 'storage', label: '存储设置' },
+  { id: 'security', label: '安全设置' },
+  { id: 'system', label: '系统信息' },
+  { id: 'stats', label: '系统统计' },
+  { id: 'users', label: '用户管理' },
+  { id: 'audit', label: '审计日志' },
+  { id: 'backup', label: '数据库备份' }
 ]
 
 const showToast = (message: string, type: 'success' | 'error' = 'success') => {
@@ -433,6 +490,41 @@ const systemInfo = ref({
   redisStatus: 'unknown'
 })
 
+// 管理面板相关状态
+interface AdminUser {
+  id: string
+  username: string
+  role: string
+  created_at: string
+}
+
+interface SystemStats {
+  total_users: number
+  total_images: number
+  total_storage: number
+  total_views: number
+  images_last_24h: number
+  images_last_7d: number
+}
+
+interface BackupInfo {
+  filename: string
+  created_at: string
+}
+
+const adminStats = ref<SystemStats>({
+  total_users: 0,
+  total_images: 0,
+  total_storage: 0,
+  total_views: 0,
+  images_last_24h: 0,
+  images_last_7d: 0
+})
+const adminUsers = ref<AdminUser[]>([])
+const auditLogs = ref<AuditLogResponse | null>(null)
+const lastBackup = ref<BackupInfo | null>(null)
+const backingUp = ref(false)
+
 const handleLogout = () => {
   auth.logout()
   router.push('/')
@@ -447,44 +539,41 @@ const toggleTheme = () => {
 const loadSettings = async () => {
   loading.value = true
   try {
-    const response = await fetch('/api/settings')
-    if (response.ok) {
-      const settings = await response.json()
-      settings.forEach((s: { key: string; value: string }) => {
-        switch (s.key) {
-          case 'site_name':
-            basicSettings.value.siteName = s.value
-            break
-          case 'site_description':
-            basicSettings.value.siteDescription = s.value
-            break
-          case 'max_upload_size':
-            uploadSettings.value.maxUploadSize = parseInt(s.value) || 10
-            break
-          case 'daily_upload_limit':
-            uploadSettings.value.dailyLimit = parseInt(s.value) || 0
-            break
-          case 'allowed_extensions':
-            uploadSettings.value.allowedExtensions = s.value.split(',')
-            break
-          case 'deleted_retention_days':
-            storageSettings.value.deletedRetentionDays = parseInt(s.value) || 30
-            break
-          case 'cleanup_interval':
-            storageSettings.value.cleanupInterval = s.value
-            break
-          case 'auto_cleanup':
-            storageSettings.value.autoCleanup = s.value === 'true'
-            break
-          case 'require_approval':
-            securitySettings.value.requireApproval = s.value === 'true'
-            break
-          case 'enable_registration':
-            securitySettings.value.enableRegistration = s.value === 'true'
-            break
-        }
-      })
-    }
+    const settings = await get<Setting[]>('/settings')
+    settings.forEach((s: Setting) => {
+      switch (s.key) {
+        case 'site_name':
+          basicSettings.value.siteName = s.value
+          break
+        case 'site_description':
+          basicSettings.value.siteDescription = s.value
+          break
+        case 'max_upload_size':
+          uploadSettings.value.maxUploadSize = parseInt(s.value) || 10
+          break
+        case 'daily_upload_limit':
+          uploadSettings.value.dailyLimit = parseInt(s.value) || 0
+          break
+        case 'allowed_extensions':
+          uploadSettings.value.allowedExtensions = s.value.split(',')
+          break
+        case 'deleted_retention_days':
+          storageSettings.value.deletedRetentionDays = parseInt(s.value) || 30
+          break
+        case 'cleanup_interval':
+          storageSettings.value.cleanupInterval = s.value
+          break
+        case 'auto_cleanup':
+          storageSettings.value.autoCleanup = s.value === 'true'
+          break
+        case 'require_approval':
+          securitySettings.value.requireApproval = s.value === 'true'
+          break
+        case 'enable_registration':
+          securitySettings.value.enableRegistration = s.value === 'true'
+          break
+      }
+    })
   } catch (error) {
     showToast('加载设置失败', 'error')
   } finally {
@@ -495,11 +584,8 @@ const loadSettings = async () => {
 // 通用设置保存函数
 const saveSetting = async (key: string, value: string) => {
   try {
-    const response = await post(`/api/settings/${key}`, { value })
-    if (response.ok) {
-      return true
-    }
-    throw new Error('保存失败')
+    await post(`/api/settings/${key}`, { value })
+    return true
   } catch (error) {
     return false
   }
@@ -571,12 +657,9 @@ const saveSecuritySettings = async () => {
 
 const loadSystemInfo = async () => {
   try {
-    const response = await fetch('/api/health')
-    if (response.ok) {
-      const data = await response.json()
-      systemInfo.value.dbStatus = data.components?.db?.status || 'unknown'
-      systemInfo.value.redisStatus = data.components?.redis?.status || 'unknown'
-    }
+    const data = await get<any>('/health')
+    systemInfo.value.dbStatus = data.database?.status || 'unknown'
+    systemInfo.value.redisStatus = data.redis?.status || 'unknown'
   } catch (error) {
     console.error('Failed to load system info:', error)
   }
@@ -591,6 +674,81 @@ const calculateUptime = () => {
   const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60))
   systemInfo.value.uptime = `运行 ${days} 天 ${hours} 小时`
 }
+
+// 管理面板函数
+const loadAdminStats = () => {
+  api.getSystemStats().then(data => {
+    adminStats.value = data
+  }).catch(error => {
+    console.error('加载系统统计失败:', error)
+  })
+}
+
+const loadUsers = () => {
+  api.getUsers().then(data => {
+    adminUsers.value = data
+  }).catch(error => {
+    console.error('加载用户列表失败:', error)
+  })
+}
+
+const loadAuditLogs = (page = 1) => {
+  api.getAuditLogs(1, 20).then(data => {
+    auditLogs.value = data
+  }).catch(error => {
+    console.error('加载审计日志失败:', error)
+  })
+}
+
+const updateUserRole = (userId: string, role: 'user' | 'admin') => {
+  api.updateUserRole(userId, role).then(() => {
+    showToast('用户角色已更新')
+  }).catch(error => {
+    console.error('更新用户角色失败:', error)
+    showToast('更新失败', 'error')
+  })
+}
+
+const createBackup = () => {
+  backingUp.value = true
+  api.backupDatabase().then(result => {
+    if (result) {
+      lastBackup.value = result
+      showToast('备份创建成功')
+    }
+  }).catch(error => {
+    console.error('创建备份失败:', error)
+    showToast('备份创建失败', 'error')
+  }).finally(() => {
+    backingUp.value = false
+  })
+}
+
+const formatSize = (bytes: number) => {
+  const KB = 1024
+  const MB = KB * 1024
+  const GB = MB * 1024
+  if (bytes >= GB) return `${(bytes / GB).toFixed(2)} GB`
+  if (bytes >= MB) return `${(bytes / MB).toFixed(2)} MB`
+  if (bytes >= KB) return `${(bytes / KB).toFixed(2)} KB`
+  return `${bytes} B`
+}
+
+const formatDate = (dateStr: string) => {
+  const date = new Date(dateStr)
+  return date.toLocaleString('zh-CN')
+}
+
+const formatDetails = (details: AuditLogDetail) => {
+  return details ? JSON.stringify(details) : '-'
+}
+
+// 监听activeSection变化，加载对应的数据
+watch(() => activeSection.value, (section) => {
+  if (section === 'stats') loadAdminStats()
+  else if (section === 'users') loadUsers()
+  else if (section === 'audit') loadAuditLogs(1)
+})
 
 onMounted(() => {
   loadSettings()
@@ -645,116 +803,11 @@ onMounted(() => {
 
 .header-actions {
   display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.user-info {
-  display: flex;
-  align-items: center;
   gap: 12px;
-  padding: 8px 16px;
-  background: var(--bg-secondary);
-  border-radius: var(--radius-full);
-  border: 1px solid var(--border-color);
-}
-
-.user-avatar {
-  width: 40px;
-  height: 40px;
-  border-radius: var(--radius-full);
-  background: var(--gradient-primary);
-  display: flex;
   align-items: center;
-  justify-content: center;
 }
 
-.user-avatar svg {
-  width: 20px;
-  height: 20px;
-  color: white;
-}
-
-.user-details {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.username {
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-semibold);
-  color: var(--text-primary);
-}
-
-.role-badge {
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: var(--radius-full);
-  font-weight: var(--font-weight-medium);
-}
-
-.role-badge.admin {
-  background: linear-gradient(135deg, rgba(102, 126, 234, 0.2) 0%, rgba(168, 85, 247, 0.2) 100%);
-  color: var(--color-primary);
-}
-
-.role-badge.user {
-  background: var(--bg-tertiary);
-  color: var(--text-secondary);
-}
-
-/* 导航按钮 */
 .btn-nav {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 16px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-lg);
-  cursor: pointer;
-  transition: all var(--transition-normal);
-  color: var(--text-primary);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-medium);
-}
-
-.btn-nav svg {
-  width: 18px;
-  height: 18px;
-}
-
-.btn-nav:hover {
-  background: var(--bg-tertiary);
-  transform: translateY(-1px);
-  border-color: var(--color-primary);
-}
-
-.btn-nav.active {
-  background: var(--gradient-primary);
-  color: white;
-  border-color: transparent;
-}
-
-.btn-nav.admin:hover {
-  border-color: var(--color-primary);
-}
-
-.btn-nav.settings:hover {
-  border-color: var(--color-primary);
-}
-
-.btn-nav.profile:hover {
-  border-color: var(--color-primary);
-}
-
-.btn-nav.logout:hover {
-  border-color: var(--color-danger);
-  color: var(--color-danger);
-}
-
-.btn-theme {
   width: 42px;
   height: 42px;
   padding: 0;
@@ -1271,21 +1324,6 @@ onMounted(() => {
     justify-content: center;
   }
 
-  .btn-nav {
-    flex: 1;
-    justify-content: center;
-    min-width: 80px;
-  }
-
-  .btn-nav span {
-    display: none;
-  }
-
-  .user-info {
-    width: 100%;
-    justify-content: center;
-  }
-
   .settings-header h1 {
     font-size: 1.25rem;
   }
@@ -1334,5 +1372,143 @@ onMounted(() => {
 
 [data-theme="dark"] .toggle-slider:before {
   background-color: var(--bg-primary);
+}
+
+/* 管理面板样式 */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+  padding: 28px;
+}
+
+.stat-card {
+  background: var(--bg-secondary);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  text-align: center;
+  border: 1px solid var(--border-color);
+}
+
+.stat-value {
+  font-size: 32px;
+  font-weight: 600;
+  color: var(--color-primary);
+  margin-bottom: 8px;
+}
+
+.stat-label {
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.users-content,
+.audit-content,
+.backup-content {
+  padding: 28px;
+}
+
+.users-table,
+.audit-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.users-table th,
+.audit-table th {
+  text-align: left;
+  padding: 12px;
+  background: var(--bg-secondary);
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text-primary);
+  border-bottom: 2px solid var(--border-color);
+}
+
+.users-table td,
+.audit-table td {
+  padding: 12px;
+  border-bottom: 1px solid var(--border-color);
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.role-badge {
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.role-badge.admin {
+  background: #dc3545;
+  color: white;
+}
+
+.role-badge.user {
+  background: #28a745;
+  color: white;
+}
+
+.role-select {
+  padding: 6px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.details-cell {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.backup-content p {
+  color: var(--text-secondary);
+  margin-bottom: 16px;
+}
+
+.btn-backup {
+  padding: 10px 20px;
+  background: var(--gradient-primary);
+  color: white;
+  border: none;
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  font-size: 14px;
+  transition: all var(--transition-normal);
+  box-shadow: var(--shadow-glow-primary);
+}
+
+.btn-backup:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(102, 126, 234, 0.4);
+}
+
+.btn-backup:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.backup-status {
+  margin-top: 20px;
+  padding: 12px 16px;
+  border-radius: var(--radius-lg);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  border: 1px solid var(--border-color);
+}
+
+.backup-status.success {
+  background: rgba(40, 167, 69, 0.1);
+  color: #28a745;
 }
 </style>

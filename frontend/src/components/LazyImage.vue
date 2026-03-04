@@ -1,14 +1,13 @@
 <template>
   <div
+    ref="containerRef"
     class="lazy-image"
     :class="{
       'loading': isLoading,
       'error': hasError,
-      'retrying': retryCount > 0
+      'loaded': isLoaded
     }"
     :style="{ aspectRatio }"
-    role="img"
-    :aria-label="alt || '图片'"
   >
     <img
       ref="imgRef"
@@ -16,33 +15,26 @@
       :alt="alt"
       :loading="lazy ? 'lazy' : 'eager'"
       :decoding="'async'"
+      :fetchpriority="priority"
       @load="handleLoad"
       @error="handleError"
       class="image"
     />
 
-    <!-- 占位符 -->
-    <div v-if="isLoading || hasError" class="placeholder" aria-hidden="true">
-      <svg v-if="isLoading && !hasError" class="spinner" viewBox="0 0 24 24" aria-hidden="true">
-        <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" fill="none" />
-      </svg>
-      <span v-if="hasError" class="error-icon" role="img" aria-label="加载失败">✕</span>
-      <button
-        v-if="hasError && retryCount < MAX_RETRY"
-        @click="handleRetry"
-        class="retry-btn"
-        :aria-label="`重试加载图片，剩余 ${MAX_RETRY - retryCount} 次机会`"
-      >
-        重试
+    <!-- 错误状态 -->
+    <div v-if="hasError" class="error-overlay">
+      <X :size="24" />
+      <span>加载失败</span>
+      <button v-if="retryCount < MAX_RETRY" @click="handleRetry" class="retry-btn">
+        重试 ({{ MAX_RETRY - retryCount }})
       </button>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
-import type { ToastType } from '../types'
-import * as CONSTANTS from '../constants'
+import { ref, computed, watch } from 'vue'
+import { X } from 'lucide-vue-next'
 
 interface Props {
   src: string
@@ -51,7 +43,7 @@ interface Props {
   height?: number
   thumbnail?: string
   loading?: boolean
-  preload?: boolean // 是否预加载
+  priority?: 'high' | 'auto' | 'low'
 }
 
 const emit = defineEmits<{
@@ -61,13 +53,12 @@ const emit = defineEmits<{
 
 const props = withDefaults(defineProps<Props>(), {
   alt: '',
-  loading: false,
-  preload: false
+  loading: true,
+  priority: 'auto'
 })
 
 // 常量
 const MAX_RETRY = 3
-const RETRY_DELAY = 1000
 
 // 状态
 const imgRef = ref<HTMLImageElement>()
@@ -75,26 +66,17 @@ const loaded = ref(false)
 const hasError = ref(false)
 const actualSrc = ref('')
 const retryCount = ref(0)
-const observer = ref<IntersectionObserver | null>(null)
 
 // 计算宽高比
 const aspectRatio = computed(() => {
   if (props.width && props.height) {
-    return `${props.width} / ${props.height}`
+    return `aspect-ratio: ${props.width} / ${props.height}`
   }
   return ''
 })
 
-// 加载中状态
-const isLoading = computed(() => !loaded.value && !hasError.value)
-
-/**
- * 创建图片 URL（带重试参数）
- */
-const getImageUrl = (retry = 0) => {
-  const base = props.thumbnail || props.src
-  return retry > 0 ? `${base}?retry=${retry}` : base
-}
+// 图片源（优先使用缩略图）
+const imageSrc = computed(() => props.thumbnail || props.src)
 
 /**
  * 处理图片加载成功
@@ -110,7 +92,7 @@ const handleLoad = () => {
  * 处理图片加载错误
  */
 const handleError = () => {
-  // 如果加载的是缩略图且失败了，尝试加载原图
+  // 如果缩略图失败，尝试原图
   if (actualSrc.value === props.thumbnail && props.src !== props.thumbnail) {
     actualSrc.value = props.src
     return
@@ -120,8 +102,8 @@ const handleError = () => {
   if (retryCount.value < MAX_RETRY) {
     retryCount.value++
     setTimeout(() => {
-      actualSrc.value = getImageUrl(retryCount.value)
-    }, RETRY_DELAY * retryCount.value)
+      actualSrc.value = imageSrc.value + (retryCount.value > 0 ? `?retry=${retryCount.value}` : '')
+    }, 500 * retryCount.value)
   } else {
     hasError.value = true
     emit('error')
@@ -135,78 +117,26 @@ const handleRetry = () => {
   hasError.value = false
   loaded.value = false
   retryCount.value = 0
-  actualSrc.value = getImageUrl()
+  actualSrc.value = imageSrc.value
 }
 
-/**
- * 设置 Intersection Observer
- */
-const setupIntersectionObserver = () => {
-  if (!('IntersectionObserver' in window)) {
-    actualSrc.value = getImageUrl()
-    return
-  }
-
-  const newObserver = new IntersectionObserver(
-    (entries) => {
-      entries.forEach((entry) => {
-        if (entry.isIntersecting && !loaded.value && !hasError.value) {
-          actualSrc.value = getImageUrl()
-          newObserver.unobserve(entry.target)
-        }
-      })
-    },
-    {
-      rootMargin: CONSTANTS.IMAGE.LAZY_LOAD_ROOT_MARGIN,
-      threshold: CONSTANTS.IMAGE.LAZY_LOAD_THRESHOLD / 100
-    }
-  )
-
-  if (imgRef.value) {
-    newObserver.observe(imgRef.value)
-  }
-
-  return newObserver
-}
-
-/**
- * 预加载图片（用于相邻图片）
- */
-const preload = () => {
-  const img = new Image()
-  img.src = props.src
-  img.onload = () => {
-    // 预加载完成，从内存中释放
-    URL.revokeObjectURL(props.src)
-  }
-}
-
-/**
- * 设置图片源
- */
-const setSource = () => {
-  if (props.loading === true || props.preload) {
-    // 立即加载或预加载
-    actualSrc.value = getImageUrl()
-
-    if (props.preload) {
-      preload()
-    }
-  } else {
-    // 延迟加载
-    observer.value = setupIntersectionObserver()
-  }
-}
-
-onMounted(() => {
-  setSource()
+// 监听缩略图变化，重置状态
+watch(() => props.thumbnail, () => {
+  actualSrc.value = imageSrc.value
+  loaded.value = false
+  hasError.value = false
+  retryCount.value = 0
 })
 
-onUnmounted(() => {
-  if (observer.value && imgRef.value) {
-    observer.value.unobserve(imgRef.value)
+// 监听 src 变化
+watch(() => props.src, () => {
+  if (actualSrc.value !== imageSrc.value) {
+    actualSrc.value = imageSrc.value
   }
 })
+
+// 初始化
+actualSrc.value = imageSrc.value
 </script>
 
 <style scoped>
@@ -215,15 +145,20 @@ onUnmounted(() => {
   overflow: hidden;
   background: var(--bg-secondary);
   border-radius: 8px;
-  contain: strict; /* 性能优化 */
+  contain: strict;
+  isolation: isolate;
 }
 
 .lazy-image.loading {
   background: var(--bg-primary);
 }
 
+.lazy-image.loaded {
+  background: transparent;
+}
+
 .lazy-image.error {
-  background: #f8f9fa;
+  background: var(--bg-secondary);
 }
 
 .lazy-image.image {
@@ -231,117 +166,57 @@ onUnmounted(() => {
   height: 100%;
   object-fit: cover;
   display: block;
-  opacity: 0;
-  transition: opacity 0.3s ease-in;
-}
-
-.lazy-image.image.loaded {
   opacity: 1;
 }
 
-/* 占位符 */
-.placeholder {
+.lazy-image.loading .image {
+  opacity: 0.3;
+}
+
+.error-overlay {
   position: absolute;
   inset: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 12px;
-  background: var(--bg-primary);
-}
-
-.spinner {
-  width: 40px;
-  height: 40px;
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.spinner circle {
-  stroke: var(--border-color);
-  stroke-linecap: round;
-  stroke-dasharray: 60;
-  stroke-dashoffset: 40;
-}
-
-.error-icon {
-  font-size: 32px;
-  color: var(--color-danger);
+  gap: 8px;
+  background: rgba(0, 0, 0, 0.5);
+  color: white;
+  z-index: 1;
 }
 
 .retry-btn {
-  padding: 8px 20px;
+  padding: 6px 12px;
   background: var(--color-primary);
   color: white;
   border: none;
-  border-radius: 6px;
+  border-radius: 4px;
   cursor: pointer;
-  font-size: 14px;
+  font-size: 12px;
   transition: all 0.2s;
 }
 
 .retry-btn:hover {
   background: var(--color-primary-hover);
-}
-
-/* 加载动画 */
-.lazy-image.loading .placeholder {
-  background: linear-gradient(
-    90deg,
-    var(--bg-secondary) 25%,
-    var(--bg-primary) 50%,
-    var(--bg-secondary) 75%
-  );
-  background-size: 200% 100%;
-  animation: shimmer 1.5s infinite;
-}
-
-@keyframes shimmer {
-  0% {
-    background-position: -200% 0;
-  }
-  100% {
-    background-position: 200% 0;
-  }
-}
-
-/* 重试状态 */
-.lazy-image.retrying .placeholder {
-  animation: pulse 1s ease-in-out infinite;
-}
-
-@keyframes pulse {
-  0%, 100% {
-    opacity: 0.6;
-  }
-  50% {
-    opacity: 1;
-  }
+  transform: scale(1.05);
 }
 
 /* 减少动画 */
 @media (prefers-reduced-motion: reduce) {
-  .lazy-image.image,
-  .spinner,
-  .placeholder {
-    animation-duration: 0.01ms !important;
-    transition-duration: 0.01ms !important;
+  .lazy-image.image {
+    transition: none;
+  }
+
+  .retry-btn {
+    transform: none;
   }
 }
 
 /* 高对比度模式 */
 @media (prefers-contrast: high) {
-  .error-icon {
-    text-shadow: 0 0 2px black;
+  .error-overlay {
+    border: 2px solid white;
   }
 }
 </style>

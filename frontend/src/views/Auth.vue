@@ -8,9 +8,7 @@
     <div class="auth-card">
       <div class="auth-header">
         <div class="logo">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-          </svg>
+          <ImageIcon :size="32" />
         </div>
         <h2>{{ isLogin ? '欢迎回来' : '创建账号' }}</h2>
         <p class="subtitle">{{ isLogin ? '登录您的账户以继续' : '注册一个新账户开始使用' }}</p>
@@ -18,9 +16,6 @@
       <form @submit.prevent="handleSubmit" novalidate>
         <div class="form-group">
           <label for="username" class="form-label">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-            </svg>
             用户名
           </label>
           <div class="input-wrapper">
@@ -44,9 +39,6 @@
         </div>
         <div class="form-group">
           <label for="password" class="form-label">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-            </svg>
             密码
           </label>
           <div class="input-wrapper">
@@ -68,18 +60,11 @@
           <span id="password-hint" class="form-hint">至少6个字符</span>
         </div>
         <div v-if="errorMessage" class="error-message" role="alert">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
           <span>{{ errorMessage }}</span>
         </div>
         <button type="submit" class="btn btn-primary" :disabled="loading" aria-live="polite">
-          <svg v-if="loading" class="btn-icon spin" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-          </svg>
-          <span class="sr-only">正在处理中...</span>
-          <span v-if="!loading">{{ isLogin ? '登录' : '注册' }}</span>
-          <span v-else>处理中...</span>
+          <span v-if="loading">处理中...</span>
+          <span v-else>{{ isLogin ? '登录' : '注册' }}</span>
         </button>
       </form>
       <p class="toggle">
@@ -99,6 +84,7 @@
 
 <script setup lang="ts">
 import { ref, nextTick } from 'vue'
+import { ImageIcon } from 'lucide-vue-next'
 import { auth } from '../store/auth'
 
 const emit = defineEmits<{
@@ -252,9 +238,9 @@ const handleSubmit = async () => {
   box-shadow: var(--shadow-glow-primary);
 }
 
-.logo svg {
-  width: 32px;
-  height: 32px;
+.logo span {
+  font-size: 24px;
+  font-weight: bold;
   color: white;
 }
 
@@ -288,11 +274,6 @@ const handleSubmit = async () => {
   font-size: var(--font-size-sm);
 }
 
-.form-label svg {
-  width: 16px;
-  height: 16px;
-  color: var(--text-secondary);
-}
 
 .input-wrapper {
   position: relative;
@@ -364,11 +345,6 @@ const handleSubmit = async () => {
   font-weight: var(--font-weight-medium);
 }
 
-.error-message svg {
-  width: 18px;
-  height: 18px;
-  flex-shrink: 0;
-}
 
 /* 按钮样式 */
 .btn {
@@ -493,10 +469,6 @@ const handleSubmit = async () => {
     height: 56px;
   }
 
-  .logo svg {
-    width: 28px;
-    height: 28px;
-  }
 
   .auth-header h2 {
     font-size: 1.5rem;

@@ -56,21 +56,6 @@ impl Cache {
             .map_err(|e| anyhow::anyhow!("Redis error: {}", e))
     }
 
-    /// 删除缓存
-    #[allow(dead_code)]
-    pub async fn del<C>(
-        conn: &mut C,
-        key: impl AsRef<str>,
-    ) -> Result<(), anyhow::Error>
-    where
-        C: redis::aio::ConnectionLike + Send + Sync,
-    {
-        let cache = Self::new("");
-        let key = cache.key(key);
-        conn.del::<_, ()>(key).await.map_err(|e| anyhow::anyhow!("Redis error: {}", e))?;
-        Ok(())
-    }
-
     /// 删除匹配前缀的所有缓存（使用 SCAN 替代 KEYS 避免阻塞）
     pub async fn del_pattern<C>(
         conn: &mut C,
@@ -110,6 +95,25 @@ impl Cache {
     }
 }
 
+/// 图片 hash 缓存键生成器
+pub struct HashCache;
+
+impl HashCache {
+    pub fn image_hash(hash: &str, strategy: &str) -> String {
+        match strategy {
+            "global" => format!("hash:global:{}", hash),
+            _ => format!("hash:user:{}", hash),
+        }
+    }
+
+    pub fn existing_info(hash: &str, strategy: &str, user_id: uuid::Uuid) -> String {
+        match strategy {
+            "global" => format!("hash:info:global:{}", hash),
+            _ => format!("hash:info:user:{}:{}", hash, user_id),
+        }
+    }
+}
+
 /// 图片缓存键生成器
 pub struct ImageCache;
 
@@ -121,21 +125,18 @@ impl ImageCache {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn detail(id: uuid::Uuid) -> String {
-        format!("images:detail:{}", id)
-    }
-
     pub fn categories(user_id: uuid::Uuid) -> String {
         format!("categories:list:{}", user_id)
     }
 
-    #[allow(dead_code)]
-    pub fn invalidate_user(user_id: uuid::Uuid) -> Vec<String> {
-        vec![
-            format!("images:list:{}:*", user_id),
-            format!("categories:list:{}", user_id),
-        ]
+    /// 用户分类列表失效模式
+    pub fn categories_invalidate(user_id: uuid::Uuid) -> String {
+        format!("categories:list:{}:*", user_id)
+    }
+
+    /// 用户图片列表失效模式
+    pub fn images_invalidate(user_id: uuid::Uuid) -> String {
+        format!("images:list:{}:*", user_id)
     }
 }
 
@@ -186,13 +187,6 @@ mod tests {
     }
 
     #[test]
-    fn test_image_cache_detail() {
-        let id = Uuid::new_v4();
-        let key = ImageCache::detail(id);
-        assert_eq!(key, format!("images:detail:{}", id));
-    }
-
-    #[test]
     fn test_image_cache_categories() {
         let user_id = Uuid::new_v4();
         let key = ImageCache::categories(user_id);
@@ -226,4 +220,3 @@ mod tests {
         assert_ne!(key2, key3);
     }
 }
-

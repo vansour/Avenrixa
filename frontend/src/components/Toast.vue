@@ -13,20 +13,10 @@
       >
         <!-- 图标 -->
         <div class="toast-icon">
-          <svg v-if="toast.type === 'success'" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L7 17l-4 4L9 5l7-7" />
-          </svg>
-          <svg v-else-if="toast.type === 'error'" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-            <circle cx="12" cy="12" r="10" />
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 9l-6 6m0 0l6 6" />
-          </svg>
-          <svg v-else-if="toast.type === 'warning'" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.29 3.86L1.82 18a2 2 0 0 1 2.83 0 0 1 1.41l-1.41 1.42a2 2 0 0 1 0-.17L2.12 12h.01c.55 0 1-.45.29-1 .71-.71a1 1 0 010-1.41 0 1 1 .41 0 1.1 .03 1.41-.4.72 0-1 .05-1.54 1.06-.47 1.06.46 0 0 .94-.04L12 5.83v6.38" />
-          </svg>
-          <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor">
-            <circle cx="12" cy="12" r="10" />
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 16v-4M8 12h8M12 8v4" />
-          </svg>
+          <Check v-if="toast.type === 'success'" :size="20" />
+          <X v-else-if="toast.type === 'error'" :size="20" />
+          <AlertTriangle v-else-if="toast.type === 'warning'" :size="20" />
+          <Info v-else :size="20" />
         </div>
 
         <!-- 内容 -->
@@ -34,9 +24,7 @@
 
         <!-- 关闭按钮 -->
         <button @click.stop="removeToast(toast.id)" class="close-btn" :aria-label="'关闭通知'" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 6L6 18M6 6l12 12" />
-          </svg>
+          <X :size="16" />
         </button>
 
         <!-- 进度条 -->
@@ -53,6 +41,7 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
+import { Check, X, AlertTriangle, Info } from 'lucide-vue-next'
 import type { ToastItem, ToastType, ToastPriority } from '../types'
 import * as CONSTANTS from '../constants'
 
@@ -300,10 +289,6 @@ defineExpose({ showToast, clearAll })
   border-radius: var(--radius-full);
 }
 
-.toast-icon svg {
-  width: 16px;
-  height: 16px;
-}
 
 /* Toast 消息 */
 .message {
@@ -335,10 +320,6 @@ defineExpose({ showToast, clearAll })
   transform: rotate(90deg);
 }
 
-.close-btn svg {
-  width: 14px;
-  height: 14px;
-}
 
 /* 进度条 */
 .progress-container {

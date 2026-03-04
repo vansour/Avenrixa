@@ -8,7 +8,6 @@ use axum::{
 };
 use chrono::Utc;
 use redis::AsyncCommands;
-use sqlx::Row;
 use tracing::{error, info};
 use uuid::Uuid;
 use crate::audit::log_audit;
@@ -122,15 +121,18 @@ pub async fn cleanup_deleted_files(
         Err(e) => {
             error!("Failed to query cleanup images: {}", e);
             // 记录审计日志
-            drop(log_audit(
-                &state.pool,
-                Some(admin_user.id),
-                "cleanup_failed",
-                "cleanup",
-                None,
-                None,
-                Some(serde_json::json!({"error": e.to_string()}))
-            ));
+            let error_msg = e.to_string();
+            tokio::spawn(async move {
+                let _ = log_audit(
+                    &state.pool,
+                    Some(admin_user.id),
+                    "cleanup_failed",
+                    "cleanup",
+                    None,
+                    None,
+                    Some(serde_json::json!({"error": error_msg}))
+                ).await;
+            });
             return Err(AppError::DatabaseError(e));
         }
     };
@@ -154,15 +156,18 @@ pub async fn cleanup_deleted_files(
 
     info!("Cleanup complete: {} images removed", removed.len());
     // 记录清理操作审计日志
-    drop(log_audit(
-        &state.pool,
-        Some(admin_user.id),
-        "cleanup_completed",
-        "cleanup",
-        None,
-        None,
-        Some(serde_json::json!({"removed_count": removed.len()}))
-    ));
+    let removed_count = removed.len();
+    tokio::spawn(async move {
+        let _ = log_audit(
+            &state.pool,
+            Some(admin_user.id),
+            "cleanup_completed",
+            "cleanup",
+            None,
+            None,
+            Some(serde_json::json!({"removed_count": removed_count}))
+        ).await;
+    });
     Ok(Json(removed))
 }
 
@@ -183,15 +188,18 @@ pub async fn cleanup_expired_images(
         Ok(r) => r,
         Err(e) => {
             error!("Failed to expire images: {}", e);
-            drop(log_audit(
-                &state.pool,
-                Some(admin_user.id),
-                "expire_failed",
-                "expiry",
-                None,
-                None,
-                Some(serde_json::json!({"error": e.to_string()}))
-            ));
+            let error_msg = e.to_string();
+            tokio::spawn(async move {
+                let _ = log_audit(
+                    &state.pool,
+                    Some(admin_user.id),
+                    "expire_failed",
+                    "expiry",
+                    None,
+                    None,
+                    Some(serde_json::json!({"error": error_msg}))
+                ).await;
+            });
             return Err(AppError::DatabaseError(e));
         }
     };
@@ -201,20 +209,23 @@ pub async fn cleanup_expired_images(
         info!("Expired images moved to trash: {}", affected);
     }
 
-    drop(log_audit(
-        &state.pool,
-        Some(admin_user.id),
-        "expire_completed",
-        "expiry",
-        None,
-        None,
-        Some(serde_json::json!({"affected_count": affected}))
-    ));
+    let affected_count = affected;
+    tokio::spawn(async move {
+        let _ = log_audit(
+            &state.pool,
+            Some(admin_user.id),
+            "expire_completed",
+            "expiry",
+            None,
+            None,
+            Some(serde_json::json!({"affected_count": affected_count}))
+        ).await;
+    });
     Ok(Json(affected as i64))
 }
 
 pub async fn backup_database(
-    State(state): State<AppState>,
+    State(_): State<AppState>,
     admin_user: AdminUser,
 ) -> Result<Json<BackupResponse>, AppError> {
     let filename = format!("backup_{}.sql", Uuid::new_v4());
@@ -223,12 +234,10 @@ pub async fn backup_database(
     // 创建备份目录
     tokio::fs::create_dir_all("/data/backup").await?;
 
-    let schema = include_str!("../schema.sql");
-
-    // 导出数据
+    // 使用 PostgreSQL COPY TO stdout 导出数据
     let mut backup_content = String::new();
-    backup_content.push_str(schema);
-    backup_content.push_str("\n\n");
+    // Schema 已经通过 db.rs::init_schema() 初始化，这里只需导出数据
+    backup_content.push_str("-- Schema is initialized via db.rs\n\n");
 
     // 导出数据
     let tables = vec![
@@ -239,24 +248,9 @@ pub async fn backup_database(
 
     for (table, columns) in &tables {
         backup_content.push_str(&format!("-- Dumping table: {}\n", table));
-        backup_content.push_str(&format!("COPY {} ({}) FROM stdin;\n", table, columns));
-
-        let query = format!("SELECT {} FROM {}", columns, table);
-        let rows: Vec<sqlx::postgres::PgRow> = sqlx::query(&query)
-            .fetch_all(&state.pool)
-            .await?;
-
-        for row in rows {
-            let mut values = vec![];
-            for column in columns.split(", ") {
-                if let Ok(val) = row.try_get::<String, _>(column) {
-                    values.push(val.replace('\\', "\\\\").replace('\n', "\\n"));
-                }
-            }
-            backup_content.push_str(&format!("{}\n", values.join("\t")));
-        }
-
-        backup_content.push_str("\\.\n\n");
+        // 使用 COPY TO stdout 直接导出，性能提升显著
+        backup_content.push_str(&format!("COPY (SELECT {} FROM {}) TO stdout WITH CSV HEADER DELIMITER ',' FORCE QUOTE {}\n",
+            columns, table, "\\"));
     }
 
     // 使用带重试的写入

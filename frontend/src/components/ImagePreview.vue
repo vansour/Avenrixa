@@ -1,7 +1,7 @@
 <template>
   <div v-if="visible" class="preview-overlay" @click.self="close">
     <div class="preview-container">
-      <button class="close-btn" @click="close">&times;</button>
+      <button class="close-btn" @click="close"><X :size="24" /></button>
       <img :src="imageUrl" :alt="image?.filename" />
       <div v-if="image" class="image-info">
         <p><strong>文件名:</strong> {{ image.filename }}</p>
@@ -16,6 +16,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { X } from 'lucide-vue-next'
 import { formatFileSize, formatDate } from '../utils/format'
 import { copyImageLink } from '../utils/clipboard'
 

@@ -4,6 +4,7 @@ import { createI18n } from 'vue-i18n'
 import App from './App.vue'
 import type { RouteRecordRaw } from 'vue-router'
 import './styles/variables.css'
+import './styles/tailwind.css'
 import './styles/animations.css'
 import { i18n } from './locales'
 

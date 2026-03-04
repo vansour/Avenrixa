@@ -29,7 +29,7 @@ pub async fn register(
     let user_id = Uuid::new_v4();
 
     let res = sqlx::query(
-        "INSERT INTO users (id, username, password_hash) VALUES ($1, $2, $3)"
+        "INSERT INTO users (id, username, password_hash, role, created_at) VALUES ($1, $2, $3, 'user', NOW())"
     )
     .bind(user_id)
     .bind(&req.username)
@@ -51,12 +51,15 @@ pub async fn register(
     .fetch_one(&state.pool)
     .await?;
 
-    let token = state.auth.generate_token(user_id, &user.username, &user.role)?;
+    let access_token = state.auth.generate_access_token(user_id, &user.username, &user.role)?;
+    let refresh_token = state.auth.generate_refresh_token(user_id)?;
 
     info!("User registered: {}", user.username);
     log_audit(&state.pool, Some(user_id), "user.register", "user", Some(user_id), None, None).await;
     Ok(Json(AuthResponse {
-        token,
+        access_token,
+        refresh_token,
+        expires_in: 900,  // 15分钟 = 900秒
         user: user.into(),
     }))
 }
@@ -79,13 +82,14 @@ pub async fn login(
         return Err(AppError::InvalidPassword);
     }
 
-    let token = state.auth.generate_token(user.id, &user.username, &user.role)?;
+    let access_token = state.auth.generate_access_token(user.id, &user.username, &user.role)?;
+    let refresh_token = state.auth.generate_refresh_token(user.id)?;
 
-    // 设置 httpOnly Cookie
+    // 设置 httpOnly Cookie (存储 refresh_token)
     let cookie_value = format!(
         "auth_token={}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age={}",
-        token,
-        7 * 24 * 3600 // 7天
+        refresh_token,
+        7 * 24 * 3600  // 7天
     );
 
     let mut headers = axum::http::HeaderMap::new();
@@ -94,7 +98,9 @@ pub async fn login(
     info!("User logged in: {}", user.username);
     log_audit(&state.pool, Some(user.id), "user.login", "user", Some(user.id), None, None).await;
     Ok((headers, Json(AuthResponse {
-        token,
+        access_token,
+        refresh_token,
+        expires_in: 900,  // 15分钟 = 900秒
         user: user.into(),
     })))
 }
@@ -135,13 +141,12 @@ pub async fn forgot_password(
 
     // 保存重置令牌
     sqlx::query(
-        "INSERT INTO password_reset_tokens (id, user_id, token, expires_at, used_at, created_at) VALUES ($1, $2, $3, $4, NULL, $5)"
+        "INSERT INTO password_reset_tokens (id, user_id, token, expires_at, used_at, created_at) VALUES ($1, $2, $3, $4, NULL, NOW())"
     )
     .bind(token_id)
     .bind(user.id)
     .bind(&reset_token)
     .bind(expires_at)
-    .bind(Utc::now())
     .execute(&state.pool)
     .await?;
 
@@ -172,7 +177,7 @@ pub async fn reset_password(
     .bind(Utc::now())
     .fetch_optional(&state.pool)
     .await?
-    .ok_or(AppError::InvalidToken)?;
+    .ok_or(AppError::ResetTokenInvalid)?;
 
     let (token_id, user_id, _expires_at) = reset_data;
 
@@ -185,7 +190,7 @@ pub async fn reset_password(
     .await?;
 
     if existing_used {
-        return Err(AppError::InvalidToken);
+        return Err(AppError::ResetTokenExpired);
     }
 
     // 生成新密码哈希
@@ -269,4 +274,33 @@ pub async fn change_password(
     }
 
     Ok(())
+}
+
+/// 刷新访问令牌
+pub async fn refresh_token(
+    State(state): State<AppState>,
+    Json(req): Json<RefreshTokenRequest>,
+) -> Result<Json<AuthResponse>, AppError> {
+    // 验证刷新令牌
+    let user_id = state.auth.verify_refresh_token(&req.refresh_token)?;
+
+    // 查找用户信息
+    let user: User = sqlx::query_as(
+        "SELECT id, username, password_hash, role, created_at FROM users WHERE id = $1"
+    )
+    .bind(user_id)
+    .fetch_one(&state.pool)
+    .await?;
+
+    // 生成新的访问令牌和刷新令牌
+    let access_token = state.auth.generate_access_token(user_id, &user.username, &user.role)?;
+    let new_refresh_token = state.auth.generate_refresh_token(user_id)?;
+
+    info!("Token refreshed for user: {}", user.username);
+    Ok(Json(AuthResponse {
+        access_token,
+        refresh_token: new_refresh_token,
+        expires_in: 900,  // 15分钟 = 900秒
+        user: user.into(),
+    }))
 }

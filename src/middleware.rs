@@ -1,6 +1,7 @@
 use axum::http::StatusCode;
 use uuid::Uuid;
 use crate::db::AppState;
+use redis::AsyncCommands;
 
 /// 认证用户信息提取器
 #[derive(Debug, Clone)]
@@ -31,10 +32,10 @@ impl axum::extract::FromRequestParts<AppState> for AuthUser {
             // 解析 Cookie header 查找 auth_token
             cookie_header
                 .to_str()
-                .map_err(|_| StatusCode::BAD_REQUEST)?
+                .map_err(|_| StatusCode::UNAUTHORIZED)?
                 .split(';')
                 .find_map(|cookie| cookie.trim().strip_prefix("auth_token="))
-                .ok_or(StatusCode::BAD_REQUEST)?
+                .ok_or(StatusCode::UNAUTHORIZED)?
         } else {
             // Cookie 中未找到，尝试从 Authorization header 获取
             parts
@@ -42,12 +43,35 @@ impl axum::extract::FromRequestParts<AppState> for AuthUser {
                 .get("authorization")
                 .and_then(|h| h.to_str().ok())
                 .and_then(|auth| auth.strip_prefix("Bearer "))
-                .ok_or(StatusCode::BAD_REQUEST)?
+                .ok_or(StatusCode::UNAUTHORIZED)?
         };
 
         // 验证 JWT 令牌
         let claims = state.auth.verify_token(token)
             .map_err(|_| StatusCode::UNAUTHORIZED)?;
+
+        // 检查令牌是否已被撤销
+        let mut redis = state.redis.clone();
+        let revoked_key = format!("token_revoked:{}", token);
+        let is_revoked: bool = redis
+            .exists(&revoked_key)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+        if is_revoked {
+            return Err(StatusCode::UNAUTHORIZED);
+        }
+
+        // 检查用户是否被标记为需要重新认证
+        let user_revoked_key = format!("user_revoked:{}", claims.sub);
+        let is_user_revoked: bool = redis
+            .exists(&user_revoked_key)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+        if is_user_revoked {
+            return Err(StatusCode::UNAUTHORIZED);
+        }
 
         Ok(AuthUser {
             id: claims.sub,
@@ -79,85 +103,4 @@ impl axum::extract::FromRequestParts<AppState> for AdminUser {
             role: user.role,
         })
     }
-}
-
-/// JWT 认证中间件 - 保留供将来使用（已禁用）
-#[allow(dead_code)]
-pub async fn auth_middleware(
-    state: &AppState,
-    mut req: axum::extract::Request,
-    next: axum::middleware::Next,
-) -> Result<axum::response::Response, StatusCode> {
-    // 跳过健康检查端点
-    if req.uri().path() == "/health" {
-        return Ok(next.run(req).await);
-    }
-
-    // 检查 Authorization header
-    let auth_header = req
-        .headers()
-        .get("authorization")
-        .and_then(|h| h.to_str().ok())
-        .ok_or(StatusCode::UNAUTHORIZED)?;
-
-    // 验证 Bearer token 格式
-    let token = auth_header
-        .strip_prefix("Bearer ")
-        .ok_or(StatusCode::UNAUTHORIZED)?;
-
-    // 验证 JWT 令牌
-    let claims = state.auth.verify_token(token)
-        .map_err(|_| StatusCode::UNAUTHORIZED)?;
-
-    // 将用户信息添加到 request extensions
-    req.extensions_mut().insert(AuthUser {
-        id: claims.sub,
-        username: claims.username,
-        role: claims.role,
-    });
-
-    Ok(next.run(req).await)
-}
-
-/// 管理员认证中间件 - 保留供将来使用（已禁用）
-#[allow(dead_code)]
-pub async fn admin_auth_middleware(
-    state: &AppState,
-    mut req: axum::extract::Request,
-    next: axum::middleware::Next,
-) -> Result<axum::response::Response, StatusCode> {
-    // 跳过健康检查端点
-    if req.uri().path() == "/health" {
-        return Ok(next.run(req).await);
-    }
-
-    // 检查 Authorization header
-    let auth_header = req
-        .headers()
-        .get("authorization")
-        .and_then(|h| h.to_str().ok())
-        .ok_or(StatusCode::UNAUTHORIZED)?;
-
-    // 验证 Bearer token 格式
-    let token = auth_header
-        .strip_prefix("Bearer ")
-        .ok_or(StatusCode::UNAUTHORIZED)?;
-
-    // 验证 JWT 令牌
-    let claims = state.auth.verify_token(token)
-        .map_err(|_| StatusCode::UNAUTHORIZED)?;
-
-    // 检查管理员角色
-    if claims.role != "admin" {
-        return Err(StatusCode::FORBIDDEN);
-    }
-
-    // 将用户信息添加到 request extensions
-    req.extensions_mut().insert(AuthUser {
-        id: claims.sub,
-        username: claims.username,
-        role: claims.role,
-    });
-
-    Ok(next.run(req).await)
 }

@@ -3,19 +3,68 @@ interface CacheEntry<T> {
     timestamp: number
 }
 
+/**
+ * 缓存统计信息
+ */
+export interface CacheStats {
+    hits: number
+    misses: number
+    size: number
+    get hitRate(): number
+}
+
+/**
+ * 缓存配置选项
+ */
+export interface CacheOptions {
+    maxEntries?: number
+    persistKey?: string
+    persistTTL?: number
+    enableStats?: boolean
+}
+
+/**
+ * 缓存持久化数据
+ */
+interface PersistedCacheData {
+    entries: Array<{ key: string; value: any; timestamp: number }>
+    timestamp: number
+}
+
 class LRUCache<K, V> {
     private cache: Map<K, CacheEntry<V>> = new Map()
     private maxEntries: number
+    private stats: { hits: number; misses: number } = { hits: 0, misses: 0 }
+    private persistKey: string | null = null
+    private persistTTL: number = 3600000 // 默认1小时
+    private enableStats: boolean = false
 
-    constructor(maxEntries: number = 100) {
+    constructor(maxEntries: number = 100, options?: CacheOptions) {
         this.maxEntries = maxEntries
+
+        if (options) {
+            this.persistKey = options.persistKey || null
+            this.persistTTL = options.persistTTL || 3600000
+            this.enableStats = options.enableStats || false
+
+            // 如果启用了持久化，尝试从 localStorage 加载
+            if (this.persistKey) {
+                this.loadFromStorage()
+            }
+        }
     }
 
     get(key: K): V | undefined {
         const entry = this.cache.get(key)
         if (entry) {
             entry.timestamp = Date.now()
+            if (this.enableStats) {
+                this.stats.hits++
+            }
             return entry.value
+        }
+        if (this.enableStats) {
+            this.stats.misses++
         }
         return undefined
     }
@@ -33,6 +82,11 @@ class LRUCache<K, V> {
         }
 
         this.evictExpired(ttl)
+
+        // 如果启用了持久化，保存到 localStorage
+        if (this.persistKey) {
+            this.saveToStorage()
+        }
     }
 
     private evictOldest(): void {
@@ -64,18 +118,166 @@ class LRUCache<K, V> {
         return this.cache.has(key)
     }
 
+    delete(key: K): boolean {
+        const deleted = this.cache.delete(key)
+        if (deleted && this.persistKey) {
+            this.saveToStorage()
+        }
+        return deleted
+    }
+
     clear(): void {
         this.cache.clear()
+        if (this.enableStats) {
+            this.stats = { hits: 0, misses: 0 }
+        }
+        if (this.persistKey) {
+            this.clearStorage()
+        }
     }
 
     size(): number {
         return this.cache.size
     }
+
+    /**
+     * 获取缓存统计信息
+     */
+    getStats(): CacheStats {
+        return {
+            hits: this.stats.hits,
+            misses: this.stats.misses,
+            size: this.cache.size,
+            get hitRate() {
+                const total = this.hits + this.misses
+                return total === 0 ? 0 : (this.hits / total) * 100
+            }
+        }
+    }
+
+    /**
+     * 重置统计信息
+     */
+    resetStats(): void {
+        this.stats = { hits: 0, misses: 0 }
+    }
+
+    /**
+     * 保存缓存到 localStorage
+     */
+    private saveToStorage(): void {
+        if (!this.persistKey) return
+
+        try {
+            const data: PersistedCacheData = {
+                entries: Array.from(this.cache.entries()).map(([key, entry]) => ({
+                    key: String(key),
+                    value: entry.value,
+                    timestamp: entry.timestamp
+                })),
+                timestamp: Date.now()
+            }
+            localStorage.setItem(this.persistKey, JSON.stringify(data))
+        } catch (e) {
+            console.warn('Failed to save cache to localStorage:', e)
+        }
+    }
+
+    /**
+     * 从 localStorage 加载缓存
+     */
+    private loadFromStorage(): void {
+        if (!this.persistKey) return
+
+        try {
+            const stored = localStorage.getItem(this.persistKey)
+            if (!stored) return
+
+            const data: PersistedCacheData = JSON.parse(stored)
+
+            // 检查是否过期
+            const age = Date.now() - data.timestamp
+            if (age > this.persistTTL) {
+                this.clearStorage()
+                return
+            }
+
+            // 恢复缓存条目
+            this.cache.clear()
+            for (const entry of data.entries) {
+                this.cache.set(entry.key as K, {
+                    value: entry.value,
+                    timestamp: entry.timestamp
+                })
+            }
+        } catch (e) {
+            console.warn('Failed to load cache from localStorage:', e)
+            this.clearStorage()
+        }
+    }
+
+    /**
+     * 清除 localStorage 中的缓存
+     */
+    private clearStorage(): void {
+        if (!this.persistKey) return
+
+        try {
+            localStorage.removeItem(this.persistKey)
+        } catch (e) {
+            console.warn('Failed to clear cache from localStorage:', e)
+        }
+    }
+
+    /**
+     * 预热缓存
+     */
+    async prewarm(entries: Array<{ key: K; value: V }>): Promise<void> {
+        for (const entry of entries) {
+            this.cache.set(entry.key, {
+                value: entry.value,
+                timestamp: Date.now()
+            })
+        }
+        if (this.persistKey) {
+            this.saveToStorage()
+        }
+    }
+
+    /**
+     * 遍历缓存条目
+     */
+    forEach(callback: (value: CacheEntry<V>, key: K) => void): void {
+        this.cache.forEach(callback)
+    }
 }
 
-const imageCache = new LRUCache<string, any>(100)
-const textCache = new LRUCache<string, any>(50)
-const dataCache = new LRUCache<string, any>(30)
+/**
+ * 图片缓存（带持久化和统计）
+ */
+const imageCache = new LRUCache<string, any>(100, {
+    persistKey: 'img_cache_images',
+    persistTTL: 7200000, // 2小时
+    enableStats: true
+})
+
+/**
+ * 文本缓存（带持久化和统计）
+ */
+const textCache = new LRUCache<string, any>(50, {
+    persistKey: 'img_cache_text',
+    persistTTL: 3600000, // 1小时
+    enableStats: true
+})
+
+/**
+ * 数据缓存（带持久化和统计）
+ */
+const dataCache = new LRUCache<string, any>(30, {
+    persistKey: 'img_cache_data',
+    persistTTL: 1800000, // 30分钟
+    enableStats: true
+})
 
 export function memoize<T extends (...args: any[]) => any>(
     key: string,
@@ -108,15 +310,24 @@ export function clearCache(cache: LRUCache<any, any>, key?: string): void {
     }
 }
 
+/**
+ * 批量处理（改进版：使用动态批次大小）
+ */
 export async function batchProcess<T, R>(
     items: T[],
     processFn: (item: T, index: number) => Promise<R> | R,
     batchSize: number = 10
 ): Promise<R[]> {
     const results: R[] = []
-    for (let i = 0; i < items.length; i += batchSize) {
-        const batch = items.slice(i, i + batchSize)
+    const isLowEnd = isLowEndDevice()
+    const dynamicBatchSize = isLowEnd ? Math.max(3, Math.floor(batchSize / 2)) : batchSize
+
+    for (let i = 0; i < items.length; i += dynamicBatchSize) {
+        const batch = items.slice(i, i + dynamicBatchSize)
+
+        // 让出主线程
         await new Promise(resolve => setTimeout(resolve, 0))
+
         const batchResults = await Promise.all(
             batch.map((item, index) => Promise.resolve(processFn(item, i + index)))
         )
@@ -145,7 +356,7 @@ export function asyncDebounce<T extends (...args: any[]) => Promise<any>>(
             clearTimeout(timeoutId)
         }
 
-        const promise = new Promise<ReturnType<T>>((resolve, reject) => {
+        const currentPromise = new Promise<ReturnType<T>>((resolve, reject) => {
             timeoutId = setTimeout(() => {
                 fn(...args).then(resolve).catch(reject)
             }, delay)
@@ -155,20 +366,27 @@ export function asyncDebounce<T extends (...args: any[]) => Promise<any>>(
             pending.then(resolve).catch(reject)
         }
 
-        pending = promise
-        return promise
+        pending = currentPromise
+        return currentPromise
     }
 
     return debounced
 }
 
 export function preloadImages(urls: string[]): void {
-    urls.forEach((url) => {
-        const img = new Image()
-        img.onload = () => {
-            URL.revokeObjectURL(url)
-        }
-        img.src = url
+    runWhenIdle(() => {
+        urls.forEach((url, index) => {
+            runWhenIdle(() => {
+                const img = new Image()
+                img.onload = () => {
+                    URL.revokeObjectURL(url)
+                }
+                img.onerror = () => {
+                    // 静默失败
+                }
+                img.src = url
+            })
+        })
     })
 }
 
@@ -288,6 +506,18 @@ export class WorkerQueue {
     size(): number {
         return Math.min(this.queue.length, this.maxQueueSize)
     }
+
+    clear(): void {
+        this.queue = []
+    }
+
+    stats() {
+        return {
+            queueSize: this.queue.length,
+            activeWorkers: this.activeWorkers,
+            maxWorkers: this.maxWorkers
+        }
+    }
 }
 
 export function isLowEndDevice(): boolean {
@@ -309,3 +539,41 @@ export function getPerformanceConfig() {
         prefetchEnabled: !isLowEnd
     }
 }
+
+/**
+ * 获取缓存统计信息
+ */
+export function getCacheStats(): {
+    images: CacheStats
+    text: CacheStats
+    data: CacheStats
+} {
+    return {
+        images: imageCache.getStats(),
+        text: textCache.getStats(),
+        data: dataCache.getStats()
+    }
+}
+
+/**
+ * 重置所有缓存统计
+ */
+export function resetAllCacheStats(): void {
+    imageCache.resetStats()
+    textCache.resetStats()
+    dataCache.resetStats()
+}
+
+/**
+ * 清除所有持久化缓存
+ */
+export function clearAllPersistentCache(): void {
+    imageCache.clear()
+    textCache.clear()
+    dataCache.clear()
+}
+
+/**
+ * 导出缓存实例
+ */
+export { imageCache, textCache, dataCache }

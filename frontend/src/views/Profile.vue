@@ -3,33 +3,25 @@
     <div class="profile-bg"/>
     <div class="profile-card">
       <button @click="$emit('close')" class="btn-close" aria-label="关闭对话框">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-        </svg>
+        ×
       </button>
 
       <div class="profile-header">
         <div class="avatar">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-          </svg>
+          <img src="/user.png" alt="用户头像" />
         </div>
         <h2>个人资料</h2>
       </div>
 
       <div class="profile-section">
         <h3>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-          </svg>
+          <User :size="16" />
           基本信息
         </h3>
         <div class="form-group">
           <label>用户名</label>
           <div class="username-display">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.121 17.804A13.937 13.937 0 0112 16c2.5 0 4.847.655 6.879 1.804M15 10a3 3 0 11-6 0 3 3 0 016 0zm6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
+            <User :size="16" />
             <span>{{ user?.username || '-' }}</span>
           </div>
         </div>
@@ -37,9 +29,7 @@
 
       <div class="profile-section">
         <h3>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-          </svg>
+          <Lock :size="16" />
           修改密码
         </h3>
         <form @submit.prevent="handlePasswordChange" novalidate>
@@ -104,20 +94,10 @@
             <span id="confirmPassword-hint" class="hint">需要与新密码一致</span>
           </div>
           <div class="password-hint" :class="{ show: passwordHint }" role="alert" aria-live="assertive">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
+            <AlertTriangle v-if="passwordHint" :size="16" />
             <span v-if="passwordHint">当前密码错误，请重试</span>
           </div>
           <button type="submit" class="btn btn-primary" :disabled="loading || !formValid" aria-live="polite">
-            <svg v-if="loading" class="btn-icon spin" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-            </svg>
-            <span v-else>
-              <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-              </svg>
-            </span>
             {{ loading ? '修改中...' : '修改密码' }}
           </button>
         </form>
@@ -128,6 +108,7 @@
 
 <script setup lang="ts">
 import { ref, computed, nextTick } from 'vue'
+import { User, Lock, AlertTriangle } from 'lucide-vue-next'
 import { auth, api } from '../store/auth'
 
 const emit = defineEmits<{
@@ -171,13 +152,11 @@ const handlePasswordChange = async () => {
 
     if (success === 'invalid_password') {
       passwordHint.value = true
-      // 聚焦到当前密码输入框
       nextTick(() => {
         currentPasswordInput.value?.focus()
       })
     } else if (success) {
       emit('toast', '密码修改成功，请重新登录')
-      // 重新登录
       auth.logout()
       form.value = { currentPassword: '', newPassword: '', confirmPassword: '' }
       emit('close')
@@ -237,7 +216,7 @@ const handlePasswordChange = async () => {
   border-radius: var(--radius-xl);
   box-shadow: var(--shadow-2xl);
   width: 100%;
-  max-width: 440px;
+  max-width: 380px;
   padding: 0;
   overflow: hidden;
   animation: cardEnter 0.4s var(--ease-out);
@@ -256,21 +235,22 @@ const handlePasswordChange = async () => {
 
 .btn-close {
   position: absolute;
-  top: 20px;
-  right: 20px;
+  top: 16px;
+  right: 16px;
   background: transparent;
   border: none;
   color: var(--text-secondary);
   cursor: pointer;
   padding: 0;
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
   display: flex;
   align-items: center;
   justify-content: center;
   border-radius: var(--radius-full);
   transition: all var(--transition-normal) var(--ease-out);
   z-index: 10;
+  font-size: 20px;
 }
 
 .btn-close:hover {
@@ -279,39 +259,31 @@ const handlePasswordChange = async () => {
   transform: rotate(90deg);
 }
 
-.btn-close svg {
-  width: 20px;
-  height: 20px;
-}
-
 .profile-header {
   text-align: center;
-  padding: 32px 32px 24px 32px;
+  padding: 20px 20px 16px 20px;
   background: linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(168, 85, 247, 0.05) 100%);
   border-bottom: 1px solid var(--border-color);
 }
 
 .avatar {
-  width: 72px;
-  height: 72px;
-  border-radius: var(--radius-xl);
-  background: var(--gradient-primary);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin: 0 auto 16px;
+  width: 56px;
+  height: 56px;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  margin: 0 auto 10px;
   box-shadow: var(--shadow-glow-primary);
 }
 
-.avatar svg {
-  width: 36px;
-  height: 36px;
-  color: white;
+.avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .profile-header h2 {
   margin: 0;
-  font-size: 1.4rem;
+  font-size: 1.2rem;
   font-weight: var(--font-weight-bold);
   background: var(--gradient-primary);
   -webkit-background-clip: text;
@@ -320,11 +292,11 @@ const handlePasswordChange = async () => {
 }
 
 .profile-section {
-  padding: 28px 32px;
+  padding: 18px 20px;
 }
 
 .profile-section:last-child {
-  padding-bottom: 32px;
+  padding-bottom: 20px;
 }
 
 .profile-section + .profile-section {
@@ -334,29 +306,33 @@ const handlePasswordChange = async () => {
 .profile-section h3 {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin: 0 0 20px;
+  gap: 6px;
+  margin: 0 0 14px;
   color: var(--text-primary);
-  font-size: var(--font-size-base);
+  font-size: var(--font-size-sm);
   font-weight: var(--font-weight-semibold);
 }
 
 .profile-section h3 svg {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   color: var(--color-primary);
 }
 
 .form-group {
-  margin-bottom: 20px;
+  margin-bottom: 14px;
+}
+
+.form-group:last-of-type {
+  margin-bottom: 12px;
 }
 
 .form-group label {
   display: block;
-  margin-bottom: 10px;
+  margin-bottom: 6px;
   color: var(--text-primary);
   font-weight: var(--font-weight-medium);
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-xs);
 }
 
 .input-wrapper {
@@ -365,12 +341,12 @@ const handlePasswordChange = async () => {
 
 .form-input {
   width: 100%;
-  padding: 14px 18px;
-  border: 2px solid var(--border-color);
-  border-radius: var(--radius-lg);
+  padding: 10px 12px;
+  border: 1.5px solid var(--border-color);
+  border-radius: var(--radius-md);
   background: var(--bg-primary);
   color: var(--text-primary);
-  font-size: var(--font-size-base);
+  font-size: var(--font-size-sm);
   transition: all var(--transition-normal) var(--ease-out);
   font-weight: var(--font-weight-medium);
 }
@@ -382,7 +358,7 @@ const handlePasswordChange = async () => {
 .form-input:focus {
   outline: none;
   border-color: var(--color-primary);
-  box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.1);
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
 }
 
 .form-input[aria-invalid="true"] {
@@ -414,46 +390,46 @@ const handlePasswordChange = async () => {
 .username-display {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 14px 18px;
+  gap: 10px;
+  padding: 10px 12px;
   background: var(--bg-primary);
-  border: 2px solid var(--border-color);
-  border-radius: var(--radius-lg);
+  border: 1.5px solid var(--border-color);
+  border-radius: var(--radius-md);
   color: var(--text-primary);
   font-weight: var(--font-weight-semibold);
-  font-size: var(--font-size-base);
+  font-size: var(--font-size-sm);
 }
 
 .username-display svg {
-  width: 20px;
-  height: 20px;
+  width: 16px;
+  height: 16px;
   color: var(--text-tertiary);
 }
 
 .hint {
   display: block;
-  margin-top: 8px;
-  font-size: var(--font-size-xs);
+  margin-top: 4px;
+  font-size: 11px;
   color: var(--text-tertiary);
 }
 
 .password-hint {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   justify-content: center;
-  padding: 12px;
-  border-radius: var(--radius-lg);
-  font-size: var(--font-size-sm);
-  margin-top: 16px;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-xs);
+  margin-top: 12px;
   color: var(--color-warning);
   background: linear-gradient(135deg, rgba(245, 158, 11, 0.1) 0%, rgba(251, 191, 36, 0.1) 100%);
   border: 1px solid rgba(245, 158, 11, 0.2);
 }
 
 .password-hint svg {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   flex-shrink: 0;
 }
 
@@ -467,18 +443,17 @@ const handlePasswordChange = async () => {
   75% { transform: translateX(4px); }
 }
 
-/* 按钮样式 */
 .btn {
   width: 100%;
-  padding: 14px 24px;
+  padding: 10px 18px;
   border: none;
-  border-radius: var(--radius-lg);
-  font-size: var(--font-size-base);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 6px;
   font-weight: var(--font-weight-semibold);
   transition: all var(--transition-normal) var(--ease-out);
   position: relative;
@@ -500,20 +475,6 @@ const handlePasswordChange = async () => {
   left: 100%;
 }
 
-.btn-icon {
-  width: 18px;
-  height: 18px;
-}
-
-.btn-icon.spin {
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
 .btn-primary {
   background: var(--gradient-primary);
   color: white;
@@ -521,8 +482,8 @@ const handlePasswordChange = async () => {
 }
 
 .btn-primary:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 24px rgba(102, 126, 234, 0.5);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.5);
 }
 
 .btn:disabled {
@@ -535,34 +496,27 @@ const handlePasswordChange = async () => {
   display: none;
 }
 
-/* 响应式 */
 @media (max-width: 480px) {
   .profile-card {
-    max-width: calc(100% - 32px);
+    max-width: calc(100% - 24px);
     border-radius: var(--radius-lg);
   }
 
   .profile-header,
   .profile-section {
-    padding: 20px 24px;
+    padding: 16px 18px;
   }
 
   .avatar {
-    width: 56px;
-    height: 56px;
-  }
-
-  .avatar svg {
-    width: 28px;
-    height: 28px;
+    width: 48px;
+    height: 48px;
   }
 
   .profile-header h2 {
-    font-size: 1.2rem;
+    font-size: 1.1rem;
   }
 }
 
-/* 减少动画模式 */
 @media (prefers-reduced-motion: reduce) {
   .profile-card {
     animation: none;

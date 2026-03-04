@@ -1,8 +1,8 @@
 <template>
-  <div class="image-list" :class="{ 'offline': !isOnline }" role="region" :aria-label="CONSTANTS.A11Y.IMAGE_LIST_REGION">
+  <div ref="scrollContainer" class="image-list" :class="{ 'offline': !isOnline }" role="region" :aria-label="CONSTANTS.A11Y.IMAGE_LIST_REGION">
     <!-- 离线提示 -->
     <div v-if="!isOnline" class="offline-banner">
-      <span>🔴 网络已断开，请检查网络连接</span>
+      <span>网络已断开，请检查网络连接</span>
     </div>
 
     <!-- 列表头部 -->
@@ -164,6 +164,10 @@ const toastRef = ref<{ showToast: (message: string, type?: ToastType, priority?:
 const tagsInputRef = ref<HTMLInputElement>()
 const isOnline = ref(navigator.onLine)
 const scrollPosition = ref({ scrollTop: 0, scrollBottom: false })
+const scrollContainer = ref<HTMLElement | null>(null)
+
+// 滚动位置存储键
+const SCROLL_POSITION_KEY = 'imagelist_scroll_position'
 
 // 引用 ImageCard 组件（用于焦点管理）
 const imageCardRefs = ref<Map<string, HTMLElement>>(new Map())
@@ -232,6 +236,8 @@ const visibleImages = computed(() => {
 // 防抖的滚动处理
 const handleScrollDebounced = debounce((data: { scrollTop: number; scrollBottom: boolean }) => {
   scrollPosition.value = data
+  saveScrollPosition()
+
   if (data.scrollBottom) {
     // 触发加载更多
     prefetchNextImages()
@@ -248,6 +254,35 @@ const prefetchNextImages = () => {
 
   // 触发加载更多事件（如果父组件实现了分页）
   emit('load-more')
+}
+
+// 保存滚动位置到 localStorage
+const saveScrollPosition = () => {
+  try {
+    localStorage.setItem(SCROLL_POSITION_KEY, JSON.stringify(scrollPosition.value))
+  } catch (e) {
+    console.warn('Failed to save scroll position:', e)
+  }
+}
+
+// 从 localStorage 恢复滚动位置
+const restoreScrollPosition = () => {
+  try {
+    const saved = localStorage.getItem(SCROLL_POSITION_KEY)
+    if (saved) {
+      const position = JSON.parse(saved) as { scrollTop: number; scrollBottom: boolean }
+      scrollPosition.value = position
+
+      // 恢复滚动位置
+      nextTick(() => {
+        if (scrollContainer.value && position.scrollTop > 0) {
+          scrollContainer.value.scrollTop = position.scrollTop
+        }
+      })
+    }
+  } catch (e) {
+    console.warn('Failed to restore scroll position:', e)
+  }
 }
 
 // 切换虚拟滚动
@@ -478,6 +513,21 @@ const handleOffline = () => {
 watch(() => props.refreshTrigger, () => {
   clearSelection()
   imageTags.value.clear()
+
+  // 重置滚动位置
+  scrollPosition.value = { scrollTop: 0, scrollBottom: false }
+  try {
+    localStorage.setItem(SCROLL_POSITION_KEY, JSON.stringify(scrollPosition.value))
+  } catch (e) {
+    console.warn('Failed to reset scroll position:', e)
+  }
+
+  // 滚动到顶部
+  nextTick(() => {
+    if (scrollContainer.value) {
+      scrollContainer.value.scrollTop = 0
+    }
+  })
 })
 
 onMounted(() => {
@@ -488,6 +538,9 @@ onMounted(() => {
 
   // 初始化网络状态
   isOnline.value = navigator.onLine
+
+  // 恢复滚动位置
+  restoreScrollPosition()
 })
 
 onUnmounted(() => {
@@ -495,6 +548,9 @@ onUnmounted(() => {
   document.removeEventListener('keydown', handleKeyDown)
   window.removeEventListener('online', handleOnline)
   window.removeEventListener('offline', handleOffline)
+
+  // 保存滚动位置
+  saveScrollPosition()
 })
 </script>
 

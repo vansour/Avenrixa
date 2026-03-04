@@ -1,12 +1,12 @@
 /**
  * 图片相关 API
  */
-import type { Image, Pagination, ImageEditParams } from '../types'
+import type { Image, Pagination, CursorPaginated, ImageEditParams } from '../types'
 import * as CONSTANTS from '../../constants'
 import { get, post, put, del, upload } from '../api'
 
 /**
- * 获取图片列表
+ * 获取图片列表（传统分页）
  */
 export async function getImages(params?: {
   page?: number
@@ -28,6 +28,30 @@ export async function getImages(params?: {
       page_size: CONSTANTS.PAGINATION.DEFAULT_PAGE_SIZE,
       total: 0,
       has_next: false
+    }
+  }
+}
+
+/**
+ * 获取图片列表（Cursor-based 分页）
+ */
+export async function getImagesCursor(params?: {
+  page_size?: number
+  sort_by?: string
+  sort_order?: string
+  search?: string
+  category_id?: string
+  tag?: string
+  cursor?: [string, string]
+}): Promise<CursorPaginated<Image>> {
+  try {
+    return await get<CursorPaginated<Image>>('/images/cursor', params, {
+      key: `getImagesCursor:${JSON.stringify(params)}`
+    })
+  } catch {
+    return {
+      data: [],
+      next_cursor: null
     }
   }
 }

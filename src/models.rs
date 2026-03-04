@@ -43,8 +43,15 @@ pub struct ResetPasswordRequest {
 
 #[derive(Debug, Serialize)]
 pub struct AuthResponse {
-    pub token: String,
+    pub access_token: String,
+    pub refresh_token: String,
+    pub expires_in: i64,
     pub user: UserResponse,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RefreshTokenRequest {
+    pub refresh_token: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -153,6 +160,8 @@ pub struct PaginationParams {
     pub search: Option<String>,
     pub category_id: Option<Uuid>,
     pub tag: Option<String>,
+    /// 游标分页参数（用于替代 OFFSET 分页）
+    pub cursor: Option<(DateTime<Utc>, String)>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -162,6 +171,13 @@ pub struct Paginated<T> {
     pub page_size: i32,
     pub total: i64,
     pub has_next: bool,
+}
+
+/// Cursor-based 分页返回类型（用于高性能分页）
+#[derive(Debug, Serialize)]
+pub struct CursorPaginated<T> {
+    pub data: Vec<T>,
+    pub next_cursor: Option<(DateTime<Utc>, String)>,
 }
 
 #[derive(Debug, Deserialize)]

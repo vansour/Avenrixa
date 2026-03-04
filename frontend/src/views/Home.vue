@@ -5,23 +5,16 @@
       <h1>VanSour Image</h1>
       <p class="subtitle">简单快速的图片托管服务</p>
       <div class="header-actions">
-        <div v-if="user" class="user-info">
-          <span>{{ user.username }}</span>
-          <button @click="showProfile = true" class="btn-profile" :aria-label="'打开个人资料'">
-            个人资料
-          </button>
-          <button v-if="user.role === 'admin'" @click="showAdminPanel = true" class="btn-admin" :aria-label="'打开管理面板'">
-            管理
-          </button>
-          <button @click="router.push('/settings')" class="btn-settings" :aria-label="'打开设置'">
-            设置
-          </button>
-          <button @click="handleLogout" class="btn-logout" :aria-label="'退出登录'">
-            退出
-          </button>
-        </div>
+        <UserMenu
+          v-if="user"
+          :user="user"
+          @profile="showProfile = true"
+          @settings="router.push('/settings')"
+          @logout="handleLogout"
+        />
         <button @click="toggleTheme" class="btn-theme" :title="theme === 'dark' ? '切换亮色模式' : '切换暗色模式'" :aria-label="'切换主题'">
-          {{ theme === 'dark' ? '🌙' : '☀️' }}
+          <Moon v-if="theme === 'dark'" />
+          <Sun v-else />
         </button>
       </div>
     </header>
@@ -109,13 +102,6 @@
       @applied="handleEditApplied"
     />
 
-    <!-- 管理面板 -->
-    <AdminPanel
-      v-if="showAdminPanel"
-      :visible="showAdminPanel"
-      @close="showAdminPanel = false"
-    />
-
     <!-- 个人资料 -->
     <Profile
       v-if="showProfile"
@@ -131,6 +117,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { Moon, Sun } from 'lucide-vue-next'
 import { auth, api } from '../store/auth'
 import { setGlobalToast, toastSuccess, toastError } from '../composables/useToast'
 import { debounce } from '../utils/debounce'
@@ -145,6 +132,7 @@ import type {
 import * as CONSTANTS from '../constants'
 
 // 组件导入
+import UserMenu from '../components/UserMenu.vue'
 import UploadZone from '../components/UploadZone.vue'
 import ImageList from '../components/ImageList.vue'
 import ImagePreview from '../components/ImagePreview.vue'
@@ -152,9 +140,9 @@ import Trash from '../components/Trash.vue'
 import Toast from '../components/Toast.vue'
 import CategoryModal from '../components/CategoryModal.vue'
 import ImageEditor from '../components/ImageEditor.vue'
-import AdminPanel from './AdminPanel.vue'
 import Profile from './Profile.vue'
 import Auth from './Auth.vue'
+import { useFileUpload } from '../composables/useFileUpload'
 
 // Router
 const router = useRouter()
@@ -163,16 +151,29 @@ const router = useRouter()
 const images = ref<Image[]>([])
 const categories = ref<Category[]>([])
 const loading = ref(false)
-const uploading = ref(false)
-const isLoading = ref(false) // 区分首次加载和刷新加载
+const isLoading = ref(false)
 const toastRef = ref<{ showToast: (message: string, type?: ToastType) => void } | null>(null)
 
+// 传统分页状态（用于搜索/筛选）
 const pagination = ref<Pagination>({
   page: 1,
   page_size: CONSTANTS.PAGINATION.DEFAULT_PAGE_SIZE,
   total: 0,
   has_next: false
 })
+
+// Cursor-based 分页状态（用于主列表）
+const nextCursor = ref<[string, string] | null>(null)
+
+// 使用上传队列
+const {
+  uploading,
+  progress,
+  uploadParallel,
+  cancelUpload,
+  resetUpload,
+  progressPercent
+} = useFileUpload()
 
 const preview = ref({ visible: false, image: null as Image | null })
 const uploadZoneRef = ref()
@@ -181,7 +182,6 @@ const uploadZoneRef = ref()
 const showCategoryModal = ref(false)
 const showEditor = ref(false)
 const editingImage = ref<Image | null>(null)
-const showAdminPanel = ref(false)
 const showProfile = ref(false)
 
 // 筛选和排序
@@ -239,22 +239,42 @@ const loadCategories = async () => {
   }
 }
 
-// 加载图片
+// 加载图片（使用 cursor-based 分页）
 const loadImages = async (page = 1) => {
   loading.value = true
   isLoading.value = page === 1
 
   try {
-    const data = await api.getImages({
-      page,
-      page_size: pagination.value.page_size,
-      sort_by: sortBy.value,
-      sort_order: sortOrder.value,
-      search: searchQuery.value || undefined,
-      category_id: selectedCategory.value || undefined
-    })
-    images.value = data.data
-    pagination.value = data
+    // 首次加载或搜索/筛选时使用 cursor-based API
+    if (page === 1 || searchQuery.value || selectedCategory.value) {
+      const data = await api.getImagesCursor({
+        page_size: pagination.value.page_size,
+        sort_by: sortBy.value,
+        sort_order: sortOrder.value,
+        search: searchQuery.value || undefined,
+        category_id: selectedCategory.value || undefined,
+        cursor: nextCursor.value || undefined
+      })
+      // 追加新数据或重置
+      if (page === 1) {
+        images.value = data.data
+      } else {
+        images.value.push(...data.data)
+      }
+      nextCursor.value = data.next_cursor
+    } else {
+      // 传统分页（保留向后兼容性）
+      const data = await api.getImages({
+        page,
+        page_size: pagination.value.page_size,
+        sort_by: sortBy.value,
+        sort_order: sortOrder.value,
+        search: searchQuery.value || undefined,
+        category_id: selectedCategory.value || undefined
+      })
+      images.value = data.data
+      pagination.value = data
+    }
     refreshTrigger.value++
   } catch (error) {
     showToast('加载图片失败', 'error')
@@ -275,44 +295,33 @@ const handleSortChange = () => {
   loadImages(1)
 }
 
-// 上传处理
+// 上传处理（使用上传队列）
 const handleUpload = async (files: FileList) => {
-  uploading.value = true
   const fileArray = Array.from(files)
 
   // 验证文件
   const validation = validateFiles(fileArray)
   if (!validation.valid) {
-    uploading.value = false
     showToast(validation.errors[0], 'error')
     return
   }
 
-  let successCount = 0
-  let failCount = 0
-
-  for (let i = 0; i < fileArray.length; i++) {
-    const file = fileArray[i]
-    const current = i + 1
-    uploadZoneRef.value?.updateProgress(current, fileArray.length, file.name)
-
-    try {
-      const result = await api.uploadImage(file)
-      if (result) {
-        successCount++
-      } else {
-        failCount++
-      }
-    } catch (error) {
-      console.error(`上传 ${file.name} 失败:`, error)
-      failCount++
+  // 使用上传队列进行并发上传
+  const results = await uploadParallel(fileArray, {
+    maxConcurrent: CONSTANTS.UPLOAD.MAX_FILES_PER_REQUEST,
+    onProgress: (progress) => {
+      uploadZoneRef.value?.updateProgress(
+        progress.current,
+        progress.total,
+        progress.fileName
+      )
     }
-  }
+  })
 
-  uploading.value = false
-
-  if (successCount > 0) {
-    const message = `上传完成: 成功 ${successCount} 张${failCount > 0 ? `, 失败 ${failCount} 张` : ''}`
+  // 处理上传结果
+  if (results.success > 0) {
+    images.value.push(...results.images)
+    const message = `上传完成: 成功 ${results.success} 张${results.failed > 0 ? `, 失败 ${results.failed} 张` : ''}`
     showToast(message, 'success')
     await loadImages(1)
   } else {
@@ -320,31 +329,6 @@ const handleUpload = async (files: FileList) => {
   }
 }
 
-// 文件验证
-const validateFiles = (files: File[]) => {
-  const errors: string[] = []
-  const validFiles: File[] = []
-
-  for (let i = 0; i < files.length; i++) {
-    const result = validateImageFile(files[i])
-    if (result.valid) {
-      validFiles.push(files[i])
-    } else {
-      errors.push(`${files[i].name}: ${result.error}`)
-    }
-  }
-
-  if (errors.length > 0) {
-    return { valid: false, errors, validFiles }
-  }
-
-  if (validFiles.length > CONSTANTS.IMAGE.MAX_UPLOAD_FILES) {
-    errors.push(`一次最多只能上传 ${CONSTANTS.IMAGE.MAX_UPLOAD_FILES} 个文件`)
-    return { valid: false, errors, validFiles }
-  }
-
-  return { valid: true, errors: [], validFiles }
-}
 
 // 图片操作处理
 const handleUpdate = async (id: string, data: { category_id?: string; tags?: string[] }) => {
@@ -519,68 +503,28 @@ h1 {
 
 .header-actions {
   display: flex;
-  gap: 10px;
+  gap: 12px;
   align-items: center;
 }
 
-.user-info {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 16px;
-  background: var(--bg-tertiary);
-  border-radius: var(--radius-full);
-}
-
-.user-info span {
-  font-size: var(--font-size-sm);
-  color: var(--text-primary);
-  font-weight: var(--font-weight-semibold);
-}
-
-/* 按钮样式 */
-.btn-profile,
-.btn-admin,
-.btn-settings,
-.btn-logout,
 .btn-theme {
-  padding: 10px 18px;
+  padding: 10px;
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-full);
   background: var(--bg-secondary);
   color: var(--text-primary);
   cursor: pointer;
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-medium);
+  font-size: 1.25rem;
   transition: all var(--transition-normal) var(--ease-out);
   display: flex;
   align-items: center;
-  gap: 6px;
+  justify-content: center;
 }
 
-.btn-profile:hover,
-.btn-admin:hover,
-.btn-settings:hover,
-.btn-logout:hover,
 .btn-theme:hover {
   transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
   border-color: var(--color-primary);
-}
-
-.btn-admin {
-  background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(168, 85, 247, 0.1) 100%);
-  color: var(--color-primary);
-}
-
-.btn-logout:hover {
-  border-color: var(--color-danger);
-  color: var(--color-danger);
-}
-
-.btn-theme {
-  font-size: 1.25rem;
-  background: var(--bg-tertiary);
 }
 
 /* 工具栏 */
@@ -721,10 +665,6 @@ h1 {
 
 /* 减少动画 */
 @media (prefers-reduced-motion: reduce) {
-  .btn-profile:hover,
-  .btn-admin:hover,
-  .btn-settings:hover,
-  .btn-logout:hover,
   .btn-theme:hover {
     transform: none;
   }

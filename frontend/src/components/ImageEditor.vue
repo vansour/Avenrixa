@@ -14,7 +14,7 @@
               :title="'撤销 (Ctrl+Z)'"
               :aria-label="'撤销操作'"
             >
-              ↶️
+              撤销
             </button>
             <button
               @click="redo"
@@ -23,13 +23,13 @@
               :title="'重做 (Ctrl+Y)'"
               :aria-label="'重做操作'"
             >
-              ↷️
+              重做
             </button>
             <span v-if="history.length > 0" class="history-count">
               {{ historyIndex + 1 }} / {{ history.length }}
             </span>
           </div>
-          <button @click="close" class="btn-close" :aria-label="'关闭编辑器'">&times;</button>
+          <button @click="close" class="btn-close" :aria-label="'关闭编辑器'"><X :size="20" /></button>
         </div>
       </div>
 
@@ -58,7 +58,7 @@
                 class="btn-tool"
                 :title="`旋转 ${angle}°`"
               >
-                {{ angle === -90 ? '↶' : angle === 90 ? '↷' : '↻' }} {{ Math.abs(angle) }}°
+                {{ angle === -90 ? '左旋' : angle === 90 ? '右旋' : '旋转' }} {{ Math.abs(angle) }}°
               </button>
             </div>
           </div>
@@ -168,6 +168,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import { X } from 'lucide-vue-next'
 import { api } from '../store/auth'
 import { formatFileSize } from '../utils/format'
 import type { Image, ImageEditParams } from '../types'

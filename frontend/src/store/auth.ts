@@ -151,11 +151,13 @@ import * as imagesApi from './api/images'
 import * as categoriesApi from './api/categories'
 import * as settingsApi from './api/settings'
 import * as adminApi from './api/admin'
-import type { Image, Pagination, Category, SystemStats, AuditLogResponse, BackupInfo, User, ImageEditParams, ChangePasswordResult } from '../types'
+import type { Image, Pagination, Category, SystemStats, AuditLogResponse, BackupInfo, ImageEditParams } from '../types'
+export type { ChangePasswordResult }
 
 export const api = {
   // Images
   getImages: imagesApi.getImages,
+  getImagesCursor: imagesApi.getImagesCursor,
   uploadImage: imagesApi.uploadImage,
   updateImage: imagesApi.updateImage,
   renameImage: imagesApi.renameImage,

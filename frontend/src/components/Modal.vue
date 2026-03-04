@@ -21,9 +21,7 @@
             :aria-label="'关闭对话框'"
             :title="'关闭 (Esc)'"
           >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
+            <X :size="20" />
           </button>
         </div>
 
@@ -43,6 +41,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import { X } from 'lucide-vue-next'
 import { disableBodyScroll, enableBodyScroll } from '../composables/useModalScroll'
 
 interface Props {
@@ -295,6 +294,7 @@ onUnmounted(() => {
   justify-content: center;
   border-radius: var(--radius-full);
   transition: all var(--transition-normal) var(--ease-out);
+  font-size: 24px;
 }
 
 .close-btn:hover {
@@ -306,11 +306,6 @@ onUnmounted(() => {
 .close-btn:focus-visible {
   outline: 3px solid var(--color-primary);
   outline-offset: 2px;
-}
-
-.close-btn svg {
-  width: 20px;
-  height: 20px;
 }
 
 /* 内容区域 */

@@ -2,15 +2,9 @@
   <Modal :visible="visible" :size="'small'" @close="handleCancel">
     <template #header>
       <div class="header-icon" :class="typeClass">
-        <svg v-if="type === 'danger'" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-        </svg>
-        <svg v-else-if="type === 'warning'" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
-        <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
+        <AlertCircle v-if="type === 'danger'" :size="24" />
+        <HelpCircle v-else-if="type === 'warning'" :size="24" />
+        <Info v-else :size="24" />
       </div>
       <h2>{{ title }}</h2>
     </template>
@@ -22,24 +16,10 @@
     </div>
     <template #footer>
       <button @click="handleCancel" class="btn btn-cancel">
-        <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-        </svg>
         <span class="btn-text">{{ cancelText }}</span>
       </button>
       <button @click="handleConfirm" :class="['btn btn-confirm', typeClass]" :disabled="loading">
-        <svg v-if="loading" class="btn-icon spin" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-        </svg>
-        <svg v-else-if="type === 'danger'" class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-        </svg>
-        <svg v-else-if="type === 'warning'" class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-        </svg>
-        <svg v-else class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-        </svg>
+        <span v-if="loading" class="loading-dots">...</span>
         <span class="btn-text">{{ loading ? '处理中...' : confirmText }}</span>
       </button>
     </template>
@@ -48,6 +28,7 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
+import { AlertCircle, HelpCircle, Info } from 'lucide-vue-next'
 import Modal from './Modal.vue'
 
 interface Props {
@@ -102,9 +83,9 @@ const handleCancel = () => {
   margin: 0 auto 16px;
 }
 
-.header-icon svg {
-  width: 24px;
-  height: 24px;
+.header-icon span {
+  font-size: 24px;
+  font-weight: var(--font-weight-bold);
 }
 
 .header-icon.type-default {
@@ -267,9 +248,8 @@ const handleCancel = () => {
     height: 40px;
   }
 
-  .header-icon svg {
-    width: 20px;
-    height: 20px;
+  .header-icon span {
+    font-size: 20px;
   }
 }
 

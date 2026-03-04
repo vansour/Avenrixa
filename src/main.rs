@@ -4,42 +4,36 @@ mod cache;
 mod config;
 mod db;
 mod email;
+mod file_queue;
 pub mod error;
 mod handlers;
 mod image_processor;
 mod middleware;
 mod models;
 mod routes;
+mod router;
+mod server;
+mod tasks;
 mod utils;
-mod validator_utils;
 
 // handlers 子模块
 pub use handlers::auth as auth_handlers;
 pub use handlers::images as image_handlers;
+pub use handlers::images_cursor as images_cursor;
 pub use handlers::categories as category_handlers;
 pub use handlers::admin as admin_handlers;
 
-use axum::{
-    extract::DefaultBodyLimit,
-    http::{header, Method},
-    http::HeaderValue,
-    Router,
-};
 use auth::AuthService;
 use config::Config;
 use image_processor::ImageProcessor;
 use redis::Client;
 use sqlx::postgres::PgPoolOptions;
-use std::net::SocketAddr;
-use tokio::net::TcpListener;
-use tower_http::{
-    cors::{Any, CorsLayer},
-    trace::TraceLayer,
-    services::ServeDir,
-};
+use std::sync::Arc;
+use tower_http::trace::TraceLayer;
 use tracing::{error, info, warn, Level};
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
-use routes::create_routes;
+use router::create_app_with_middleware;
+use server::{spawn_cleanup_tasks, start_server};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -55,6 +49,13 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let config = Config::from_env();
+
+    // 验证配置
+    if let Err(e) = config.validate() {
+        error!("Configuration validation failed: {}", e);
+        return Err(e.into());
+    }
+
     info!("Configuration loaded (log level: {})", log_level);
 
     info!("Connecting to database...");
@@ -94,6 +95,13 @@ async fn main() -> anyhow::Result<()> {
     tokio::fs::create_dir_all(&config.storage.path).await?;
     tokio::fs::create_dir_all(&config.storage.thumbnail_path).await?;
 
+    // 设置目录权限为 755，确保 web 服务器可以读取
+    use std::os::unix::fs::PermissionsExt;
+    let images_perms = PermissionsExt::from_mode(0o755);
+    let thumbs_perms = PermissionsExt::from_mode(0o755);
+    let _ = tokio::fs::set_permissions(&config.storage.path, images_perms).await;
+    let _ = tokio::fs::set_permissions(&config.storage.thumbnail_path, thumbs_perms).await;
+
     let image_processor = ImageProcessor::new(
         config.image.max_width,
         config.image.max_height,
@@ -101,134 +109,33 @@ async fn main() -> anyhow::Result<()> {
         config.image.jpeg_quality,
     );
 
+    // 初始化文件保存任务队列
+    let file_save_queue = Arc::new(file_queue::FileSaveQueue::new());
+    info!("File save task queue initialized");
+
     let state = db::AppState {
         pool,
         redis: redis_conn,
         config: config.clone(),
         auth,
         image_processor,
+        file_save_queue,
         started_at: std::time::Instant::now(),
     };
 
-    let cors = if config.server.cors_origins == "*" {
-        // 开发环境：允许所有来源
-        CorsLayer::new()
-            .allow_origin(Any)
-            .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE, Method::OPTIONS])
-            .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION])
-    } else {
-        // 生产环境：使用配置的来源
-        let origins: Vec<HeaderValue> = config.server.cors_origins
-            .split(',')
-            .map(|s| s.trim().parse().expect("Invalid CORS origin"))
-            .collect();
+    // 创建应用路由和中间件
+    let app = create_app_with_middleware(state.clone(), &config, config.server.max_upload_size)
+        .layer(TraceLayer::new_for_http());
 
-        CorsLayer::new()
-            .allow_origin(origins)
-            .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE, Method::OPTIONS])
-            .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION])
-    };
+    // 启动清理任务
+    spawn_cleanup_tasks(&state);
 
-    let api_routes = Router::new()
-        .merge(create_routes())
-        .with_state(state.clone());
+    // 启动服务器
+    let addr = config.addr();
+    let listener = server::bind_listener(addr).await?;
 
-    let static_assets = Router::new()
-        .nest_service("/images", ServeDir::new(&config.storage.path))
-        .nest_service("/thumbnails", ServeDir::new(&config.storage.thumbnail_path))
-        .fallback_service(ServeDir::new("./frontend/dist").append_index_html_on_directories(true));
-
-    // 配置限流中间件（ TODO: 待完善 tower_governor API）
-    // let governor_config = GovernorConfig {
-    //     interval: std::time::Duration::from_secs(60),
-    //     burst_size: NonZeroUsize::new(config.rate_limit.burst_size as usize).unwrap(),
-    //     quanta: NonZeroUsize::new(config.rate_limit.requests_per_minute as usize).unwrap(),
-    // };
-    // let governor_layer = GovernorLayer {
-    //     config: std::sync::Arc::new(governor_config),
-    // };
-
-    let app = Router::new()
-        .merge(api_routes)
-        .merge(static_assets)
-        .layer(cors)
-        .layer(TraceLayer::new_for_http())
-        // .layer(governor_layer) // 限流层（待完善）
-        .layer(DefaultBodyLimit::max(config.server.max_upload_size));
-
-    let addr: SocketAddr = config.addr();
-    let listener = TcpListener::bind(addr).await?;
-
-    let cleanup_pool = state.pool.clone();
-    let retention_days = state.config.cleanup.deleted_images_retention_days;
-    let storage_path = state.config.storage.path.clone();
-    let thumbnail_path = state.config.storage.thumbnail_path.clone();
-    tokio::spawn(async move {
-        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(86400));
-        loop {
-            interval.tick().await;
-            info!("Running cleanup task...");
-
-            let days_ago = chrono::Utc::now() - chrono::Duration::days(retention_days);
-            let result = sqlx::query_as::<_, (uuid::Uuid, String)>(
-                "SELECT id, filename FROM images WHERE deleted_at < $1"
-            )
-            .bind(days_ago)
-            .fetch_all(&cleanup_pool)
-            .await;
-
-            let images: Vec<(uuid::Uuid, String)> = match result {
-                Ok(r) => r,
-                Err(e) => {
-                    error!("Failed to query cleanup images: {}", e);
-                    continue;
-                }
-            };
-
-            let mut removed_count = 0;
-            for (id, filename) in &images {
-                let file_storage_path = format!("{}/{}", storage_path, filename);
-                let file_thumbnail_path = format!("{}/{}.jpg", thumbnail_path, id);
-
-                let file_removed = tokio::fs::remove_file(&file_storage_path).await.is_ok();
-                let thumb_removed = tokio::fs::remove_file(&file_thumbnail_path).await.is_ok();
-
-                if file_removed || thumb_removed {
-                    let _ = sqlx::query("DELETE FROM images WHERE id = $1")
-                        .bind(id)
-                        .execute(&cleanup_pool)
-                        .await;
-                    removed_count += 1;
-                }
-            }
-            info!("Cleanup complete: {} images removed", removed_count);
-        }
-    });
-
-    let expiry_pool = state.pool.clone();
-    tokio::spawn(async move {
-        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(3600));
-        loop {
-            interval.tick().await;
-            let now = chrono::Utc::now();
-
-            let result = sqlx::query(
-                "UPDATE images SET deleted_at = $1 WHERE expires_at < $1 AND deleted_at IS NULL"
-            )
-            .bind(now)
-            .execute(&expiry_pool)
-            .await;
-
-            if let Ok(r) = result
-                && r.rows_affected() > 0 {
-                    info!("Expired images moved to trash: {}", r.rows_affected());
-                }
-        }
-    });
-
-    info!("Server listening on {}", addr);
-
-    axum::serve(listener, app).await?;
+    // 启动服务器
+    start_server(listener, app).await?;
 
     Ok(())
 }

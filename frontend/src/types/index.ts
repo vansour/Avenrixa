@@ -62,6 +62,8 @@ export interface PaginationParams {
   search?: string
   category_id?: string
   tag?: string
+  /// Cursor-based 分页参数
+  cursor?: [string, string] // [created_at, id]
 }
 
 /**
@@ -73,6 +75,14 @@ export interface Pagination<T = any> {
   page_size: number
   total: number
   has_next: boolean
+}
+
+/**
+ * Cursor-based 分页响应
+ */
+export interface CursorPaginated<T = any> {
+  data: T[]
+  next_cursor: [string, string] | null
 }
 
 /**

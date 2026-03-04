@@ -1,7 +1,8 @@
 use crate::audit::log_audit;
-use crate::cache::{Cache, ImageCache};
+use crate::cache::{Cache, ImageCache, HashCache};
 use crate::db::AppState;
 use crate::error::AppError;
+use crate::file_queue::FileSaveResult;
 use crate::middleware::AuthUser;
 use crate::models::*;
 use axum::{
@@ -11,10 +12,74 @@ use axum::{
 use axum_extra::extract::Multipart;
 use chrono::Utc;
 use redis::AsyncCommands;
-use sqlx::Row;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 use crate::utils::write_file_with_retry;
+
+/// 检查图片 hash 是否已存在（使用 Redis 缓存层）
+async fn check_image_hash_with_cache(
+    state: &crate::db::AppState,
+    hash: &str,
+    strategy: &str,
+    user_id: uuid::Uuid,
+) -> Result<Option<ImageInfo>, AppError>
+{
+    // 先检查 Redis 缓存
+    let _cache_key = HashCache::image_hash(hash, strategy);
+    let cache_info_key = HashCache::existing_info(hash, strategy, user_id);
+    let mut redis = state.redis.clone();
+
+    // 尝试从缓存获取现有图片信息
+    if let Ok(Some(cached_info)) = Cache::get::<ImageInfo, _>(&mut redis, &cache_info_key).await {
+        // 缓存命中，返回缓存的图片信息
+        info!("Hash cache hit for image hash: {}", hash);
+        return Ok(Some(cached_info));
+    }
+
+    // 缓存未命中，查询数据库
+    info!("Hash cache miss for image hash: {}, querying database", hash);
+    let existing_row = match strategy {
+        "global" => {
+            // 全局去重：检查所有用户
+            sqlx::query_as::<_, ImageInfo>(
+                "SELECT id, filename, user_id FROM images WHERE hash = $1 AND deleted_at IS NULL LIMIT 1"
+            )
+            .bind(hash)
+            .fetch_optional(&state.pool)
+            .await?
+        }
+        _ => {
+            // 用户内去重（默认）
+            sqlx::query_as::<_, ImageInfo>(
+                "SELECT id, filename, user_id FROM images WHERE hash = $1 AND user_id = $2 AND deleted_at IS NULL"
+            )
+            .bind(hash)
+            .bind(user_id)
+            .fetch_optional(&state.pool)
+            .await?
+        }
+    };
+
+    // 将查询结果存入缓存
+    if let Some(ref info) = existing_row {
+        // 设置缓存 TTL，使用 list_ttl (5分钟) 用于图片列表缓存
+        let cache_ttl = state.config.cache.list_ttl;
+        let _ = Cache::set(&mut redis, &cache_info_key, info, cache_ttl).await;
+
+        // 将 hash 添加到已存在集合（用于快速检查）
+        let hash_cache_key = HashCache::image_hash(hash, strategy);
+        let _ = Cache::set(&mut redis, &hash_cache_key, "1", 3600).await;
+    }
+
+    Ok(existing_row)
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, sqlx::FromRow)]
+struct ImageInfo {
+    id: Uuid,
+    filename: String,
+    user_id: Uuid,
+}
 
 pub async fn upload_image(
     State(state): State<AppState>,
@@ -66,58 +131,75 @@ pub async fn upload_image(
             let hash = crate::image_processor::ImageProcessor::calculate_hash(&compressed);
             let compressed_size = compressed.len() as i64;
 
-            // 检查去重
-            let existing_row = sqlx::query(
-                "SELECT id, filename FROM images WHERE hash = $1 AND user_id = $2 AND deleted_at IS NULL"
-            )
-            .bind(&hash)
-            .bind(auth_user.id)
-            .fetch_optional(&state.pool)
-            .await?;
+            // 使用 Redis 缓存层检查图片 hash 是否已存在
+            let dedup_strategy = &state.config.image.dedup_strategy;
+            let existing_info = check_image_hash_with_cache(&state, &hash, dedup_strategy, auth_user.id).await?;
 
-            if let Some(row) = existing_row {
-                let existing_id: Uuid = row.get("id");
-                let existing_filename: String = row.get("filename");
-                info!("Duplicate image detected, returning existing: {}", existing_id);
-                return Ok(Json(Image {
-                    id: existing_id,
-                    user_id: auth_user.id,
-                    category_id: None,
-                    filename: existing_filename,
-                    thumbnail: Some(format!("{}.jpg", existing_id)),
-                    original_filename: Some(filename.clone()),
-                    size: compressed_size,
-                    hash,
-                    format: ext,
-                    views: 0,
-                    status: "active".to_string(),
-                    expires_at: None,
-                    deleted_at: None,
-                    created_at: Utc::now(),
-                    total_count: None,
-                }));
+            if let Some(info) = existing_info {
+                // 用户内去重：直接返回现有图片
+                // 全局去重：仅当图片属于当前用户时才返回
+                if dedup_strategy == "user" || info.user_id == auth_user.id {
+                    info!("Duplicate image detected (cache hit), returning existing: {} (strategy: {})", info.id, dedup_strategy);
+                    return Ok(Json(Image {
+                        id: info.id,
+                        user_id: auth_user.id,
+                        category_id: None,
+                        filename: info.filename,
+                        thumbnail: Some(format!("{}.jpg", info.id)),
+                        original_filename: Some(filename.clone()),
+                        size: compressed_size,
+                        hash,
+                        format: ext,
+                        views: 0,
+                        status: "active".to_string(),
+                        expires_at: None,
+                        deleted_at: None,
+                        created_at: Utc::now(),
+                        total_count: None,
+                    }));
+                } else {
+                    info!("Duplicate hash detected but belongs to different user, allowing new upload");
+                }
             }
 
             let image_id = Uuid::new_v4();
             let stored_filename = format!("{}.{}", image_id, ext);
             let thumbnail_filename = format!("{}.jpg", image_id);
 
-            // 异步保存文件
+            // 使用任务队列保存文件，确保文件写入完成后再返回
             let storage_path = format!("{}/{}", state.config.storage.path, stored_filename);
             let thumbnail_path = format!("{}/{}", state.config.storage.thumbnail_path, thumbnail_filename);
 
-            // 异步保存文件（带重试机制）
-            let max_retries = 3;
-            let storage_path_for_save = storage_path.clone();
-            let thumbnail_path_for_save = thumbnail_path.clone();
-            tokio::spawn(async move {
-                if let Err(e) = write_file_with_retry(&storage_path_for_save, &compressed, max_retries).await {
-                    error!("Failed to write image file after {} retries: {}", max_retries, e);
+            // 提交文件保存任务到队列
+            let save_task = crate::file_queue::FileSaveTask {
+                image_id: image_id.to_string(),
+                storage_path: storage_path.clone(),
+                thumbnail_path: thumbnail_path.clone(),
+                image_data: compressed.clone(),
+                thumbnail_data: thumbnail.clone(),
+            };
+
+            // 等待文件保存完成
+            match state.file_save_queue.submit(save_task).await {
+                Ok(()) => {
+                    info!("Files saved successfully for image: {}", image_id);
                 }
-                if let Err(e) = write_file_with_retry(&thumbnail_path_for_save, &thumbnail, max_retries).await {
-                    error!("Failed to write thumbnail file after {} retries: {}", max_retries, e);
+                Err(FileSaveResult::ImageFailed { image_id: id, error }) => {
+                    error!("Failed to save image file [{}]: {}", id, error);
+                    return Err(AppError::IoError(std::io::Error::other(
+                        format!("文件保存失败: {}", error),
+                    )));
                 }
-            });
+                Err(FileSaveResult::ThumbnailFailed { image_id: id, error }) => {
+                    error!("Failed to save thumbnail [{}]: {}", id, error);
+                    // 缩略图失败不影响主要功能，继续返回
+                    warn!("Thumbnail save failed, but continuing with image record");
+                }
+                Err(e) => {
+                    error!("File save queue error: {:?}", e);
+                    return Err(AppError::Internal(anyhow::anyhow!("文件保存队列错误: {:?}", e)));
+                }
+            }
 
             let image = Image {
                 id: image_id,
@@ -216,7 +298,8 @@ pub async fn get_images(
     }
 
     // 使用已验证的 sort_by 和 sort_order，避免 format! 拼接
-    let order_clause = match (sort_by, sort_order) {
+    // order_clause 值已直接嵌入到静态 SQL 语句中
+    let _order_clause = match (sort_by, sort_order) {
         ("created_at", "ASC") => "ORDER BY created_at ASC",
         ("created_at", "DESC") => "ORDER BY created_at DESC",
         ("size", "ASC") => "ORDER BY size ASC",
@@ -230,24 +313,22 @@ pub async fn get_images(
         _ => "ORDER BY created_at DESC", // 默认值
     };
 
-    // 根据参数选择合适的查询，避免使用 format! 拼接参数占位符
+    // 根据参数选择合适的查询，使用完全静态的 SQL 语句
     let (images, total) = match (search, category_id, tag) {
         // 搜索 + 分类 + 标签
         (Some(s), Some(cid), Some(t)) if !s.is_empty() => {
-            let search_pattern = format!("%{}%", s);
-            let rows = sqlx::query_as::<_, Image>(&format!(
+            let rows = sqlx::query_as::<_, Image>(
                 "SELECT *, COUNT(*) OVER() as total_count FROM images
                  WHERE user_id = $1 AND deleted_at IS NULL AND status = 'active'
                  AND category_id = $2 AND $3 IN (SELECT tag FROM image_tags WHERE image_id = images.id)
                  AND (filename ILIKE $4 OR id::text IN (SELECT tag FROM image_tags WHERE tag ILIKE $5 AND image_id = images.id))
-                 {} LIMIT $6 OFFSET $7",
-                order_clause
-            ))
+                 ORDER BY created_at DESC LIMIT $6 OFFSET $7"
+            )
             .bind(auth_user.id)
             .bind(cid)
             .bind(t)
-            .bind(&search_pattern)
-            .bind(&search_pattern)
+            .bind(format!("%{}%", s))
+            .bind(format!("%{}%", s))
             .bind(page_size)
             .bind(offset)
             .fetch_all(&state.pool)
@@ -257,19 +338,17 @@ pub async fn get_images(
         }
         // 搜索 + 分类
         (Some(s), Some(cid), None) if !s.is_empty() => {
-            let search_pattern = format!("%{}%", s);
-            let rows = sqlx::query_as::<_, Image>(&format!(
+            let rows = sqlx::query_as::<_, Image>(
                 "SELECT *, COUNT(*) OVER() as total_count FROM images
                  WHERE user_id = $1 AND deleted_at IS NULL AND status = 'active'
                  AND category_id = $2
                  AND (filename ILIKE $3 OR id::text IN (SELECT tag FROM image_tags WHERE tag ILIKE $4 AND image_id = images.id))
-                 {} LIMIT $5 OFFSET $6",
-                order_clause
-            ))
+                 ORDER BY created_at DESC LIMIT $5 OFFSET $6"
+            )
             .bind(auth_user.id)
             .bind(cid)
-            .bind(&search_pattern)
-            .bind(&search_pattern)
+            .bind(format!("%{}%", s))
+            .bind(format!("%{}%", s))
             .bind(page_size)
             .bind(offset)
             .fetch_all(&state.pool)
@@ -279,19 +358,17 @@ pub async fn get_images(
         }
         // 搜索 + 标签
         (Some(s), None, Some(t)) if !s.is_empty() => {
-            let search_pattern = format!("%{}%", s);
-            let rows = sqlx::query_as::<_, Image>(&format!(
+            let rows = sqlx::query_as::<_, Image>(
                 "SELECT *, COUNT(*) OVER() as total_count FROM images
                  WHERE user_id = $1 AND deleted_at IS NULL AND status = 'active'
                  AND $2 IN (SELECT tag FROM image_tags WHERE image_id = images.id)
                  AND (filename ILIKE $3 OR id::text IN (SELECT tag FROM image_tags WHERE tag ILIKE $4 AND image_id = images.id))
-                 {} LIMIT $5 OFFSET $6",
-                order_clause
-            ))
+                 ORDER BY created_at DESC LIMIT $5 OFFSET $6"
+            )
             .bind(auth_user.id)
             .bind(t)
-            .bind(&search_pattern)
-            .bind(&search_pattern)
+            .bind(format!("%{}%", s))
+            .bind(format!("%{}%", s))
             .bind(page_size)
             .bind(offset)
             .fetch_all(&state.pool)
@@ -301,17 +378,15 @@ pub async fn get_images(
         }
         // 搜索
         (Some(s), None, None) if !s.is_empty() => {
-            let search_pattern = format!("%{}%", s);
-            let rows = sqlx::query_as::<_, Image>(&format!(
+            let rows = sqlx::query_as::<_, Image>(
                 "SELECT *, COUNT(*) OVER() as total_count FROM images
                  WHERE user_id = $1 AND deleted_at IS NULL AND status = 'active'
                  AND (filename ILIKE $2 OR id::text IN (SELECT tag FROM image_tags WHERE tag ILIKE $3 AND image_id = images.id))
-                 {} LIMIT $4 OFFSET $5",
-                order_clause
-            ))
+                 ORDER BY created_at DESC LIMIT $4 OFFSET $5"
+            )
             .bind(auth_user.id)
-            .bind(&search_pattern)
-            .bind(&search_pattern)
+            .bind(format!("%{}%", s))
+            .bind(format!("%{}%", s))
             .bind(page_size)
             .bind(offset)
             .fetch_all(&state.pool)
@@ -321,13 +396,12 @@ pub async fn get_images(
         }
         // 分类 + 标签
         (None, Some(cid), Some(t)) => {
-            let rows = sqlx::query_as::<_, Image>(&format!(
+            let rows = sqlx::query_as::<_, Image>(
                 "SELECT *, COUNT(*) OVER() as total_count FROM images
                  WHERE user_id = $1 AND deleted_at IS NULL AND status = 'active'
                  AND category_id = $2 AND $3 IN (SELECT tag FROM image_tags WHERE image_id = images.id)
-                 {} LIMIT $4 OFFSET $5",
-                order_clause
-            ))
+                 ORDER BY created_at DESC LIMIT $4 OFFSET $5"
+            )
             .bind(auth_user.id)
             .bind(cid)
             .bind(t)
@@ -340,12 +414,11 @@ pub async fn get_images(
         }
         // 分类
         (None, Some(cid), None) => {
-            let rows = sqlx::query_as::<_, Image>(&format!(
+            let rows = sqlx::query_as::<_, Image>(
                 "SELECT *, COUNT(*) OVER() as total_count FROM images
                  WHERE user_id = $1 AND deleted_at IS NULL AND status = 'active' AND category_id = $2
-                 {} LIMIT $3 OFFSET $4",
-                order_clause
-            ))
+                 ORDER BY created_at DESC LIMIT $3 OFFSET $4"
+            )
             .bind(auth_user.id)
             .bind(cid)
             .bind(page_size)
@@ -357,13 +430,12 @@ pub async fn get_images(
         }
         // 标签
         (None, None, Some(t)) => {
-            let rows = sqlx::query_as::<_, Image>(&format!(
+            let rows = sqlx::query_as::<_, Image>(
                 "SELECT *, COUNT(*) OVER() as total_count FROM images
                  WHERE user_id = $1 AND deleted_at IS NULL AND status = 'active'
                  AND $2 IN (SELECT tag FROM image_tags WHERE image_id = images.id)
-                 {} LIMIT $3 OFFSET $4",
-                order_clause
-            ))
+                 ORDER BY created_at DESC LIMIT $3 OFFSET $4"
+            )
             .bind(auth_user.id)
             .bind(t)
             .bind(page_size)
@@ -375,12 +447,11 @@ pub async fn get_images(
         }
         // 无筛选条件
         (None, None, None) => {
-            let rows = sqlx::query_as::<_, Image>(&format!(
+            let rows = sqlx::query_as::<_, Image>(
                 "SELECT *, COUNT(*) OVER() as total_count FROM images
                  WHERE user_id = $1 AND deleted_at IS NULL AND status = 'active'
-                 {} LIMIT $2 OFFSET $3",
-                order_clause
-            ))
+                 ORDER BY created_at DESC LIMIT $2 OFFSET $3"
+            )
             .bind(auth_user.id)
             .bind(page_size)
             .bind(offset)
@@ -391,12 +462,11 @@ pub async fn get_images(
         }
         // 空搜索
         _ => {
-            let rows = sqlx::query_as::<_, Image>(&format!(
+            let rows = sqlx::query_as::<_, Image>(
                 "SELECT *, COUNT(*) OVER() as total_count FROM images
                  WHERE user_id = $1 AND deleted_at IS NULL AND status = 'active'
-                 {} LIMIT $2 OFFSET $3",
-                order_clause
-            ))
+                 ORDER BY created_at DESC LIMIT $2 OFFSET $3"
+            )
             .bind(auth_user.id)
             .bind(page_size)
             .bind(offset)
@@ -413,43 +483,49 @@ pub async fn get_images(
         img.total_count = None;
     }
 
-    // 过滤掉文件不存在的图片（使用并发检查提高性能）
-    let storage_path_base = &state.config.storage.path;
-    let thumbnail_path_base = &state.config.storage.thumbnail_path;
+    // 根据配置决定是否进行文件存在检查
+    let valid_images = if state.config.storage.enable_file_check {
+        let storage_path_base = &state.config.storage.path;
+        let thumbnail_path_base = &state.config.storage.thumbnail_path;
+        let concurrent_threshold = state.config.storage.file_check_concurrent_threshold;
 
-    let valid_images = if images.len() > 50 {
-        // 图片数量较多时，使用并发检查
-        use futures::future::join_all;
-        let existence_checks: Vec<_> = images.iter().map(|img| async {
-            let storage_path = format!("{}/{}", storage_path_base, img.filename);
-            let thumbnail_path = format!("{}/{}.jpg", thumbnail_path_base, img.id);
-            tokio::join!(
-                tokio::fs::try_exists(storage_path),
-                tokio::fs::try_exists(thumbnail_path)
-            )
-        }).collect();
+        if images.len() > concurrent_threshold {
+            // 图片数量较多时，使用并发检查
+            use futures::future::join_all;
+            let existence_checks: Vec<_> = images.iter().map(|img| async {
+                let storage_path = format!("{}/{}", storage_path_base, img.filename);
+                let thumbnail_path = format!("{}/{}.jpg", thumbnail_path_base, img.id);
+                tokio::join!(
+                    tokio::fs::try_exists(storage_path),
+                    tokio::fs::try_exists(thumbnail_path)
+                )
+            }).collect();
 
-        let results = join_all(existence_checks).await;
-        images.into_iter()
-            .zip(results)
-            .filter(|(_img, (storage_exists, thumb_exists))| {
-                *storage_exists.as_ref().unwrap_or(&false) && *thumb_exists.as_ref().unwrap_or(&false)
-            })
-            .map(|(img, _)| img)
-            .collect()
-    } else {
-        // 图片数量较少时，使用串行检查
-        let mut valid_images = Vec::new();
-        for img in images {
-            let storage_path = format!("{}/{}", storage_path_base, img.filename);
-            let thumbnail_path = format!("{}/{}.jpg", thumbnail_path_base, img.id);
-            let storage_exists = tokio::fs::try_exists(&storage_path).await.unwrap_or(false);
-            let thumbnail_exists = tokio::fs::try_exists(&thumbnail_path).await.unwrap_or(false);
-            if storage_exists && thumbnail_exists {
-                valid_images.push(img);
+            let results = join_all(existence_checks).await;
+            images.into_iter()
+                .zip(results)
+                .filter(|(_img, (storage_exists, thumb_exists))| {
+                    *storage_exists.as_ref().unwrap_or(&false) && *thumb_exists.as_ref().unwrap_or(&false)
+                })
+                .map(|(img, _)| img)
+                .collect()
+        } else {
+            // 图片数量较少时，使用串行检查
+            let mut valid_images = Vec::new();
+            for img in images {
+                let storage_path = format!("{}/{}", storage_path_base, img.filename);
+                let thumbnail_path = format!("{}/{}.jpg", thumbnail_path_base, img.id);
+                let storage_exists = tokio::fs::try_exists(&storage_path).await.unwrap_or(false);
+                let thumbnail_exists = tokio::fs::try_exists(&thumbnail_path).await.unwrap_or(false);
+                if storage_exists && thumbnail_exists {
+                    valid_images.push(img);
+                }
             }
+            valid_images
         }
-        valid_images
+    } else {
+        // 文件检查已禁用，直接返回数据库结果
+        images
     };
 
     let has_next = ((page * page_size) as i64) < total;
@@ -632,41 +708,49 @@ pub async fn get_deleted_images(
     .fetch_all(&state.pool)
     .await?;
 
-    // 过滤掉文件不存在的图片
-    let storage_path_base = &state.config.storage.path;
-    let thumbnail_path_base = &state.config.storage.thumbnail_path;
+    // 根据配置决定是否进行文件存在检查
+    let valid_images = if state.config.storage.enable_file_check {
+        let storage_path_base = &state.config.storage.path;
+        let thumbnail_path_base = &state.config.storage.thumbnail_path;
+        let concurrent_threshold = state.config.storage.file_check_concurrent_threshold;
 
-    let valid_images = if images.len() > 50 {
-        use futures::future::join_all;
-        let existence_checks: Vec<_> = images.iter().map(|img| async {
-            let storage_path = format!("{}/{}", storage_path_base, img.filename);
-            let thumbnail_path = format!("{}/{}.jpg", thumbnail_path_base, img.id);
-            tokio::join!(
-                tokio::fs::try_exists(storage_path),
-                tokio::fs::try_exists(thumbnail_path)
-            )
-        }).collect();
+        if images.len() > concurrent_threshold {
+            // 图片数量较多时，使用并发检查
+            use futures::future::join_all;
+            let existence_checks: Vec<_> = images.iter().map(|img| async {
+                let storage_path = format!("{}/{}", storage_path_base, img.filename);
+                let thumbnail_path = format!("{}/{}.jpg", thumbnail_path_base, img.id);
+                tokio::join!(
+                    tokio::fs::try_exists(storage_path),
+                    tokio::fs::try_exists(thumbnail_path)
+                )
+            }).collect();
 
-        let results = join_all(existence_checks).await;
-        images.into_iter()
-            .zip(results)
-            .filter(|(_img, (storage_exists, thumb_exists))| {
-                *storage_exists.as_ref().unwrap_or(&false) && *thumb_exists.as_ref().unwrap_or(&false)
-            })
-            .map(|(img, _)| img)
-            .collect()
-    } else {
-        let mut valid_images = Vec::new();
-        for img in images {
-            let storage_path = format!("{}/{}", storage_path_base, img.filename);
-            let thumbnail_path = format!("{}/{}.jpg", thumbnail_path_base, img.id);
-            let storage_exists = tokio::fs::try_exists(&storage_path).await.unwrap_or(false);
-            let thumbnail_exists = tokio::fs::try_exists(&thumbnail_path).await.unwrap_or(false);
-            if storage_exists && thumbnail_exists {
-                valid_images.push(img);
+            let results = join_all(existence_checks).await;
+            images.into_iter()
+                .zip(results)
+                .filter(|(_img, (storage_exists, thumb_exists))| {
+                    *storage_exists.as_ref().unwrap_or(&false) && *thumb_exists.as_ref().unwrap_or(&false)
+                })
+                .map(|(img, _)| img)
+                .collect()
+        } else {
+            // 图片数量较少时，使用串行检查
+            let mut valid_images = Vec::new();
+            for img in images {
+                let storage_path = format!("{}/{}", storage_path_base, img.filename);
+                let thumbnail_path = format!("{}/{}.jpg", thumbnail_path_base, img.id);
+                let storage_exists = tokio::fs::try_exists(&storage_path).await.unwrap_or(false);
+                let thumbnail_exists = tokio::fs::try_exists(&thumbnail_path).await.unwrap_or(false);
+                if storage_exists && thumbnail_exists {
+                    valid_images.push(img);
+                }
             }
+            valid_images
         }
-        valid_images
+    } else {
+        // 文件检查已禁用，直接返回数据库结果
+        images
     };
 
     Ok(Json(valid_images))

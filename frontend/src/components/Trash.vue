@@ -1,9 +1,7 @@
 <template>
   <div class="trash" :class="{ open }">
     <button @click="toggleTrash" class="trash-btn">
-      <svg class="trash-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-      </svg>
+      <Trash2 :size="20" class="trash-icon" />
       <span>回收站</span>
       <span v-if="deletedImages.length > 0" class="badge">{{ deletedImages.length }}</span>
     </button>
@@ -25,38 +23,26 @@
             </div>
             <div class="item-actions">
               <button @click="restoreImage(img.id)" class="btn-icon btn-restore" title="恢复">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
+                <span>恢复</span>
               </button>
               <button @click="permanentDelete(img.id)" class="btn-icon btn-delete" title="永久删除">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                </svg>
+                <span>删除</span>
               </button>
             </div>
           </div>
         </div>
         <div class="trash-footer">
           <button @click="restoreAll" class="btn btn-restore-all">
-            <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-            </svg>
             恢复全部
           </button>
           <button @click="permanentDeleteAll" class="btn btn-delete-all">
-            <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-            </svg>
             清空回收站
           </button>
         </div>
       </div>
       <div v-else-if="open" class="trash-content empty">
         <div class="empty-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-          </svg>
+          <Trash2 :size="32" />
         </div>
         <p>回收站是空的</p>
       </div>
@@ -66,6 +52,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
+import { Trash2 } from 'lucide-vue-next'
 import { api } from '../store/auth'
 import { formatDate as formatDateString } from '../utils/format'
 import { showConfirm } from '../composables/useDialog'
@@ -188,8 +175,8 @@ watch(() => props.refresh, () => {
 }
 
 .trash-icon {
-  width: 20px;
-  height: 20px;
+  display: flex;
+  align-items: center;
 }
 
 .trash-btn:hover {
@@ -330,8 +317,10 @@ watch(() => props.refresh, () => {
 }
 
 .btn-icon {
-  width: 36px;
+  width: auto;
+  min-width: 44px;
   height: 36px;
+  padding: 0 8px;
   border: none;
   border-radius: var(--radius-md);
   cursor: pointer;
@@ -339,11 +328,12 @@ watch(() => props.refresh, () => {
   align-items: center;
   justify-content: center;
   transition: all var(--transition-normal) var(--ease-out);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
 }
 
-.btn-icon svg {
-  width: 16px;
-  height: 16px;
+.btn-icon span {
+  display: inline;
 }
 
 .btn-restore {

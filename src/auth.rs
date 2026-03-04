@@ -101,10 +101,58 @@ impl AuthService {
         token.len() >= 32 && token.len() <= 64
     }
 
-    /// 修改密码
-    /// 注意：此函数已被弃用，密码修改逻辑已移至 handlers/auth.rs
-    #[deprecated(since = "0.1.0", note = "密码修改逻辑请使用 handlers::auth::change_password")]
-    pub fn change_password(_current: &str, new: &str) -> anyhow::Result<String> {
-        Self::hash_password(new)
+    /// 生成访问令牌（短期，15分钟有效）
+    pub fn generate_access_token(&self, user_id: Uuid, username: &str, role: &str) -> anyhow::Result<String> {
+        let now = Utc::now();
+        let exp = now + Duration::minutes(15);
+
+        let claims = Claims {
+            sub: user_id,
+            username: username.to_string(),
+            role: role.to_string(),
+            exp: exp.timestamp(),
+            iat: now.timestamp(),
+        };
+
+        encode(
+            &Header::default(),
+            &claims,
+            &EncodingKey::from_secret(self.jwt_secret.as_ref()),
+        )
+        .map_err(Into::into)
+    }
+
+    /// 生成刷新令牌（长期，7天有效）
+    pub fn generate_refresh_token(&self, user_id: Uuid) -> anyhow::Result<String> {
+        let now = Utc::now();
+        let exp = now + Duration::hours(self.expiration_hours);
+
+        let claims = Claims {
+            sub: user_id,
+            username: "".to_string(), // 刷新令牌不需要用户名
+            role: "refresh".to_string(),
+            exp: exp.timestamp(),
+            iat: now.timestamp(),
+        };
+
+        encode(
+            &Header::default(),
+            &claims,
+            &EncodingKey::from_secret(self.jwt_secret.as_ref()),
+        )
+        .map_err(Into::into)
+    }
+
+    /// 验证刷新令牌
+    pub fn verify_refresh_token(&self, token: &str) -> anyhow::Result<Uuid> {
+        let claims = self.verify_token(token)?;
+
+        // 验证是否为刷新令牌
+        if claims.role != "refresh" {
+            return Err(anyhow::anyhow!("Not a refresh token"));
+        }
+
+        Ok(claims.sub)
     }
 }
+

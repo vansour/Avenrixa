@@ -21,12 +21,25 @@ pub enum AppError {
     #[error("密码已被使用，请选择新密码")]
     PasswordAlreadyUsed,
 
+    #[error("请求过于频繁，请稍后重试: {0}")]
+    RateLimitExceeded(String),
+
     /// 用户相关错误
     #[error("用户不存在")]
     UserNotFound,
 
     #[error("用户名已存在")]
     UsernameExists,
+
+    /// 邮件相关错误
+    #[error("邮件服务未启用")]
+    MailServiceNotEnabled,
+
+    #[error("重置令牌已过期")]
+    ResetTokenExpired,
+
+    #[error("重置令牌无效")]
+    ResetTokenInvalid,
 
     /// 图片相关错误
     #[error("图片不存在")]
@@ -85,6 +98,9 @@ impl AppError {
             Self::PasswordAlreadyUsed => "PASSWORD_ALREADY_USED",
             Self::UserNotFound => "USER_NOT_FOUND",
             Self::UsernameExists => "USERNAME_EXISTS",
+            Self::MailServiceNotEnabled => "MAIL_SERVICE_NOT_ENABLED",
+            Self::ResetTokenExpired => "RESET_TOKEN_EXPIRED",
+            Self::ResetTokenInvalid => "RESET_TOKEN_INVALID",
             Self::ImageNotFound => "IMAGE_NOT_FOUND",
             Self::InvalidImageFormat => "INVALID_IMAGE_FORMAT",
             Self::ImageProcessingFailed { .. } => "IMAGE_PROCESSING_FAILED",
@@ -93,6 +109,7 @@ impl AppError {
             Self::InvalidUsernameLength => "INVALID_USERNAME_LENGTH",
             Self::InvalidPasswordLength => "INVALID_PASSWORD_LENGTH",
             Self::EmptyCategoryName => "EMPTY_CATEGORY_NAME",
+            Self::RateLimitExceeded(_) => "RATE_LIMIT_EXCEEDED",
             Self::InvalidPagination => "INVALID_PAGINATION",
             Self::DatabaseError(_) => "DATABASE_ERROR",
             Self::CacheError(_) => "CACHE_ERROR",
@@ -111,6 +128,9 @@ impl AppError {
                 | Self::PasswordAlreadyUsed
                 | Self::UserNotFound
                 | Self::UsernameExists
+                | Self::MailServiceNotEnabled
+                | Self::ResetTokenExpired
+                | Self::ResetTokenInvalid
                 | Self::ImageNotFound
                 | Self::InvalidImageFormat
                 | Self::Forbidden
@@ -118,6 +138,7 @@ impl AppError {
                 | Self::InvalidUsernameLength
                 | Self::InvalidPasswordLength
                 | Self::EmptyCategoryName
+                | Self::RateLimitExceeded(_)
                 | Self::InvalidPagination
         )
     }
@@ -138,6 +159,9 @@ impl IntoResponse for AppError {
             AppError::PasswordAlreadyUsed => StatusCode::BAD_REQUEST,
             AppError::UserNotFound => StatusCode::NOT_FOUND,
             AppError::UsernameExists => StatusCode::CONFLICT,
+            AppError::MailServiceNotEnabled => StatusCode::SERVICE_UNAVAILABLE,
+            AppError::ResetTokenExpired => StatusCode::BAD_REQUEST,
+            AppError::ResetTokenInvalid => StatusCode::BAD_REQUEST,
             AppError::ImageNotFound => StatusCode::NOT_FOUND,
             AppError::InvalidImageFormat => StatusCode::BAD_REQUEST,
             AppError::ImageProcessingFailed { .. } => StatusCode::INTERNAL_SERVER_ERROR,
@@ -146,6 +170,7 @@ impl IntoResponse for AppError {
             AppError::InvalidUsernameLength => StatusCode::BAD_REQUEST,
             AppError::InvalidPasswordLength => StatusCode::BAD_REQUEST,
             AppError::EmptyCategoryName => StatusCode::BAD_REQUEST,
+            AppError::RateLimitExceeded(_) => StatusCode::TOO_MANY_REQUESTS,
             AppError::InvalidPagination => StatusCode::BAD_REQUEST,
             AppError::DatabaseError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             AppError::CacheError(_) => StatusCode::INTERNAL_SERVER_ERROR,
@@ -179,6 +204,7 @@ impl IntoResponse for AppError {
                 AppError::Internal(source) => {
                     format!("内部错误: {}", source)
                 }
+                AppError::MailServiceNotEnabled => "邮件服务未启用，请联系管理员配置".to_string(),
                 _ => self.to_string(),
             }
         } else {
@@ -189,6 +215,7 @@ impl IntoResponse for AppError {
                 AppError::CacheError(_) => "服务暂时不可用".to_string(),
                 AppError::IoError(_) => "文件操作失败".to_string(),
                 AppError::Internal(_) => "内部服务器错误".to_string(),
+                AppError::MailServiceNotEnabled => "邮件服务未启用，请联系管理员".to_string(),
                 _ => self.to_string(),
             }
         };

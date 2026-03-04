@@ -1,5 +1,47 @@
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
+use thiserror::Error;
+
+/// 配置验证错误
+#[derive(Debug, Error)]
+pub enum ConfigError {
+    #[error("数据库 URL 不能为空")]
+    DatabaseUrlEmpty,
+    #[error("Redis URL 不能为空")]
+    RedisUrlEmpty,
+    #[error("存储路径不能为空")]
+    StoragePathEmpty,
+    #[error("缩略图路径不能为空")]
+    ThumbnailPathEmpty,
+    #[error("允许的扩展名列表不能为空")]
+    AllowedExtensionsEmpty,
+    #[error("数据库连接池大小必须大于 0")]
+    InvalidPoolSize,
+    #[error("JWT secret 最小长度: {min}, 实际: {actual}")]
+    JwtSecretTooShort { min: usize, actual: usize },
+    #[error("最大上传大小必须大于 0")]
+    InvalidMaxUploadSize,
+    #[error("无效的去重策略: {0}，必须是 'user' 或 'global'")]
+    InvalidDedupStrategy(String),
+    #[error("无效的文件检查并发阈值: {0}")]
+    InvalidFileCheckThreshold(String),
+    #[error("保留图片天数必须大于 0")]
+    InvalidRetentionDays,
+    #[error("TTL 必须大于 0")]
+    InvalidTtl,
+    #[error("JPEG 质量必须在 1-100 之间")]
+    InvalidJpegQuality,
+    #[error("图片尺寸必须大于 0")]
+    InvalidImageSize,
+}
+
+// 获取默认数据库连接池大小
+// 对于 I/O 密集型应用（图片处理 + 文件 I/O），使用更高的连接数
+fn default_max_connections() -> u32 {
+    // 基础连接：每个物理核心 4 个（用于并发查询）
+    // 额外连接：至少 10 个（用于处理突发请求和后台任务）
+    std::cmp::max(num_cpus::get_physical() * 4, 10) as u32
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -48,6 +90,20 @@ pub struct StorageConfig {
     pub path: String,
     pub thumbnail_path: String,
     pub allowed_extensions: Vec<String>,
+    /// 是否在查询时检查文件存在性（默认 true）
+    #[serde(default = "default_enable_file_check")]
+    pub enable_file_check: bool,
+    /// 检查文件存在时的并发阈值（超过此数量时使用并发检查）
+    #[serde(default = "default_file_check_concurrent_threshold")]
+    pub file_check_concurrent_threshold: usize,
+}
+
+fn default_enable_file_check() -> bool {
+    true
+}
+
+fn default_file_check_concurrent_threshold() -> usize {
+    50
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -75,6 +131,13 @@ pub struct ImageConfig {
     pub max_height: u32,
     pub thumbnail_size: u32,
     pub jpeg_quality: u8,
+    /// 去重策略：'user' 表示仅在同一用户内去重，'global' 表示全局去重
+    #[serde(default = "default_dedup_strategy")]
+    pub dedup_strategy: String,
+}
+
+fn default_dedup_strategy() -> String {
+    "user".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -103,7 +166,7 @@ impl Default for Config {
             },
             database: DatabaseConfig {
                 url: "postgresql://user:pass@postgres:5432/image".to_string(),
-                max_connections: 10,
+                max_connections: default_max_connections(),
             },
             redis: RedisConfig {
                 url: "redis://dragonfly:6379".to_string(),
@@ -121,6 +184,8 @@ impl Default for Config {
                     "webp".to_string(),
                     "svg".to_string(),
                 ],
+                enable_file_check: true,
+                file_check_concurrent_threshold: 50,
             },
             cache: CacheConfig {
                 list_ttl: 300,           // 5分钟
@@ -140,6 +205,7 @@ impl Default for Config {
                 max_height: 1080,
                 thumbnail_size: 300,
                 jpeg_quality: 85,
+                dedup_strategy: "user".to_string(),
             },
             mail: MailConfig {
                 enabled: false,
@@ -156,6 +222,75 @@ impl Default for Config {
 }
 
 impl Config {
+    /// 验证配置是否有效
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        // 验证数据库配置
+        if self.database.url.trim().is_empty() {
+            return Err(ConfigError::DatabaseUrlEmpty);
+        }
+        if self.database.max_connections == 0 {
+            return Err(ConfigError::InvalidPoolSize);
+        }
+
+        // 验证 Redis 配置
+        if self.redis.url.trim().is_empty() {
+            return Err(ConfigError::RedisUrlEmpty);
+        }
+        if self.redis.ttl == 0 {
+            return Err(ConfigError::InvalidTtl);
+        }
+
+        // 验证存储配置
+        if self.storage.path.trim().is_empty() {
+            return Err(ConfigError::StoragePathEmpty);
+        }
+        if self.storage.thumbnail_path.trim().is_empty() {
+            return Err(ConfigError::ThumbnailPathEmpty);
+        }
+        if self.storage.allowed_extensions.is_empty() {
+            return Err(ConfigError::AllowedExtensionsEmpty);
+        }
+
+        // 验证服务器配置
+        if self.server.max_upload_size == 0 {
+            return Err(ConfigError::InvalidMaxUploadSize);
+        }
+
+        // 验证图片配置
+        if self.image.max_width == 0 || self.image.max_height == 0 {
+            return Err(ConfigError::InvalidImageSize);
+        }
+        if self.image.thumbnail_size == 0 {
+            return Err(ConfigError::InvalidImageSize);
+        }
+        if !(1..=100).contains(&self.image.jpeg_quality) {
+            return Err(ConfigError::InvalidJpegQuality);
+        }
+        if self.image.dedup_strategy != "user" && self.image.dedup_strategy != "global" {
+            return Err(ConfigError::InvalidDedupStrategy(self.image.dedup_strategy.clone()));
+        }
+
+        // 验证清理配置
+        if self.cleanup.deleted_images_retention_days <= 0 {
+            return Err(ConfigError::InvalidRetentionDays);
+        }
+        if self.cleanup.expiry_check_interval_seconds == 0 {
+            return Err(ConfigError::InvalidTtl);
+        }
+
+        // 验证缓存配置
+        if self.cache.list_ttl == 0 || self.cache.detail_ttl == 0 || self.cache.categories_ttl == 0 {
+            return Err(ConfigError::InvalidTtl);
+        }
+
+        // 验证限流配置
+        if self.rate_limit.requests_per_minute == 0 || self.rate_limit.burst_size == 0 {
+            return Err(ConfigError::InvalidTtl);
+        }
+
+        Ok(())
+    }
+
     pub fn from_env() -> Self {
         let mut config = Self::default();
 
@@ -171,11 +306,20 @@ impl Config {
         if let Ok(db_url) = std::env::var("DATABASE_URL") {
             config.database.url = db_url;
         }
+        if let Ok(max_connections) = std::env::var("DATABASE_MAX_CONNECTIONS") {
+            config.database.max_connections = max_connections.parse().unwrap_or(default_max_connections());
+        }
         if let Ok(redis_url) = std::env::var("REDIS_URL") {
             config.redis.url = redis_url;
         }
         if let Ok(storage_path) = std::env::var("STORAGE_PATH") {
             config.storage.path = storage_path;
+        }
+        if let Ok(enable_file_check) = std::env::var("STORAGE_ENABLE_FILE_CHECK") {
+            config.storage.enable_file_check = enable_file_check.parse().unwrap_or(true);
+        }
+        if let Ok(file_check_threshold) = std::env::var("STORAGE_FILE_CHECK_THRESHOLD") {
+            config.storage.file_check_concurrent_threshold = file_check_threshold.parse().unwrap_or(50);
         }
 
         // 邮件配置
@@ -216,6 +360,10 @@ impl Config {
         }
         if let Ok(jpeg_quality) = std::env::var("IMAGE_JPEG_QUALITY") {
             config.image.jpeg_quality = jpeg_quality.parse().unwrap_or(85);
+        }
+        if let Ok(dedup_strategy) = std::env::var("IMAGE_DEDUP_STRATEGY")
+            && (dedup_strategy == "user" || dedup_strategy == "global") {
+            config.image.dedup_strategy = dedup_strategy;
         }
 
         config

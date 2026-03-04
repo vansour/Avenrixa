@@ -4,15 +4,11 @@
       <div class="modal">
         <div class="modal-header">
           <div class="header-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
-            </svg>
+            <Tag :size="18" />
           </div>
           <h3>创建分类</h3>
-          <button @click="$emit('close')" class="close-btn">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
+          <button @click="$emit('close')" class="close-btn" title="关闭">
+            <X :size="20" />
           </button>
         </div>
         <div class="modal-body">
@@ -30,15 +26,9 @@
         </div>
         <div class="modal-footer">
           <button @click="submit" class="btn btn-primary">
-            <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-            </svg>
             <span>创建</span>
           </button>
           <button @click="$emit('close')" class="btn btn-secondary">
-            <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-            </svg>
             <span>取消</span>
           </button>
         </div>
@@ -49,6 +39,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
+import { Tag, X } from 'lucide-vue-next'
 import { api } from '../store/auth'
 
 const props = defineProps<{
@@ -163,12 +154,12 @@ watch(() => props.visible, (newVal: boolean) => {
 .close-btn:hover {
   background: var(--hover-bg);
   color: var(--text-primary);
-  transform: rotate(90deg);
+  transform: scale(1.1);
 }
 
-.close-btn svg {
-  width: 18px;
-  height: 18px;
+.close-btn {
+  font-size: 24px;
+  line-height: 1;
 }
 
 .modal-body {

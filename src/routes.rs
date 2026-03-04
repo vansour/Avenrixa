@@ -1,19 +1,44 @@
-use axum::{Router, routing};
+use axum::{Router, routing, extract::{Path, State}, response::Response};
+use axum::http::{StatusCode, header};
 use crate::db::AppState;
+use tokio::fs;
+use tracing::error;
+
+/// 处理缩略图请求（自动添加 .jpg 扩展名）
+async fn serve_thumbnail(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Response, StatusCode> {
+    let thumbnail_path = format!("{}/{}.jpg", state.config.storage.thumbnail_path, id);
+    match fs::read(&thumbnail_path).await {
+        Ok(data) => Ok(Response::builder()
+            .status(StatusCode::OK)
+            .header(header::CONTENT_TYPE, "image/jpeg")
+            .body(axum::body::Body::from(data))
+            .unwrap()),
+        Err(e) => {
+            error!("Failed to read thumbnail: {}", e);
+            Err(StatusCode::NOT_FOUND)
+        }
+    }
+}
 
 pub fn create_routes() -> Router<AppState> {
     // 公共路由（无需认证）
     let public_routes = Router::new()
         .route("/health", routing::get(crate::admin_handlers::health_check))
+        .route("/thumbnails/{id}", routing::get(serve_thumbnail))
         .route("/api/auth/register", routing::post(crate::auth_handlers::register))
         .route("/api/auth/login", routing::post(crate::auth_handlers::login))
         .route("/api/auth/forgot-password", routing::post(crate::auth_handlers::forgot_password))
-        .route("/api/auth/reset-password", routing::post(crate::auth_handlers::reset_password));
+        .route("/api/auth/reset-password", routing::post(crate::auth_handlers::reset_password))
+        .route("/api/auth/refresh", routing::post(crate::auth_handlers::refresh_token));
 
     // 需要认证的 API 路由
     let protected_routes = Router::new()
         .route("/api/upload", routing::post(crate::image_handlers::upload_image))
         .route("/api/images", routing::get(crate::image_handlers::get_images))
+        .route("/api/images/cursor", routing::get(crate::handlers::images_cursor::get_images))
         .route("/api/images", routing::delete(crate::image_handlers::delete_images))
         .route("/api/images/{id}", routing::get(crate::image_handlers::get_image))
         .route("/api/images/{id}/edit", routing::post(crate::image_handlers::edit_image))
