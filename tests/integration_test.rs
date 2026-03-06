@@ -24,7 +24,7 @@ fn test_string_operations() {
 
 #[test]
 fn test_json() {
-    use serde_json::{json, from_str, Value};
+    use serde_json::{Value, from_str, json};
 
     let data = json!({"name": "test"});
     let serialized = data.to_string();

@@ -3,6 +3,7 @@ use sqlx::{PgPool, Executor};
 use crate::auth::AuthService;
 use crate::cache::Cache;
 use crate::config::Config;
+use crate::domain::auth::DefaultAuthDomainService;
 use crate::file_queue::FileSaveQueue;
 use crate::image_processor::ImageProcessor;
 use uuid::Uuid;
@@ -16,6 +17,7 @@ pub struct AppState {
     pub redis: ConnectionManager,
     pub config: Config,
     pub auth: AuthService,
+    pub auth_domain_service: Option<Arc<DefaultAuthDomainService>>,
     pub image_processor: ImageProcessor,
     pub file_save_queue: Arc<FileSaveQueue>,
     pub started_at: Instant,

@@ -6,38 +6,33 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "lint": "eslint . --ext .ts,.js,.vue --fix",
-    "lint:check": "eslint . --ext .ts,.js,.vue",
-    "format": "prettier --write \"src/**/*.{vue,ts,js,json,md}\"",
     "test": "vitest",
     "test:ui": "vitest --ui"
   },
   "dependencies": {
-    "dompurify": "^3.0.8",
-    "lucide-vue-next": "^0.576.0",
-    "vue": "^3.4.21",
-    "vue-i18n": "^11.2.8",
-    "vue-router": "^4.3.0"
+    "dompurify": "^3.3.2",
+    "lucide-svelte": "^0.577.0",
+    "svelte-i18n": "^4.0.0"
   },
   "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^6.2.4",
     "@tailwindcss/postcss": "^4.2.1",
+    "@tailwindcss/typography": "^0.5.19",
     "@tailwindcss/vite": "^4.2.1",
-    "@typescript-eslint/eslint-plugin": "^8.56.1",
-    "@typescript-eslint/parser": "^8.56.1",
-    "@vitejs/plugin-vue": "^5.0.4",
-    "@vue/eslint-config-prettier": "^10.2.0",
-    "@vue/eslint-config-typescript": "^14.7.0",
+    "@testing-library/svelte": "^5.3.1",
     "autoprefixer": "^10.4.27",
     "clsx": "^2.1.1",
-    "eslint": "^10.0.0",
-    "eslint-plugin-vue": "^10.8.0",
-    "jsdom": "^25.0.1",
+    "jsdom": "^28.1.0",
     "postcss": "^8.5.8",
     "prettier": "^3.8.1",
+    "prettier-plugin-svelte": "^3.5.1",
+    "svelte": "^5.53.7",
+    "svelte-check": "^4.4.4",
+    "svelte-preprocess": "^6.0.3",
     "tailwind-merge": "^3.5.0",
     "tailwindcss": "^4.2.1",
-    "typescript": "^5.4.2",
-    "vite": "^5.2.6",
-    "vitest": "^2.1.8"
+    "typescript": "^5.9.3",
+    "vite": "^7.3.1",
+    "vitest": "^4.0.18"
   }
 }

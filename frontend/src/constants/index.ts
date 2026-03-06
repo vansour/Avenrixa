@@ -26,24 +26,19 @@ class ConfigManager {
   private listeners: Map<string, Set<ConfigChangeListener>> = new Map()
   private overrides: Map<string, any> = new Map()
 
-  /**
-   * 监听配置变更
-   */
+  /** 监听配置变更 */
   on(key: string, listener: ConfigChangeListener): () => void {
     if (!this.listeners.has(key)) {
       this.listeners.set(key, new Set())
     }
     this.listeners.get(key)!.add(listener)
 
-    // 返回取消监听的函数
     return () => {
       this.listeners.get(key)?.delete(listener)
     }
   }
 
-  /**
-   * 触发配置变更事件
-   */
+  /** 触发配置变更事件 */
   emit(key: string, oldValue: any, newValue: any): void {
     const listeners = this.listeners.get(key)
     if (listeners) {
@@ -57,25 +52,19 @@ class ConfigManager {
     }
   }
 
-  /**
-   * 设置配置覆盖值
-   */
+  /** 设置配置覆盖值 */
   setOverride(key: string, value: any): void {
     const oldValue = this.overrides.get(key)
     this.overrides.set(key, value)
     this.emit(key, oldValue, value)
   }
 
-  /**
-   * 获取配置值（优先使用覆盖值）
-   */
+  /** 获取配置值（优先使用覆盖值） */
   get(key: string, defaultValue: any): any {
     return this.overrides.get(key) ?? defaultValue
   }
 
-  /**
-   * 清除配置覆盖
-   */
+  /** 清除配置覆盖 */
   clearOverride(key: string): void {
     const oldValue = this.overrides.get(key)
     this.overrides.delete(key)
@@ -84,9 +73,7 @@ class ConfigManager {
     }
   }
 
-  /**
-   * 清除所有配置覆盖
-   */
+  /** 清除所有配置覆盖 */
   clearAllOverrides(): void {
     this.overrides.forEach((value, key) => {
       this.emit(key, value, undefined)
@@ -132,31 +119,6 @@ function validateRange(
 }
 
 /**
- * 数组包含验证
- */
-function validateIncludes<T>(
-  value: T,
-  allowed: readonly T[],
-  key: string
-): void {
-  if (!allowed.includes(value)) {
-    throw new ConfigError(
-      `配置 ${key} 的值 ${String(value)} 不在允许的值列表中: ${allowed.join(', ')}`,
-      key
-    )
-  }
-}
-
-/**
- * 正则表达式测试
- */
-function testRegex(pattern: RegExp, value: string, key: string): void {
-  if (!pattern.test(value)) {
-    throw new ConfigError(`配置 ${key} 的值 ${value} 不符合要求的格式`, key)
-  }
-}
-
-/**
  * 验证所有配置
  */
 export function validateConfig(): ConfigError[] {
@@ -183,13 +145,6 @@ export function validateConfig(): ConfigError[] {
     errors.push(e as ConfigError)
   }
 
-  // 验证主题值
-  try {
-    validateIncludes(THEME.DEFAULT, THEME.VALUES as readonly string[], 'THEME.DEFAULT')
-  } catch (e) {
-    errors.push(e as ConfigError)
-  }
-
   return errors
 }
 
@@ -197,30 +152,22 @@ export function validateConfig(): ConfigError[] {
  * 导出配置工具
  */
 export const configUtils = {
-  /**
-   * 获取配置值（支持覆盖）
-   */
+  /** 获取配置值（支持覆盖） */
   get<T>(key: string, defaultValue: T): T {
     return configManager.get(key, defaultValue)
   },
 
-  /**
-   * 设置配置覆盖
-   */
+  /** 设置配置覆盖 */
   set(key: string, value: any): void {
     configManager.setOverride(key, value)
   },
 
-  /**
-   * 监听配置变更
-   */
+  /** 监听配置变更 */
   on(key: string, listener: ConfigChangeListener): () => void {
     return configManager.on(key, listener)
   },
 
-  /**
-   * 清除配置覆盖
-   */
+  /** 清除配置覆盖 */
   reset(key?: string): void {
     if (key) {
       configManager.clearOverride(key)
@@ -229,9 +176,7 @@ export const configUtils = {
     }
   },
 
-  /**
-   * 导出所有配置
-   */
+  /** 导出所有配置 */
   export(): Record<string, any> {
     return {
       FILE_SIZE,
@@ -261,9 +206,7 @@ export const configUtils = {
   }
 }
 
-/**
- * 文件大小常量
- */
+/** 文件大小常量 */
 export const FILE_SIZE = {
   B: 1,
   KB: 1024,
@@ -274,9 +217,7 @@ export const FILE_SIZE = {
   MAX_UPLOAD_BYTES: getEnvOverride('MAX_UPLOAD_MB', 10) * 1024 * 1024,
 } as const
 
-/**
- * 文件大小显示精度
- */
+/** 文件大小显示精度 */
 export const FILE_SIZE_PRECISION = {
   B: 0,
   KB: 1,
@@ -285,18 +226,14 @@ export const FILE_SIZE_PRECISION = {
   TB: 2,
 } as const
 
-/**
- * 分页配置
- */
+/** 分页配置 */
 export const PAGINATION = {
   DEFAULT_PAGE_SIZE: getEnvOverride('DEFAULT_PAGE_SIZE', 20),
   MAX_PAGE_SIZE: getEnvOverride('MAX_PAGE_SIZE', 100),
   ADMIN_PAGE_SIZE: getEnvOverride('ADMIN_PAGE_SIZE', 50),
 } as const
 
-/**
- * 图片配置
- */
+/** 图片配置 */
 export const IMAGE = {
   // 缩略图尺寸
   THUMBNAIL_WIDTH: getEnvOverride('THUMBNAIL_WIDTH', 300),
@@ -324,9 +261,7 @@ export const IMAGE = {
   DEFAULT_ASPECT_RATIO: getEnvOverride('DEFAULT_ASPECT_RATIO', '4/3'),
 } as const
 
-/**
- * 上传配置
- */
+/** 上传配置 */
 export const UPLOAD = {
   MAX_FILES_PER_REQUEST: getEnvOverride('MAX_FILES_PER_REQUEST', 10),
   RETRY_COUNT: getEnvOverride('UPLOAD_RETRY_COUNT', 3),
@@ -335,9 +270,7 @@ export const UPLOAD = {
   PROGRESS_UPDATE_INTERVAL: getEnvOverride('PROGRESS_UPDATE_INTERVAL', 100),
 } as const
 
-/**
- * 筛选配置
- */
+/** 筛选配置 */
 export const FILTER = {
   // 亮度、对比度、饱和度范围
   MIN_BRIGHTNESS: 0,
@@ -369,9 +302,7 @@ export const FILTER = {
   ] as const,
 } as const
 
-/**
- * 标签配置
- */
+/** 标签配置 */
 export const TAGS = {
   MAX_TAGS_PER_IMAGE: getEnvOverride('MAX_TAGS_PER_IMAGE', 10),
   MAX_TAG_LENGTH: getEnvOverride('MAX_TAG_LENGTH', 20),
@@ -379,9 +310,7 @@ export const TAGS = {
   SEPARATOR: ',',
 } as const
 
-/**
- * 验证规则
- */
+/** 验证规则 */
 export const VALIDATION = {
   // 用户名
   USERNAME_MIN_LENGTH: getEnvOverride('USERNAME_MIN_LENGTH', 3),
@@ -391,29 +320,11 @@ export const VALIDATION = {
   PASSWORD_MIN_LENGTH: getEnvOverride('PASSWORD_MIN_LENGTH', 6),
   PASSWORD_MAX_LENGTH: getEnvOverride('PASSWORD_MAX_LENGTH', 128),
 
-  // 分类名称
-  CATEGORY_MIN_LENGTH: getEnvOverride('CATEGORY_MIN_LENGTH', 1),
-  CATEGORY_MAX_LENGTH: getEnvOverride('CATEGORY_MAX_LENGTH', 50),
-
   // 重命名
   FILENAME_MAX_LENGTH: getEnvOverride('FILENAME_MAX_LENGTH', 255),
 } as const
 
-/**
- * 主题配置
- */
-export const THEME = {
-  STORAGE_KEY: 'theme',
-  DEFAULT: getEnvOverride('THEME_DEFAULT', 'light'),
-  VALUES: ['light', 'dark'] as const,
-
-  // 自动检测系统主题
-  AUTO_DETECT: getEnvOverride('THEME_AUTO_DETECT', true),
-} as const
-
-/**
- * API 配置
- */
+/** API 配置 */
 export const API = {
   BASE_URL: getEnvOverride('API_BASE_URL', '/api'),
   TIMEOUT: getEnvOverride('API_TIMEOUT', 30000),
@@ -421,9 +332,7 @@ export const API = {
   RETRY_DELAY: getEnvOverride('API_RETRY_DELAY', 1000),
 } as const
 
-/**
- * Toast 配置
- */
+/** Toast 配置 */
 export const TOAST = {
   DEFAULT_DURATION: getEnvOverride('TOAST_DEFAULT_DURATION', 3000),
   SUCCESS_DURATION: getEnvOverride('TOAST_SUCCESS_DURATION', 3000),
@@ -439,9 +348,7 @@ export const TOAST = {
   } as const,
 } as const
 
-/**
- * 动画配置
- */
+/** 动画配置 */
 export const ANIMATION = {
   FAST: 150,
   NORMAL: 300,
@@ -452,107 +359,68 @@ export const ANIMATION = {
   TRANSITION_SLOW: '0.5s',
 } as const
 
-/**
- * 防抖/节流延迟
- */
+/** 防抖/节流延迟 */
 export const DEBOUNCE = {
   DEFAULT: getEnvOverride('DEBOUNCE_DEFAULT', 300),
-  SEARCH: getEnvOverride('DEBOUNCE_SEARCH', 500),
-  SCROLL: 16, // 60fps
+  SEARCH: getEnvOverride('DEBOUNCE_SEARCH', 300),
+  SCROLL: 16,
   RESIZE: getEnvOverride('DEBOUNCE_RESIZE', 100),
   INPUT: getEnvOverride('DEBOUNCE_INPUT', 300),
 } as const
 
-/**
- * 虚拟滚动配置
- */
+/** 虚拟滚动配置 */
 export const VIRTUAL_SCROLL = {
   DEFAULT_BUFFER: getEnvOverride('VIRTUAL_SCROLL_DEFAULT_BUFFER', 5),
   LOW_END_BUFFER: getEnvOverride('VIRTUAL_SCROLL_LOW_END_BUFFER', 3),
   ITEM_HEIGHT: getEnvOverride('VIRTUAL_SCROLL_ITEM_HEIGHT', 280),
 } as const
 
-/**
- * 键盘快捷键
- */
+/** 键盘快捷键 */
 export const KEYBOARD = {
-  // 全选
   SELECT_ALL: { ctrl: true, meta: true, key: 'a' },
-
-  // 复制
   COPY: { ctrl: true, meta: true, key: 'c' },
-
-  // 粘贴
   PASTE: { ctrl: true, meta: true, key: 'v' },
-
-  // 取消
   ESCAPE: 'Escape',
-
-  // 删除
   DELETE: 'Delete',
-
-  // 回车
   ENTER: 'Enter',
-
-  // 空格
   SPACE: ' ',
-
-  // 方向键
   ARROW_UP: 'ArrowUp',
   ARROW_DOWN: 'ArrowDown',
   ARROW_LEFT: 'ArrowLeft',
   ARROW_RIGHT: 'ArrowRight',
 } as const
 
-/**
- * 存储键
- */
+/** 存储键 */
 export const STORAGE_KEYS = {
   AUTH: getEnvOverride('STORAGE_AUTH', 'vansour_auth'),
-  THEME: getEnvOverride('STORAGE_THEME', 'theme'),
   VIRTUAL_SCROLL: getEnvOverride('STORAGE_VIRTUAL_SCROLL', 'virtualScroll'),
   LAST_VISIT: getEnvOverride('STORAGE_LAST_VISIT', 'lastVisit'),
   USER_PREFERENCES: getEnvOverride('STORAGE_USER_PREFERENCES', 'userPreferences'),
 } as const
 
-/**
- * 性能配置
- */
+/** 性能配置 */
 export const PERFORMANCE = {
-  // 设备检测
   LOW_END_CORES: 2,
-
-  // 缓存 TTL
-  CACHE_TTL: getEnvOverride('PERFORMANCE_CACHE_TTL', 5 * 60 * 1000), // 5分钟
-  LOW_END_CACHE_TTL: getEnvOverride('PERFORMANCE_LOW_END_CACHE_TTL', 10 * 60 * 1000), // 10分钟
-
-  // 批处理大小
+  CACHE_TTL: getEnvOverride('PERFORMANCE_CACHE_TTL', 5 * 60 * 1000),
+  LOW_END_CACHE_TTL: getEnvOverride('PERFORMANCE_LOW_END_CACHE_TTL', 10 * 60 * 1000),
   BATCH_SIZE: getEnvOverride('PERFORMANCE_BATCH_SIZE', 10),
   LOW_END_BATCH_SIZE: getEnvOverride('PERFORMANCE_LOW_END_BATCH_SIZE', 5),
-
-  // 懒加载阈值
   LAZY_THRESHOLD: getEnvOverride('PERFORMANCE_LAZY_THRESHOLD', 50),
   LOW_END_LAZY_THRESHOLD: getEnvOverride('PERFORMANCE_LOW_END_LAZY_THRESHOLD', 200),
 } as const
 
-/**
- * 可访问性
- */
+/** 可访问性 */
 export const A11Y = {
-  // ARIA 标签
   IMAGE_LIST_REGION: '图片列表',
   IMAGE_ITEM_LABEL_PREFIX: '图片',
   BULK_ACTIONS_GROUP: '批量操作',
   IMAGE_COUNT_LABEL: '图片数量',
 
-  // 焦点管理
   FOCUS_SELECTOR: '[tabindex="0"]',
   SKIP_LINK_SELECTOR: '.skip-link',
 } as const
 
-/**
- * 正则表达式
- */
+/** 正则表达式 */
 export const REGEX = {
   EMAIL: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
   USERNAME: /^[a-zA-Z0-9_]{3,50}$/,
@@ -562,9 +430,7 @@ export const REGEX = {
   IMAGE_EXTENSION: /\.(jpe?g|png|gif|webp|bmp|svg)$/i,
 } as const
 
-/**
- * 颜色主题
- */
+/** 颜色主题 */
 export const COLORS = {
   PRIMARY: getEnvOverride('COLOR_PRIMARY', '#007bff'),
   PRIMARY_HOVER: getEnvOverride('COLOR_PRIMARY_HOVER', '#0056b3'),
@@ -580,17 +446,13 @@ export const COLORS = {
   SECONDARY_HOVER: getEnvOverride('COLOR_SECONDARY_HOVER', '#5a6268'),
 } as const
 
-/**
- * 网络状态检查间隔
- */
+/** 网络状态检查间隔 */
 export const NETWORK_CHECK = {
-  INTERVAL: getEnvOverride('NETWORK_CHECK_INTERVAL', 30000), // 30秒
+  INTERVAL: getEnvOverride('NETWORK_CHECK_INTERVAL', 30000),
   RETRY_DELAY: getEnvOverride('NETWORK_CHECK_RETRY_DELAY', 5000),
 } as const
 
-/**
- * 编辑器默认值
- */
+/** 编辑器默认值 */
 export const EDITOR_DEFAULTS = {
   rotate: null as number | null,
   brightness: 128,
@@ -604,13 +466,15 @@ export const EDITOR_DEFAULTS = {
   convertFormat: '',
 } as const
 
-/**
- * 表单默认值
- */
+/** 表单默认值 */
 export const FORM_DEFAULTS = {
   USERNAME_MIN: getEnvOverride('USERNAME_MIN', 3),
   USERNAME_MAX: getEnvOverride('USERNAME_MAX', 50),
   PASSWORD_MIN: getEnvOverride('PASSWORD_MIN', 6),
   PASSWORD_MAX: getEnvOverride('PASSWORD_MAX', 128),
-  CATEGORY_NAME_MAX: getEnvOverride('CATEGORY_NAME_MAX', 50),
+} as const
+
+export const THEME = {
+  PRIMARY: '#667eea',
+  SECONDARY: '#764ba2',
 } as const

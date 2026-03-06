@@ -5,13 +5,13 @@
 use crate::db::AppState;
 use crate::error::AppError;
 use crate::middleware::AuthUser;
-use crate::models::{Image, CursorPaginated};
-use axum::extract::{Query, State};
+use crate::models::{CursorPaginated, Image};
 use axum::Json;
+use axum::extract::{Query, State};
 use chrono::Utc;
+use sqlx::PgPool;
 use tracing::info;
 use uuid::Uuid;
-use sqlx::PgPool;
 
 /// Cursor-based 图片分页
 pub async fn get_images(
@@ -33,8 +33,6 @@ pub async fn get_images(
     };
 
     let search = params.search.as_deref();
-    let category_id = params.category_id;
-    let tag = params.tag.as_deref();
 
     // 解码 cursor
     let (cursor_created_at, cursor_id) = match &params.cursor {
@@ -46,93 +44,51 @@ pub async fn get_images(
     };
 
     // 根据查询条件选择合适的预编译 SQL
-    let images = match (search, category_id, tag, cursor_created_at) {
+    let images = match (search, cursor_created_at) {
         // 有搜索 + 有 cursor
-        (Some(_), _, _, Some(_)) => {
+        (Some(s), Some(c)) if !s.is_empty() => {
             execute_search_cursor_query(
                 &state.pool,
                 auth_user.id,
-                format!("%{}%", search.unwrap()),
-                cursor_created_at.unwrap(),
+                format!("%{}%", s),
+                c,
                 cursor_id.as_deref().unwrap_or_default().to_string(),
                 page_size,
-            ).await?
+            )
+            .await?
         }
-
         // 有搜索 + 无 cursor
-        (Some(_), _, _, None) => {
+        (Some(s), None) if !s.is_empty() => {
             execute_search_query(
                 &state.pool,
                 auth_user.id,
-                format!("%{}%", search.unwrap()),
+                format!("%{}%", s),
                 page_size,
-            ).await?
+            )
+            .await?
         }
-
-        // 无搜索 + 有分类 + 有 cursor
-        (None, Some(_), _, Some(_)) => {
-            execute_category_cursor_query(
-                &state.pool,
-                auth_user.id,
-                category_id.unwrap(),
-                cursor_created_at.unwrap(),
-                cursor_id.as_deref().unwrap_or_default().to_string(),
-                page_size,
-            ).await?
-        }
-
-        // 无搜索 + 有分类 + 无 cursor
-        (None, Some(_), _, None) => {
-            execute_category_query(
-                &state.pool,
-                auth_user.id,
-                category_id.unwrap(),
-                page_size,
-            ).await?
-        }
-
-        // 无搜索 + 有标签 + 有 cursor
-        (None, None, Some(_), Some(_)) => {
-            execute_tag_cursor_query(
-                &state.pool,
-                auth_user.id,
-                tag.unwrap().to_string(),
-                cursor_created_at.unwrap(),
-                cursor_id.as_deref().unwrap_or_default().to_string(),
-                page_size,
-            ).await?
-        }
-
-        // 无搜索 + 有标签 + 无 cursor
-        (None, None, Some(_), None) => {
-            execute_tag_query(
-                &state.pool,
-                auth_user.id,
-                tag.unwrap().to_string(),
-                page_size,
-            ).await?
-        }
-
-        // 有 cursor（任何排序字段）
-        (None, None, None, Some(_)) => {
+        // 有 cursor
+        (None, Some(c)) => {
+            let query = get_cursor_query(&sort_by, &sort_order);
             execute_cursor_query(
                 &state.pool,
-                get_cursor_query(&sort_by, &sort_order),
+                query,
                 auth_user.id,
-                cursor_created_at.unwrap(),
+                c,
                 cursor_id.as_deref().unwrap_or_default().to_string(),
                 page_size,
-            ).await?
+            )
+            .await?
         }
-
-        // 无 cursor（默认情况）
-        (None, None, None, None) => {
+        // 默认情况
+        _ => {
             execute_default_query(
                 &state.pool,
                 get_default_query(&sort_by, &sort_order),
                 auth_user.id,
                 page_size,
-            ).await?
+            )
+            .await?
         }
     };
 
@@ -173,32 +129,7 @@ const QUERY_SEARCH: &str = r#"
     WHERE user_id = $1
       AND deleted_at IS NULL
       AND status = 'active'
-      AND (
-          filename ILIKE $2
-          OR id IN (SELECT image_id FROM image_tags WHERE tag ILIKE $2)
-      )
-    ORDER BY created_at DESC
-    LIMIT $3
-"#;
-
-// 带分类的查询（无 cursor）
-const QUERY_CATEGORY: &str = r#"
-    SELECT * FROM images
-    WHERE user_id = $1
-      AND deleted_at IS NULL
-      AND status = 'active'
-      AND category_id = $2
-    ORDER BY created_at DESC
-    LIMIT $3
-"#;
-
-// 带标签的查询（无 cursor）
-const QUERY_TAG: &str = r#"
-    SELECT * FROM images
-    WHERE user_id = $1
-      AND deleted_at IS NULL
-      AND status = 'active'
-      AND EXISTS (SELECT 1 FROM image_tags WHERE image_id = images.id AND tag = $2)
+      AND filename ILIKE $2
     ORDER BY created_at DESC
     LIMIT $3
 "#;
@@ -225,40 +156,7 @@ const QUERY_SEARCH_CURSOR: &str = r#"
     WHERE user_id = $1
       AND deleted_at IS NULL
       AND status = 'active'
-      AND (
-          filename ILIKE $2
-          OR id IN (SELECT image_id FROM image_tags WHERE tag ILIKE $2)
-      )
-      AND (
-          created_at < $3
-          OR (created_at = $3 AND id < $4)
-      )
-    ORDER BY created_at DESC
-    LIMIT $5
-"#;
-
-// 带分类 + cursor 的查询
-const QUERY_CATEGORY_CURSOR: &str = r#"
-    SELECT * FROM images
-    WHERE user_id = $1
-      AND deleted_at IS NULL
-      AND status = 'active'
-      AND category_id = $2
-      AND (
-          created_at < $3
-          OR (created_at = $3 AND id < $4)
-      )
-    ORDER BY created_at DESC
-    LIMIT $5
-"#;
-
-// 带标签 + cursor 的查询
-const QUERY_TAG_CURSOR: &str = r#"
-    SELECT * FROM images
-    WHERE user_id = $1
-      AND deleted_at IS NULL
-      AND status = 'active'
-      AND EXISTS (SELECT 1 FROM image_tags WHERE image_id = images.id AND tag = $2)
+      AND filename ILIKE $2
       AND (
           created_at < $3
           OR (created_at = $3 AND id < $4)
@@ -399,39 +297,6 @@ async fn execute_search_query(
     sqlx::query_as::<_, Image>(QUERY_SEARCH)
         .bind(user_id)
         .bind(&search_pattern)
-        .bind(&search_pattern)  // ILIKE 用两次
-        .bind(page_size)
-        .fetch_all(pool)
-        .await
-        .map_err(AppError::DatabaseError)
-}
-
-/// 执行带分类的查询
-async fn execute_category_query(
-    pool: &PgPool,
-    user_id: Uuid,
-    category_id: Uuid,
-    page_size: i32,
-) -> Result<Vec<Image>, AppError> {
-    sqlx::query_as::<_, Image>(QUERY_CATEGORY)
-        .bind(user_id)
-        .bind(category_id)
-        .bind(page_size)
-        .fetch_all(pool)
-        .await
-        .map_err(AppError::DatabaseError)
-}
-
-/// 执行带标签的查询
-async fn execute_tag_query(
-    pool: &PgPool,
-    user_id: Uuid,
-    tag: String,
-    page_size: i32,
-) -> Result<Vec<Image>, AppError> {
-    sqlx::query_as::<_, Image>(QUERY_TAG)
-        .bind(user_id)
-        .bind(&tag)
         .bind(page_size)
         .fetch_all(pool)
         .await
@@ -469,47 +334,6 @@ async fn execute_search_cursor_query(
     sqlx::query_as::<_, Image>(QUERY_SEARCH_CURSOR)
         .bind(user_id)
         .bind(&search_pattern)
-        .bind(&search_pattern)
-        .bind(cursor_created_at)
-        .bind(cursor_id)
-        .bind(page_size)
-        .fetch_all(pool)
-        .await
-        .map_err(AppError::DatabaseError)
-}
-
-/// 执行带分类和 cursor 的查询
-async fn execute_category_cursor_query(
-    pool: &PgPool,
-    user_id: Uuid,
-    category_id: Uuid,
-    cursor_created_at: chrono::DateTime<Utc>,
-    cursor_id: String,
-    page_size: i32,
-) -> Result<Vec<Image>, AppError> {
-    sqlx::query_as::<_, Image>(QUERY_CATEGORY_CURSOR)
-        .bind(user_id)
-        .bind(category_id)
-        .bind(cursor_created_at)
-        .bind(cursor_id)
-        .bind(page_size)
-        .fetch_all(pool)
-        .await
-        .map_err(AppError::DatabaseError)
-}
-
-/// 执行带标签和 cursor 的查询
-async fn execute_tag_cursor_query(
-    pool: &PgPool,
-    user_id: Uuid,
-    tag: String,
-    cursor_created_at: chrono::DateTime<Utc>,
-    cursor_id: String,
-    page_size: i32,
-) -> Result<Vec<Image>, AppError> {
-    sqlx::query_as::<_, Image>(QUERY_TAG_CURSOR)
-        .bind(user_id)
-        .bind(&tag)
         .bind(cursor_created_at)
         .bind(cursor_id)
         .bind(page_size)

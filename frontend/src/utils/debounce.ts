@@ -1,88 +1,97 @@
 /**
+ * 防抖和节流工具
+ */
+
+/**
  * 防抖函数
- * @param fn 要执行的函数
- * @param delay 延迟时间（毫秒）
- * @returns 防抖后的函数
  */
 export function debounce<T extends (...args: any[]) => any>(
   fn: T,
-  delay: number = 300
+  delay: number
 ): (...args: Parameters<T>) => void {
   let timeoutId: ReturnType<typeof setTimeout> | null = null
 
-  return function(this: any, ...args: Parameters<T>) {
+  return function (this: any, ...args: Parameters<T>) {
     if (timeoutId) {
       clearTimeout(timeoutId)
     }
 
     timeoutId = setTimeout(() => {
       fn.apply(this, args)
-      timeoutId = null
     }, delay)
   }
 }
 
 /**
- * 节流函数
- * @param fn 要执行的函数
- * @param limit 时间间隔（毫秒）
- * @returns 节流后的函数
- */
-export function throttle<T extends (...args: any[]) => any>(
-  fn: T,
-  limit: number = 300
-): (...args: Parameters<T>) => void {
-  let inThrottle = false
-  let lastResult: ReturnType<T>
-
-  return function(this: any, ...args: Parameters<T>) {
-    if (!inThrottle) {
-      lastResult = fn.apply(this, args)
-      inThrottle = true
-
-      setTimeout(() => {
-        inThrottle = false
-      }, limit)
-    }
-
-    return lastResult
-  }
-}
-
-/**
- * 创建一个可取消的防抖函数
+ * 可取消的防抖
  */
 export function debounceCancelable<T extends (...args: any[]) => any>(
   fn: T,
-  delay: number = 300
-) {
+  delay: number
+): {
+  debounced: (...args: Parameters<T>) => void
+  cancel: () => void
+} {
   let timeoutId: ReturnType<typeof setTimeout> | null = null
-  let isCancelled = false
 
-  const debouncedFn = function(this: any, ...args: Parameters<T>) {
+  const debounced = function (this: any, ...args: Parameters<T>) {
     if (timeoutId) {
       clearTimeout(timeoutId)
     }
 
     timeoutId = setTimeout(() => {
-      if (!isCancelled) {
-        fn.apply(this, args)
-      }
-      timeoutId = null
-      isCancelled = false
+      fn.apply(this, args)
     }, delay)
   }
 
   const cancel = () => {
-    isCancelled = true
     if (timeoutId) {
       clearTimeout(timeoutId)
       timeoutId = null
     }
   }
 
-  return {
-    fn: debouncedFn,
-    cancel
+  return { debounced, cancel }
+}
+
+/**
+ * 节流函数
+ */
+export function throttle<T extends (...args: any[]) => any>(
+  fn: T,
+  limit: number
+): (...args: Parameters<T>) => void {
+  let inThrottle = false
+  let lastResult: ReturnType<T>
+
+  return function (this: any, ...args: Parameters<T>) {
+    if (!inThrottle) {
+      inThrottle = true
+      lastResult = fn.apply(this, args)
+      setTimeout(() => (inThrottle = false), limit)
+    }
+    return lastResult
+  }
+}
+
+/**
+ * 延迟执行
+ */
+export function delay(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+/**
+ * 批量执行（延迟）
+ */
+export function batch<T>(
+  items: T[],
+  fn: (batch: T[]) => void,
+  batchSize: number,
+  delayMs: number = 0
+): void {
+  for (let i = 0; i < items.length; i += batchSize) {
+    const batch = items.slice(i, i + batchSize)
+    setTimeout(() => fn(batch), i * delayMs)
   }
 }

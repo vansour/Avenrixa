@@ -10,12 +10,13 @@ pub async fn cleanup_expired_images(
     pool: &PgPool,
     retention_days: i64,
     storage_path: &str,
-    thumbnail_path: &str,
 ) -> Result<u64> {
     let days_ago = chrono::Utc::now() - chrono::Duration::days(retention_days);
+    let images_dir = format!("{}/images", storage_path);
+    let thumbnail_dir = format!("{}/thumbnails", storage_path);
 
     let images: Vec<(uuid::Uuid, String)> = sqlx::query_as::<_, (uuid::Uuid, String)>(
-        "SELECT id, filename FROM images WHERE deleted_at < $1"
+        "SELECT id, filename FROM images WHERE deleted_at < $1",
     )
     .bind(days_ago)
     .fetch_all(pool)
@@ -25,8 +26,8 @@ pub async fn cleanup_expired_images(
 
     let mut removed_count = 0;
     for (id, filename) in &images {
-        let file_storage_path = format!("{}/{}", storage_path, filename);
-        let file_thumbnail_path = format!("{}/{}.jpg", thumbnail_path, id);
+        let file_storage_path = format!("{}/{}", images_dir, filename);
+        let file_thumbnail_path = format!("{}/{}.jpg", thumbnail_dir, id);
 
         let file_removed = tokio::fs::remove_file(&file_storage_path).await.is_ok();
         let thumb_removed = tokio::fs::remove_file(&file_thumbnail_path).await.is_ok();
@@ -49,7 +50,7 @@ pub async fn move_expired_to_trash(pool: &PgPool) -> Result<u64> {
     let now = chrono::Utc::now();
 
     let result = sqlx::query(
-        "UPDATE images SET deleted_at = $1 WHERE expires_at < $1 AND deleted_at IS NULL"
+        "UPDATE images SET deleted_at = $1 WHERE expires_at < $1 AND deleted_at IS NULL",
     )
     .bind(now)
     .execute(pool)

@@ -80,6 +80,7 @@ impl axum::response::IntoResponse for UserResponse {
 }
 
 #[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
+#[allow(dead_code)]
 pub struct Category {
     pub id: Uuid,
     pub user_id: Uuid,
@@ -88,6 +89,7 @@ pub struct Category {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub struct CreateCategoryRequest {
     pub name: String,
 }

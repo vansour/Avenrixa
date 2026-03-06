@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use crate::config::Config;
 use anyhow::Result;
 use lettre::transport::smtp::authentication::Credentials;

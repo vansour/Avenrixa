@@ -1,12 +1,12 @@
 import { defineConfig } from 'vite'
-import vue from '@vitejs/plugin-vue'
+import { svelte } from '@sveltejs/vite-plugin-svelte'
 import { fileURLToPath } from 'node:url'
+import path from 'node:path'
 
 export default defineConfig({
-  plugins: [vue()],
-  css: {
-    postcss: './postcss.config.js',
-  },
+  plugins: [
+    svelte(),
+  ],
   base: '/',
   server: {
     proxy: {

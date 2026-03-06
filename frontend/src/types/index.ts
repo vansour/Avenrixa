@@ -1,11 +1,6 @@
-/**
- * 统一的类型定义
- * 消除各文件中的重复定义
- */
+import type { Writable } from 'svelte/store'
 
-/**
- * 用户信息
- */
+// ==================== 用户相关 ====================
 export interface User {
   id: string
   username: string
@@ -13,63 +8,52 @@ export interface User {
   created_at: string
 }
 
-/**
- * 认证响应
- */
 export interface AuthResponse {
-  token: string
+  access_token: string
+  refresh_token: string
+  expires_in: number
   user: User
 }
 
-/**
- * 分类
- */
-export interface Category {
-  id: string
-  user_id: string
-  name: string
-  created_at: string
+export interface LoginRequest {
+  username: string
+  password: string
 }
 
-/**
- * 图片
- */
+export interface RegisterRequest {
+  username: string
+  password: string
+}
+
+// ==================== 图片相关 ====================
 export interface Image {
   id: string
   user_id: string
-  category_id: string | null
   filename: string
-  thumbnail: string | null
-  original_filename?: string | null // 原始文件名
+  thumbnail?: string
+  original_filename?: string
   size: number
   hash: string
+  format: string
   views: number
   status: string
-  expires_at: string | null
+  expires_at?: string
+  deleted_at?: string
   created_at: string
-  deleted_at?: string | null
-  tags?: string[] // 标签
+  total_count?: number
 }
 
-/**
- * 分页参数
- */
 export interface PaginationParams {
   page?: number
   page_size?: number
   sort_by?: string
   sort_order?: 'ASC' | 'DESC'
   search?: string
-  category_id?: string
   tag?: string
-  /// Cursor-based 分页参数
-  cursor?: [string, string] // [created_at, id]
+  cursor?: [string, string]
 }
 
-/**
- * 分页响应
- */
-export interface Pagination<T = any> {
+export interface Pagination<T> {
   data: T[]
   page: number
   page_size: number
@@ -77,57 +61,140 @@ export interface Pagination<T = any> {
   has_next: boolean
 }
 
-/**
- * Cursor-based 分页响应
- */
-export interface CursorPaginated<T = any> {
+export interface CursorPaginated<T> {
   data: T[]
-  next_cursor: [string, string] | null
+  next_cursor?: [string, string]
 }
 
-/**
- * 认证状态
- */
-export interface AuthState {
-  token: string | null
-  user: User | null
-}
-
-/**
- * 审计日志详情
- */
-export type AuditLogDetail = {
-  [key: string]: string | number | boolean | null | AuditLogDetail | AuditLogDetail[]
-}
-
-/**
- * 审计日志
- */
-export interface AuditLog {
-  id: string
-  user_id: string | null
-  action: string
-  target_type: string
-  target_id: string | null
-  details: AuditLogDetail
-  ip_address: string | null
-  created_at: string
-}
-
-/**
- * 审计日志响应
- */
-export interface AuditLogResponse {
-  data: AuditLog[]
+// ==================== 分页和排序 ====================
+export interface Paginated<T> {
+  data: T[]
   page: number
   page_size: number
   total: number
-  has_next?: boolean
+  has_next: boolean
 }
 
-/**
- * 系统统计
- */
+// ==================== 编辑相关 ====================
+export interface CropParams {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+export interface FilterParams {
+  brightness?: number
+  contrast?: number
+  saturation?: number
+  grayscale?: boolean
+  sepia?: boolean
+}
+
+export interface WatermarkParams {
+  text?: string
+  position?: string
+  opacity?: number
+}
+
+export interface EditImageRequest {
+  crop?: CropParams
+  rotate?: number
+  filters?: FilterParams
+  convert_format?: string
+  watermark?: WatermarkParams
+}
+
+export interface EditImageResponse {
+  id: string
+  edited_url: string
+  thumbnail_url: string
+}
+
+// ==================== 请求相关 ====================
+export interface RenameRequest {
+  filename: string
+}
+
+export interface SetExpiryRequest {
+  expires_at?: string
+}
+
+export interface DeleteRequest {
+  image_ids: string[]
+  permanent: boolean
+}
+
+export interface RestoreRequest {
+  image_ids: string[]
+}
+
+export interface DuplicateRequest {
+  image_id: string
+}
+
+// ==================== 响应相关 ====================
+export interface ApiResponse<T> {
+  success: boolean
+  data: T
+  message?: string
+}
+
+export interface ErrorResponse {
+  error: string
+  code: string
+  details?: string
+}
+
+// ==================== Toast ====================
+export type ToastType = 'success' | 'error' | 'warning' | 'info'
+export type ToastPriority = 'high' | 'normal' | 'low'
+
+export interface Toast {
+  id: string
+  message: string
+  type: ToastType
+  priority?: ToastPriority
+  duration?: number
+}
+
+// ==================== Dialog ====================
+export interface DialogOptions {
+  title?: string
+  message?: string
+  details?: string
+  confirmText?: string
+  cancelText?: string
+  type?: 'default' | 'danger' | 'warning'
+  loading?: boolean
+}
+
+export interface PromptOptions {
+  title?: string
+  message?: string
+  placeholder?: string
+  defaultValue?: string
+  type?: 'text' | 'password' | 'number'
+  maxLength?: number
+  validator?: (value: string) => string | null
+}
+
+export interface DialogResolve {
+  confirm: boolean
+  value?: string
+}
+
+// ==================== 设置相关 ====================
+export interface Setting {
+  key: string
+  value: string
+}
+
+export interface UpdateSettingRequest {
+  value: string
+}
+
+// ==================== 管理员相关 ====================
 export interface SystemStats {
   total_users: number
   total_images: number
@@ -137,244 +204,101 @@ export interface SystemStats {
   images_last_7d: number
 }
 
-/**
- * 备份信息
- */
-export interface BackupInfo {
+export interface AuditLog {
+  id: string
+  user_id?: string
+  action: string
+  target_type: string
+  target_id?: string
+  details?: any
+  ip_address?: string
+  created_at: string
+}
+
+export interface AuditLogResponse {
+  data: AuditLog[]
+  page: number
+  page_size: number
+  total: number
+}
+
+export interface HealthStatus {
+  status: string
+  timestamp: string
+  database: ComponentStatus
+  redis: ComponentStatus
+  storage: ComponentStatus
+  version?: string
+  uptime_seconds?: number
+  metrics?: HealthMetrics
+}
+
+export interface HealthMetrics {
+  images_count: number
+  users_count: number
+  storage_used_mb?: number
+}
+
+export interface ComponentStatus {
+  status: string
+  message?: string
+}
+
+export interface BackupResponse {
   filename: string
   created_at: string
 }
 
-/**
- * 图片编辑参数
- */
-export interface ImageEditParams {
-  crop?: { x: number; y: number; width: number; height: number }
-  rotate?: number
-  filters?: {
-    brightness?: number
-    contrast?: number
-    saturation?: number
-    grayscale?: boolean
-    sepia?: boolean
-  }
-  watermark?: {
-    text?: string
-    position?: string
-    opacity?: number
-  }
-  convert_format?: string
-}
-
-/**
- * 上传进度
- */
-export interface UploadProgress {
-  current: number
-  total: number
-  fileName: string
-  progress: number
-}
-
-/**
- * 上传结果
- */
-export interface UploadResult {
-  success: number
-  failed: number
-  images: Image[]
-}
-
-/**
- * 图片标签
- */
-export interface ImageTags {
-  [imageId: string]: string[]
-}
-
-/**
- * 主题类型
- */
-export type Theme = 'light' | 'dark'
-
-/**
- * Toast 类型
- */
-export type ToastType = 'success' | 'error' | 'info' | 'warning'
-
-/**
- * Toast 优先级
- */
-export type ToastPriority = 'low' | 'normal' | 'high'
-
-/**
- * Toast 项目
- */
-export interface ToastItem {
-  id: string
-  message: string
-  type: ToastType
-  priority: ToastPriority
-  removing: boolean
-}
-
-/**
- * 对话框类型
- */
-export type DialogType = 'default' | 'danger' | 'warning'
-
-/**
- * 对话框选项
- */
-export interface ConfirmOptions {
-  title?: string
-  message: string
-  details?: string
-  confirmText?: string
-  cancelText?: string
-  type?: DialogType
-  loading?: boolean
-}
-
-/**
- * 输入对话框选项
- */
-export interface PromptOptions {
-  title?: string
-  message: string
-  type?: 'text' | 'password' | 'number'
-  placeholder?: string
-  defaultValue?: string
-  maxLength?: number
-  validator?: (value: string) => string | null
-  confirmText?: string
-  cancelText?: string
-  loading?: boolean
-}
-
-/**
- * 对话框解析结果
- */
-export interface DialogResolve {
-  confirm: boolean
-  value?: string
-}
-
-/**
- * 验证规则
- */
+// ==================== 验证规则 ====================
 export interface ValidationRule {
   required?: boolean
   minLength?: number
   maxLength?: number
   pattern?: RegExp
-  custom?: (value: string) => string | null
-  email?: boolean
-  url?: boolean
+  validator?: (value: any) => string | null
 }
 
-/**
- * 验证结果
- */
 export interface ValidationResult {
   valid: boolean
-  error?: string
+  errors: Record<string, string>
 }
 
-/**
- * 表单验证结果
- */
-export interface FormValidationResult<T extends string> {
-  valid: boolean
-  errors: Partial<Record<T, string>>
-}
-
-/**
- * 密码强度
- */
+// ==================== 密码强度 ====================
 export interface PasswordStrength {
   score: number
-  level: 'weak' | 'medium' | 'strong' | 'very-strong'
-  message: string
+  level: 'weak' | 'medium' | 'strong'
+  suggestions: string[]
 }
 
-/**
- * 虚拟滚动项
- */
-export interface VirtualScrollItem {
-  id: string | number
-  height?: number
-}
-
-/**
- * 图片预览参数
- */
-export interface ImagePreviewProps {
-  visible: boolean
-  image: Image | null
-}
-
-/**
- * 图片列表 props
- */
-export interface ImageListProps {
-  images: Image[]
-  totalImages?: number
-  categories?: Category[]
-  refreshTrigger?: number
-  loading?: boolean
-}
-
-/**
- * 图片列表事件
- */
-export interface ImageListEmits {
-  preview: [image: Image]
-  edit: [image: Image]
-  rename: [id: string, filename: string]
-  setExpiry: [id: string, expiresAt: string | null]
-  update: [id: string, data: { category_id?: string; tags?: string[] }]
-  delete: [ids: string[]]
-  duplicate: [id: string]
-}
-
-/**
- * 网络状态
- */
+// ==================== 网络状态 ====================
 export interface NetworkStatus {
-  isOnline: boolean
-  lastOnlineTime?: number
-  lastOfflineTime?: number
+  online: boolean
+  connectionType?: string
+  effectiveType?: string
 }
 
-/**
- * 图片编辑器 props
- */
-export interface ImageEditorProps {
-  visible: boolean
-  image: Image
+// ==================== 虚拟滚动 ====================
+export interface VirtualScrollItem {
+  id: string
+  height: number
 }
 
-/**
- * 图片编辑器事件
- */
-export interface ImageEditorEmits {
-  close: []
-  applied: [image: Image]
+// ==================== 用户管理 ====================
+export interface UserUpdateRequest {
+  role?: string
 }
 
-/**
- * 虚拟滚动 props
- */
-export interface VirtualScrollProps<T> {
-  items: T[]
-  itemHeight: number
-  buffer?: number
+export interface ChangePasswordRequest {
+  current_password?: string
+  new_password: string
+  confirm_password: string
 }
 
-/**
- * 虚拟滚动事件
- */
-export interface VirtualScrollEmits {
-  scroll: [{ scrollTop: number; scrollBottom: boolean }]
+export type ChangePasswordResult = 'success' | 'invalid_password' | 'error'
+
+// ==================== 批量操作 ====================
+export interface BatchOperationResult {
+  success: number
+  failed: number
+  errors?: string[]
 }

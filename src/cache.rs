@@ -57,6 +57,7 @@ impl Cache {
     }
 
     /// 删除匹配前缀的所有缓存（使用 SCAN 替代 KEYS 避免阻塞）
+    #[allow(dead_code)]
     pub async fn del_pattern<C>(
         conn: &mut C,
         pattern: impl AsRef<str>,
@@ -96,8 +97,10 @@ impl Cache {
 }
 
 /// 图片 hash 缓存键生成器
+#[allow(dead_code)]
 pub struct HashCache;
 
+#[allow(dead_code)]
 impl HashCache {
     pub fn image_hash(hash: &str, strategy: &str) -> String {
         match strategy {
@@ -115,8 +118,10 @@ impl HashCache {
 }
 
 /// 图片缓存键生成器
+#[allow(dead_code)]
 pub struct ImageCache;
 
+#[allow(dead_code)]
 impl ImageCache {
     pub fn list(user_id: uuid::Uuid, page: i32, page_size: i32, category_id: Option<uuid::Uuid>, sort_by: &str, sort_order: &str) -> String {
         match category_id {

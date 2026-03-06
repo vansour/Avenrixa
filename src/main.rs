@@ -3,6 +3,8 @@ mod auth;
 mod cache;
 mod config;
 mod db;
+mod domain;
+mod infrastructure;
 mod email;
 mod file_queue;
 pub mod error;
@@ -20,11 +22,11 @@ mod utils;
 pub use handlers::auth as auth_handlers;
 pub use handlers::images as image_handlers;
 pub use handlers::images_cursor as images_cursor;
-pub use handlers::categories as category_handlers;
 pub use handlers::admin as admin_handlers;
 
 use auth::AuthService;
 use config::Config;
+use domain::auth::{PostgresAuthRepository, AuthDomainService};
 use image_processor::ImageProcessor;
 use redis::Client;
 use sqlx::postgres::PgPoolOptions;
@@ -113,11 +115,26 @@ async fn main() -> anyhow::Result<()> {
     let file_save_queue = Arc::new(file_queue::FileSaveQueue::new());
     info!("File save task queue initialized");
 
+    // 初始化认证领域服务
+    let auth_repository = PostgresAuthRepository::new(pool.clone());
+    let mut auth_domain_service = AuthDomainService::new(auth_repository, auth.clone());
+
+    // 如果配置了邮件服务，则设置邮件服务
+    if config.mail.enabled {
+        let mail_service = email::MailService::new(config.clone());
+        auth_domain_service = auth_domain_service.with_mail_service(mail_service);
+        info!("Mail service enabled for auth domain service");
+    }
+
+    let auth_domain_service = Arc::new(auth_domain_service);
+    info!("Auth domain service initialized");
+
     let state = db::AppState {
         pool,
         redis: redis_conn,
         config: config.clone(),
         auth,
+        auth_domain_service: Some(auth_domain_service),
         image_processor,
         file_save_queue,
         started_at: std::time::Instant::now(),

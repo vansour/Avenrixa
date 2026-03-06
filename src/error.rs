@@ -18,6 +18,9 @@ pub enum AppError {
     #[error("密码不正确")]
     InvalidPassword,
 
+    #[error("密码哈希错误")]
+    HashError(#[from] bcrypt::BcryptError),
+
     #[error("密码已被使用，请选择新密码")]
     PasswordAlreadyUsed,
 
@@ -95,6 +98,7 @@ impl AppError {
             Self::Unauthorized => "UNAUTHORIZED",
             Self::InvalidToken => "INVALID_TOKEN",
             Self::InvalidPassword => "INVALID_PASSWORD",
+            Self::HashError(_) => "HASH_ERROR",
             Self::PasswordAlreadyUsed => "PASSWORD_ALREADY_USED",
             Self::UserNotFound => "USER_NOT_FOUND",
             Self::UsernameExists => "USERNAME_EXISTS",
@@ -125,6 +129,7 @@ impl AppError {
             Self::Unauthorized
                 | Self::InvalidToken
                 | Self::InvalidPassword
+                | Self::HashError(_)
                 | Self::PasswordAlreadyUsed
                 | Self::UserNotFound
                 | Self::UsernameExists
@@ -156,6 +161,7 @@ impl IntoResponse for AppError {
             AppError::Unauthorized => StatusCode::UNAUTHORIZED,
             AppError::InvalidToken => StatusCode::UNAUTHORIZED,
             AppError::InvalidPassword => StatusCode::UNAUTHORIZED,
+            AppError::HashError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             AppError::PasswordAlreadyUsed => StatusCode::BAD_REQUEST,
             AppError::UserNotFound => StatusCode::NOT_FOUND,
             AppError::UsernameExists => StatusCode::CONFLICT,

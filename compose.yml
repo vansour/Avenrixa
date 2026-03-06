@@ -17,7 +17,6 @@ services:
       - JWT_SECRET=your-secret-key-change-in-production
     volumes:
       - ./image_data:/data/images
-      - ./thumbnail_data:/data/thumbnails
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
@@ -45,8 +44,6 @@ services:
   dragonfly:
     image: ghcr.io/dragonflydb/dragonfly:latest
     container_name: vansour-image-dragonfly
-    volumes:
-      - ./dragonfly_data:/data
     command: --dir=/data
     healthcheck:
       test: ["CMD-SHELL", "redis-cli ping"]
