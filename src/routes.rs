@@ -115,10 +115,6 @@ pub fn create_routes() -> Router<AppState> {
         .route(
             "/auth/logout",
             routing::post(crate::auth_handlers::logout),
-        )
-        .route(
-            "/settings",
-            routing::get(crate::admin_handlers::get_settings_public),
         );
 
     // 管理员路由
