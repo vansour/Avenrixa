@@ -44,9 +44,6 @@ export async function loadImages(params: PaginationParams = {}): Promise<void> {
       {
         page: params.page ?? 1,
         page_size: params.page_size ?? 20,
-        sort_by: params.sort_by ?? 'created_at',
-        sort_order: params.sort_order ?? 'DESC',
-        search: params.search,
       }
     )
 
@@ -70,14 +67,20 @@ export async function loadImagesCursor(params: PaginationParams = {}): Promise<v
   const $state = get(imagesState)
 
   try {
+    // 处理 cursor：如果是字符串，解析为数组；如果是数组，直接使用
+    let cursorParam = params.cursor
+    if (typeof cursorParam === 'string' && cursorParam) {
+      const parts = cursorParam.split(',')
+      if (parts.length === 2) {
+        cursorParam = [parts[0], parts[1]]
+      }
+    }
+
     const response = await getReq<CursorPaginated<Image>>(
       `${API.BASE_URL}/images/cursor`,
       {
         page_size: params.page_size ?? 20,
-        sort_by: params.sort_by ?? 'created_at',
-        sort_order: params.sort_order ?? 'DESC',
-        search: params.search,
-        cursor: params.cursor,
+        cursor: cursorParam,
       }
     )
 

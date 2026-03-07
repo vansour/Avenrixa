@@ -1,152 +1,350 @@
 <script lang="ts">
-  import { imagesState, loadImagesCursor, toggleSelect, clearSelection } from '../stores/images'
+  import { onMount } from 'svelte'
+  import { imagesState, loadImagesCursor, toggleSelect, clearSelection, removeImages, addImage } from '../stores/images'
   import { isAuthenticated, currentUser } from '../stores/auth'
   import { toastSuccess, toastError } from '../stores/toast'
+  import { showConfirm, showPrompt } from '../stores/dialog'
   import { formatFileSize } from '../utils/format'
-  import { debounce } from '../utils/debounce'
+  import { uploadFilesWithToast } from '../utils/upload'
+  import { deleteImages, duplicateImage, renameImage } from '../stores/api'
   import type { Image } from '../types'
+  import { Image as ImageIcon, ImageOff, Trash2, X, RefreshCw } from 'lucide-svelte'
   import ImageCard from './ImageCard.svelte'
   import ImagePreview from './ImagePreview.svelte'
   import UploadZone from './UploadZone.svelte'
   import UserMenu from './UserMenu.svelte'
+  import Skeleton from './Skeleton.svelte'
+  import EmptyState from './EmptyState.svelte'
+  import { VIRTUAL_SCROLL } from '../constants'
+  import VirtualList from './VirtualList.svelte'
 
-  let searchQuery = ''
-  let sortBy = 'created_at'
-  let sortOrder: 'ASC' | 'DESC' = 'DESC'
+  // 图片预览状态
+  let previewVisible = false
+  let previewImage: Image | null = null
 
-  const debouncedSearch = debounce(() => {
-    loadImagesCursor({
-      page_size: 20,
-      sort_by: sortBy,
-      sort_order: sortOrder,
-      search: searchQuery || undefined,
-    })
-  }, 300)
+  // 上传状态
+  let uploadProgress = 0
+  let uploading = false
 
-  function handleSearchInput() {
-    debouncedSearch()
-  }
+  // 是否正在加载更多
+  let loadingMore = false
 
-  function handleSortChange() {
-    loadImagesCursor({
-      page_size: 20,
-      sort_by: sortBy,
-      sort_order: sortOrder,
-      search: searchQuery || undefined,
-    })
-  }
+  // 编辑状态
+  let editingImageId: string | null = null
 
+  // 组件挂载时加载图片
+  onMount(() => {
+    if ($isAuthenticated) {
+      loadImagesCursor({
+        page_size: 20,
+      })
+    }
+  })
+
+  // 处理图片选择
   function handleSelect(id: string) {
     toggleSelect(id)
   }
 
+  // 处理图片预览
   function handlePreview(image: Image) {
-    // 打开预览
+    previewImage = image
+    previewVisible = true
   }
 
+  // 关闭预览
+  function handleClosePreview() {
+    previewVisible = false
+    previewImage = null
+  }
+
+  // 处理删除图片
   async function handleDelete(ids: string[]) {
-    // 使用对话框确认删除
+    if (ids.length === 0) return
+
+    const result = await showConfirm({
+      title: '确认删除',
+      message: `确定要删除 ${ids.length} 张图片吗？`,
+      details: ids.length > 1 ? '此操作将把图片移至回收站，您可以在 30 天内恢复。' : '此操作将把图片移至回收站。',
+      confirmText: '删除',
+      cancelText: '取消',
+      type: 'danger',
+    })
+    const confirmed = result.confirm
+
+    if (!confirmed) return
+
+    try {
+      await deleteImages(ids, false)
+      removeImages(ids)
+      clearSelection()
+      toastSuccess(`已删除 ${ids.length} 张图片`)
+    } catch (error: any) {
+      toastError(error.message || '删除失败')
+    }
   }
 
-  function handleDuplicate(id: string) {
-    // 复制图片
+  // 处理永久删除
+  async function handlePermanentDelete(ids: string[]) {
+    if (ids.length === 0) return
+
+    const result = await showConfirm({
+      title: '永久删除',
+      message: `确定要永久删除 ${ids.length} 张图片吗？`,
+      details: '此操作不可撤销，图片将被彻底删除。',
+      confirmText: '永久删除',
+      cancelText: '取消',
+      type: 'danger',
+    })
+    const confirmed = result.confirm
+
+    if (!confirmed) return
+
+    try {
+      await deleteImages(ids, true)
+      removeImages(ids)
+      clearSelection()
+      toastSuccess(`已永久删除 ${ids.length} 张图片`)
+    } catch (error: any) {
+      toastError(error.message || '删除失败')
+    }
   }
 
-  function handleLogout() {
+  // 处理复制图片
+  async function handleDuplicate(id: string) {
+    try {
+      const newImage = await duplicateImage(id)
+      if (newImage) {
+        addImage(newImage)
+        toastSuccess('图片已复制')
+      }
+    } catch (error: any) {
+      toastError(error.message || '复制失败')
+    }
+  }
+
+  // 处理重命名
+  async function handleRename(image: Image) {
+    const result = await showPrompt({
+      title: '重命名图片',
+      message: '请输入新的文件名',
+      placeholder: '输入文件名',
+      defaultValue: image.original_filename || image.filename,
+      maxLength: 255,
+    })
+
+    const newName = result.value
+    if (result.confirm && newName && newName.trim()) {
+      try {
+        // 调用 API 更新文件名
+        await renameImage(image.id, newName.trim())
+        toastSuccess('重命名成功')
+        // 重新加载图片列表
+        loadImagesCursor({
+          page_size: 20,
+        })
+      } catch (error: any) {
+        toastError(error.message || '重命名失败')
+      }
+    }
+  }
+
+  // 复制图片链接
+  async function handleCopyLink(image: Image) {
+    const url = window.location.origin + '/images/' + image.id
+    try {
+      await navigator.clipboard.writeText(url)
+      toastSuccess('链接已复制')
+    } catch {
+      toastError('复制失败')
+    }
+  }
+
+  // 处理文件上传
+  async function handleFilesUpload(files: FileList) {
+    uploading = true
+    uploadProgress = 0
+
+    try {
+      await uploadFilesWithToast(files, {
+        onSuccess: (image) => {
+          addImage(image)
+        },
+        onProgress: (progress) => {
+          uploadProgress = progress
+        }
+      })
+    } finally {
+      uploading = false
+      uploadProgress = 0
+    }
+  }
+
+  // 加载更多
+  async function handleLoadMore() {
+    if (loadingMore || !$imagesState.hasMore) return
+
+    loadingMore = true
+    try {
+      await loadImagesCursor({
+        page_size: 20,
+        cursor: $imagesState.nextCursor,
+      })
+    } finally {
+      loadingMore = false
+    }
+  }
+
+  // 清空选择
+  function handleClearSelection() {
     clearSelection()
   }
+
+  // 批量删除
+  function handleBatchDelete() {
+    const ids = [...$imagesState.selectedIds]
+    if (ids.length > 0) {
+      handleDelete(ids)
+    }
+  }
+
+  // 响应式计算网格布局
+  let columns = 4
+  let containerWidth = 0
+
+  $: {
+    if (containerWidth > 1200) columns = 6
+    else if (containerWidth > 1024) columns = 5
+    else if (containerWidth > 768) columns = 4
+    else if (containerWidth > 480) columns = 3
+    else columns = 2
+  }
+
+  $: gridRows = Math.ceil($imagesState.images.length / columns)
+  $: rowItems = Array.from({ length: gridRows }, (_, i) => {
+    return {
+      id: `row-${i}`,
+      items: $imagesState.images.slice(i * columns, (i + 1) * columns)
+    }
+  })
+
+  // 动态计算行高
+  $: itemWidth = containerWidth / columns
+  $: rowHeight = itemWidth + 80 // 图片比例 1:1 + 信息区域高度
+  $: buffer = VIRTUAL_SCROLL.DEFAULT_BUFFER
 </script>
 
-<div class="home">
-  <!-- 头部 -->
-  <header>
-    <div class="header-left">
-      <h1>VanSour Image</h1>
-      <p class="subtitle">简单快速的图片托管服务</p>
-    </div>
-    <div class="header-right">
-      {#if $isAuthenticated && $currentUser}
-        <UserMenu
-          user={$currentUser}
-          on:logout={handleLogout}
-        />
-      {/if}
-    </div>
-  </header>
+{#if $isAuthenticated && $currentUser}
+  <div class="home">
+    <!-- 头部 -->
+    <header class="header">
+      <div class="header-left">
+        <h1 class="logo">VanSour Image</h1>
+        <p class="subtitle">简单快速的图片托管服务</p>
+      </div>
+      <div class="header-right">
+        <UserMenu on:logout={handleLogout} />
+      </div>
+    </header>
 
-  <!-- 工具栏 -->
-  <div class="toolbar">
-    <div class="search-box">
-      <input
-        type="text"
-        placeholder="搜索图片名称..."
-        bind:value={searchQuery}
-        on:input={handleSearchInput}
-        disabled={$imagesState.loading}
-      />
-      <select bind:value={sortBy} on:change={handleSortChange} disabled={$imagesState.loading}>
-        <option value="created_at">上传时间</option>
-        <option value="views">浏览量</option>
-        <option value="size">大小</option>
-      </select>
-      <select bind:value={sortOrder} on:change={handleSortChange} disabled={$imagesState.loading}>
-        <option value="DESC">降序</option>
-        <option value="ASC">升序</option>
-      </select>
+    <!-- 工具栏 -->
+    <div class="toolbar">
+      <div class="toolbar-actions">
+        <span class="image-count">共 {$imagesState.images.length} 张图片</span>
+      </div>
     </div>
-  </div>
 
-  <!-- 上传区域 -->
-  <div class="upload-section">
-    <UploadZone />
-  </div>
-
-  <!-- 批量操作栏 -->
-  {#if $imagesState.selectedIds.size > 0}
-    <div class="bulk-actions">
-      <span class="selection-info">已选择 {$imagesState.selectedIds.size} 张</span>
-      <button class="btn" on:click={clearSelection}>取消</button>
-      <button class="btn btn-danger" on:click={() => handleDelete([...$imagesState.selectedIds])}>删除</button>
+    <!-- 上传区域 -->
+    <div class="upload-section">
+      <UploadZone />
     </div>
-  {/if}
 
-  <!-- 骨架屏 -->
-  {#if $imagesState.loading}
-    <div class="skeleton-grid">
-      {#each Array(12) as _}
-        <div class="skeleton-item">
-          <div class="skeleton-image"></div>
-          <div class="skeleton-info">
-            <div class="skeleton-line"></div>
-            <div class="skeleton-line short"></div>
-          </div>
+    <!-- 批量操作栏 -->
+    {#if $imagesState.selectedIds.size > 0}
+      <div class="bulk-actions">
+        <span class="selection-info">已选择 {$imagesState.selectedIds.size} 张</span>
+        <div class="bulk-buttons">
+          <button class="btn btn-secondary" on:click={handleClearSelection}>
+            <X size={16} />
+            取消选择
+          </button>
+          <button class="btn btn-danger" on:click={handleBatchDelete}>
+            <Trash2 size={16} />
+            删除选中
+          </button>
         </div>
-      {/each}
-    </div>
-  {:else}
-    <!-- 图片列表 -->
-    <div class="image-grid">
-      {#each $imagesState.images as image (image.id)}
-        <ImageCard
-          {image}
-          selected={$imagesState.selectedIds.has(image.id)}
-          on:select={() => handleSelect(image.id)}
-          on:preview={handlePreview}
-          on:delete={() => handleDelete([image.id])}
-          on:duplicate={() => handleDuplicate(image.id)}
-        />
-      {/each}
-    </div>
-  {/if}
+      </div>
+    {/if}
 
-  {#if $imagesState.images.length === 0 && !$imagesState.loading}
-    <div class="empty-state">
-      <div class="empty-icon">Image</div>
-      <p>暂无图片</p>
-      <p>拖拽图片到这里或点击上传</p>
-    </div>
-  {/if}
-</div>
+    <!-- 骨架屏 -->
+    {#if $imagesState.loading && $imagesState.images.length === 0}
+      <div class="skeleton-grid">
+        {#each Array(12) as _}
+          <div class="skeleton-item">
+            <Skeleton height="100%" width="100%" rounded />
+            <div class="skeleton-info">
+              <Skeleton height={16} width="80%" rounded />
+              <div style="height: 0.5rem"></div>
+              <Skeleton height={12} width="60%" rounded />
+            </div>
+          </div>
+        {/each}
+      </div>
+    {:else}
+      <!-- 图片列表 -->
+      <div class="virtual-grid-wrapper" bind:offsetWidth={containerWidth}>
+        <VirtualList
+          items={rowItems}
+          itemHeight={rowHeight}
+          {buffer}
+          on:reachEnd={handleLoadMore}
+          className="image-virtual-list"
+          let:item={row}
+        >
+          <div class="image-grid-row" style:grid-template-columns="repeat({columns}, 1fr)">
+            {#each row.items as image (image.id)}
+              <ImageCard
+                {image}
+                selected={$imagesState.selectedIds.has(image.id)}
+                on:select={() => handleSelect(image.id)}
+                on:preview={() => handlePreview(image)}
+                on:delete={() => handleDelete([image.id])}
+                on:duplicate={() => handleDuplicate(image.id)}
+              />
+            {/each}
+          </div>
+        </VirtualList>
+      </div>
+
+      <!-- 加载状态提示 -->
+      {#if loadingMore}
+        <div class="loading-more-indicator">
+          <RefreshCw size={16} class="animate-spin" />
+          <span>正在加载更多...</span>
+        </div>
+      {/if}
+    {/if}
+
+    <!-- 空状态 -->
+    {#if $imagesState.images.length === 0 && !$imagesState.loading}
+      <div class="empty-state-wrapper">
+        <EmptyState
+          icon={ImageOff}
+          title="暂无图片"
+          description="拖拽图片到这里或点击上传区域添加图片"
+          size="lg"
+        />
+      </div>
+    {/if}
+  </div>
+
+  <!-- 图片预览 -->
+  <ImagePreview
+    bind:visible={previewVisible}
+    bind:image={previewImage}
+    onClose={handleClosePreview}
+  />
+{/if}
 
 <style>
   .home {
@@ -156,7 +354,7 @@
     min-height: 100vh;
   }
 
-  header {
+  .header {
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -166,11 +364,18 @@
     border-radius: var(--radius-xl);
     backdrop-filter: blur(var(--glass-blur));
     margin-bottom: 1.5rem;
+    transition: background-color var(--transition-normal), border-color var(--transition-normal);
   }
 
-  .header-left h1 {
+  .header-left {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  .logo {
     margin: 0;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: var(--gradient-primary);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
@@ -180,7 +385,7 @@
 
   .subtitle {
     color: var(--muted-foreground);
-    margin: 0.25rem 0 0 0;
+    margin: 0;
     font-size: var(--font-size-sm);
   }
 
@@ -193,30 +398,21 @@
     border-radius: var(--radius-xl);
     margin-bottom: 1.5rem;
     backdrop-filter: blur(var(--glass-blur));
-  }
-
-  .search-box {
-    display: flex;
-    gap: 0.75rem;
-    flex: 1;
     flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    transition: background-color var(--transition-normal), border-color var(--transition-normal);
   }
 
-  .search-box input,
-  .search-box select {
-    padding: 0.75rem 1rem;
-    border: 2px solid var(--border);
-    border-radius: var(--radius-lg);
+  .toolbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+  }
+
+  .image-count {
     font-size: var(--font-size-sm);
-    background: var(--background);
-    color: var(--foreground);
-  }
-
-  .search-box input:focus,
-  .search-box select:focus {
-    outline: none;
-    border-color: var(--primary);
-    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+    color: var(--muted-foreground);
   }
 
   .upload-section {
@@ -226,15 +422,24 @@
   .bulk-actions {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: 0.75rem;
     padding: 1rem 1.5rem;
-    background: rgba(255, 107, 107, 0.1);
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.2);
     border-radius: var(--radius-lg);
     margin-bottom: 1rem;
+    flex-wrap: wrap;
   }
 
   .selection-info {
     font-weight: var(--font-weight-medium);
+    color: var(--foreground);
+  }
+
+  .bulk-buttons {
+    display: flex;
+    gap: 0.5rem;
   }
 
   .btn {
@@ -245,6 +450,18 @@
     font-size: var(--font-size-sm);
     font-weight: var(--font-weight-medium);
     transition: all var(--transition-fast);
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .btn-secondary {
+    background: var(--secondary);
+    color: var(--secondary-foreground);
+  }
+
+  .btn-secondary:hover:not(:disabled) {
+    background: var(--muted);
   }
 
   .btn-danger {
@@ -252,10 +469,37 @@
     color: var(--destructive-foreground);
   }
 
-  .image-grid {
+  .btn-danger:hover:not(:disabled) {
+    background: var(--destructive-hover);
+    transform: translateY(-1px);
+  }
+
+  .btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none !important;
+  }
+
+  .virtual-grid-wrapper {
+    height: calc(100vh - 400px);
+    min-height: 500px;
+    margin-bottom: 1.5rem;
+  }
+
+  .image-grid-row {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
     gap: 1rem;
+    padding-bottom: 1rem;
+  }
+
+  .loading-more-indicator {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 1rem;
+    color: var(--muted-foreground);
+    font-size: var(--font-size-sm);
   }
 
   .skeleton-grid {
@@ -268,65 +512,14 @@
     position: relative;
   }
 
-  .skeleton-image {
-    aspect-ratio: 1;
-    background: var(--muted);
-    border-radius: var(--radius-lg);
-    overflow: hidden;
-    position: relative;
-  }
-
-  .skeleton-image::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(
-      90deg,
-      transparent 0%,
-      rgba(255, 255, 255, 0.5) 50%,
-      rgba(0, 0, 0, 0) 50%
-    );
-    background-size: 200% 100%;
-    animation: shimmer 1.5s infinite;
-  }
-
   .skeleton-info {
     padding: 0.75rem;
   }
 
-  .skeleton-line {
-    height: 20px;
-    background: var(--muted);
-    border-radius: var(--radius-md);
-  }
-
-  .skeleton-line.short {
-    height: 14px;
-    width: 60%;
-  }
-
-  @keyframes shimmer {
-    0% {
-      background-position: -200% 0;
-    }
-    100% {
-      background-position: 200% 0;
-    }
-  }
-
-  .empty-state {
+  .empty-state-wrapper {
     display: flex;
-    flex-direction: column;
-    align-items: center;
     justify-content: center;
-    padding: 4rem 2rem;
-    text-align: center;
-  }
-
-  .empty-icon {
-    font-size: 4rem;
-    margin-bottom: 1rem;
-    opacity: 0.3;
+    padding: 2rem;
   }
 
   @media (max-width: 768px) {
@@ -334,19 +527,34 @@
       padding: 1rem;
     }
 
-    header {
+    .header {
       flex-direction: column;
       gap: 1rem;
       align-items: flex-start;
     }
 
-    .search-box {
-      flex-direction: column;
+    .toolbar {
+      padding: 1rem;
     }
 
-    .search-box input,
-    .search-box select {
-      width: 100%;
+    .virtual-grid-wrapper {
+      height: calc(100vh - 350px);
     }
-}
+
+    .bulk-actions {
+      flex-direction: column;
+      text-align: center;
+    }
+
+    .bulk-buttons {
+      width: 100%;
+      justify-content: center;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .virtual-grid-wrapper {
+      height: calc(100vh - 400px);
+    }
+  }
 </style>

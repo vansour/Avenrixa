@@ -23,7 +23,7 @@ pub async fn log_audit(
         created_at: chrono::Utc::now(),
     };
 
-    match sqlx::query(
+    let result = sqlx::query(
         "INSERT INTO audit_logs (id, user_id, action, target_type, target_id, details, ip_address, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"
     )
     .bind(audit_log.id)
@@ -35,9 +35,16 @@ pub async fn log_audit(
     .bind(&audit_log.ip_address)
     .bind(audit_log.created_at)
     .execute(pool)
-    .await
-    {
-        Ok(_) => info!("Audit log recorded: {} on {}", action, target_type),
+    .await;
+
+    match result {
+        Ok(_) => info!(
+            action = %action,
+            target_type = %target_type,
+            target_id = ?target_id,
+            user_id = ?user_id,
+            "Audit log recorded"
+        ),
         Err(e) => tracing::error!("Failed to record audit log: {}", e),
     }
 }

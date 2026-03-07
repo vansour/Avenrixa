@@ -1,40 +1,45 @@
 <script lang="ts">
   import { login, register, currentUser, isAuthenticated } from '../stores/auth'
   import { toastSuccess, toastError } from '../stores/toast'
+  import { FORM_DEFAULTS } from '../constants'
 
   let formType: 'login' | 'register' = 'login'
   let username = ''
   let password = ''
   let loading = false
+  let touched = { username: false, password: false }
+
+  // 实时验证
+  $: usernameError = touched.username && !username ? '请输入用户名' :
+    touched.username && username.length < FORM_DEFAULTS.USERNAME_MIN ? `用户名至少 ${FORM_DEFAULTS.USERNAME_MIN} 个字符` : ''
+
+  $: passwordError = touched.password && !password ? '请输入密码' :
+    touched.password && password.length < FORM_DEFAULTS.PASSWORD_MIN ? `密码至少 ${FORM_DEFAULTS.PASSWORD_MIN} 个字符` : ''
+
+  $: canSubmit = username && password && password.length >= FORM_DEFAULTS.PASSWORD_MIN && !loading
 
   async function handleSubmit() {
-    if (!username || !password) {
-      toastError('请输入用户名和密码')
-      return
-    }
+    touched = { username: true, password: true }
 
-    if (password.length < 6) {
-      toastError('密码至少需要 6 个字符')
-      return
-    }
+    if (!canSubmit) return
 
     loading = true
 
     try {
       if (formType === 'login') {
-        const success = await login({ username, password })
-        if (success) {
+        const result = await login({ username, password })
+        if (result.success) {
           toastSuccess('登录成功')
         } else {
-          toastError('登录失败，请检查用户名和密码')
+          toastError(result.error || '登录失败，请检查用户名和密码')
         }
       } else {
-        const success = await register({ username, password })
-        if (success) {
+        const result = await register({ username, password })
+        if (result.success) {
           toastSuccess('注册成功')
           formType = 'login'
         } else {
-          toastError('注册失败，用户名可能已存在')
+          toastError(result.error || '注册失败，用户名可能已存在')
         }
       }
     } finally {
@@ -44,6 +49,7 @@
 
   function toggleForm() {
     formType = formType === 'login' ? 'register' : 'login'
+    touched = { username: false, password: false }
   }
 </script>
 
@@ -55,47 +61,46 @@
 
       <div class="form">
         <div class="form-group">
-          <label for="username-input">
-            {formType === 'login' ? '用户名' : '用户名'}
-          </label>
+          <label for="username-input">用户名</label>
           <input
             id="username-input"
             type="text"
             placeholder="请输入用户名"
             bind:value={username}
             disabled={loading}
-            on:keydown={(e) => e.key === 'Enter' && handleSubmit()}
+            onblur={() => touched = { ...touched, username: true }}
+            onkeydown={(e: KeyboardEvent) => e.key === 'Enter' && handleSubmit()}
+            class:error={usernameError}
           />
+          {#if usernameError}
+            <span class="field-error">{usernameError}</span>
+          {/if}
         </div>
 
         <div class="form-group">
-          <label for="password-input">
-            {formType === 'login' ? '密码' : '密码'}
-          </label>
+          <label for="password-input">密码</label>
           <input
             id="password-input"
             type="password"
             placeholder="请输入密码"
             bind:value={password}
             disabled={loading}
-            on:keydown={(e) => e.key === 'Enter' && handleSubmit()}
+            onblur={() => touched = { ...touched, password: true }}
+            onkeydown={(e: KeyboardEvent) => e.key === 'Enter' && handleSubmit()}
+            class:error={passwordError}
           />
-          <input
-            type="password"
-            placeholder="请输入密码"
-            bind:value={password}
-            disabled={loading}
-            on:keydown={(e) => e.key === 'Enter' && handleSubmit()}
-          />
+          {#if passwordError}
+            <span class="field-error">{passwordError}</span>
+          {/if}
         </div>
 
         <button
           class="btn-submit"
-          on:click={handleSubmit}
-          disabled={loading}
+          onclick={handleSubmit}
+          disabled={!canSubmit}
         >
           {#if loading}
-            <span class="loading-spinner"></span>
+            <span class="spinner spinner-sm" style="border-top-color: var(--primary-foreground)"></span>
           {:else if (formType === 'login')}
             登录
           {:else}
@@ -105,7 +110,7 @@
 
         <button
           class="btn-toggle"
-          on:click={toggleForm}
+          onclick={toggleForm}
           type="button"
         >
           {formType === 'login' ? '没有账号？' : '已有账号？'}
@@ -189,6 +194,17 @@
     box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
   }
 
+  .form-group input.error {
+    border-color: var(--destructive);
+    box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.1);
+  }
+
+  .field-error {
+    font-size: var(--font-size-xs);
+    color: var(--destructive);
+    margin-top: -0.25rem;
+  }
+
   .btn-submit {
     padding: 0.875rem 2rem;
     border: none;
@@ -232,19 +248,4 @@
     text-decoration: underline;
   }
 
-  .loading-spinner {
-    display: inline-block;
-    width: 16px;
-    height: 16px;
-    border: 2px solid transparent;
-    border-top-color: var(--primary-foreground);
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-  }
-
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
-  }
 </style>

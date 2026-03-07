@@ -9,6 +9,7 @@
   export let height: number | string = 'auto'
   export let threshold: number = 100
   export let className: string = ''
+  export let quality: 'low' | 'high' = 'high'
 
   let imgElement: HTMLImageElement
   let loading = true
@@ -16,24 +17,46 @@
   let loaded = false
   let observer: IntersectionObserver | null = null
   let visible = false
+  let preloadImage: HTMLImageElement | null = null
 
   const loadImage = () => {
     if (!src || loaded) return
 
-    const img = new Image()
-    img.src = src
+    // 如果启用了渐进式加载，先加载低质量版本
+    if (quality === 'high' && src.startsWith('/images/')) {
+      const thumbSrc = src.replace('/images/', '/thumbnails/') + '.jpg'
+      const thumbImg = new Image()
+      thumbImg.src = thumbSrc
+      thumbImg.onload = () => {
+        if (!loaded && imgElement) {
+          imgElement.src = thumbSrc
+          imgElement.style.filter = 'blur(4px)'
+          imgElement.style.opacity = '0.7'
+        }
+      }
+    }
 
-    img.onload = () => {
+    // 清理之前的预加载图片
+    if (preloadImage) {
+      preloadImage.onload = null
+      preloadImage.onerror = null
+    }
+
+    preloadImage = new Image()
+    preloadImage.src = src
+
+    preloadImage.onload = () => {
       loaded = true
       loading = false
       error = false
       if (imgElement) {
         imgElement.src = src
         imgElement.style.opacity = '1'
+        imgElement.style.filter = 'none'
       }
     }
 
-    img.onerror = () => {
+    preloadImage.onerror = () => {
       loading = false
       error = true
       loaded = false
@@ -71,6 +94,13 @@
   onDestroy(() => {
     if (observer) {
       observer.disconnect()
+      observer = null
+    }
+    // 清理预加载图片的事件监听器
+    if (preloadImage) {
+      preloadImage.onload = null
+      preloadImage.onerror = null
+      preloadImage = null
     }
   })
 </script>
@@ -138,11 +168,6 @@
   background: linear-gradient(90deg, var(--bg-secondary) 25%, var(--bg-tertiary) 50%, var(--bg-secondary) 75%);
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite;
-}
-
-@keyframes shimmer {
-  0% { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
 }
 
 .skeleton-icon {

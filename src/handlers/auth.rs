@@ -14,6 +14,7 @@ use axum::{
 use tracing::info;
 
 /// 用户注册
+#[tracing::instrument(skip(state, req), fields(username = %req.username))]
 pub async fn register(
     State(state): State<AppState>,
     Json(req): Json<RegisterRequest>,
@@ -31,6 +32,7 @@ pub async fn register(
 }
 
 /// 用户登录
+#[tracing::instrument(skip(state, req), fields(username = %req.username))]
 pub async fn login(
     State(state): State<AppState>,
     Json(req): Json<LoginRequest>,

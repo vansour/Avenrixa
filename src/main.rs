@@ -27,6 +27,8 @@ pub use handlers::admin as admin_handlers;
 use auth::AuthService;
 use config::Config;
 use domain::auth::{PostgresAuthRepository, AuthDomainService};
+use domain::image::{ImageDomainService, PostgresImageRepository, PostgresCategoryRepository};
+use domain::admin::AdminDomainService;
 use image_processor::ImageProcessor;
 use redis::Client;
 use sqlx::postgres::PgPoolOptions;
@@ -112,8 +114,11 @@ async fn main() -> anyhow::Result<()> {
     );
 
     // 初始化文件保存任务队列
-    let file_save_queue = Arc::new(file_queue::FileSaveQueue::new());
-    info!("File save task queue initialized");
+    let file_save_queue = Arc::new(file_queue::FileSaveQueue::new(
+        redis_conn.clone(),
+        format!("{}image_save_queue", config.redis.key_prefix)
+    ));
+    info!("File save task queue initialized (Redis backed: {}image_save_queue)", config.redis.key_prefix);
 
     // 初始化认证领域服务
     let auth_repository = PostgresAuthRepository::new(pool.clone());
@@ -129,12 +134,34 @@ async fn main() -> anyhow::Result<()> {
     let auth_domain_service = Arc::new(auth_domain_service);
     info!("Auth domain service initialized");
 
+    // 初始化图片领域服务
+    let image_repository = PostgresImageRepository::new(pool.clone());
+    let category_repository = PostgresCategoryRepository::new(pool.clone());
+    let image_domain_service = ImageDomainService::new(
+        pool.clone(),
+        Some(redis_conn.clone()),
+        config.clone(),
+        image_repository,
+        category_repository,
+        image_processor.clone(),
+        file_save_queue.clone(),
+    );
+    let image_domain_service = Arc::new(image_domain_service);
+    info!("Image domain service initialized");
+
+    // 初始化管理领域服务
+    let admin_domain_service = AdminDomainService::new(pool.clone(), Some(redis_conn.clone()), config.clone());
+    let admin_domain_service = Arc::new(admin_domain_service);
+    info!("Admin domain service initialized");
+
     let state = db::AppState {
         pool,
         redis: redis_conn,
         config: config.clone(),
         auth,
         auth_domain_service: Some(auth_domain_service),
+        image_domain_service: Some(image_domain_service),
+        admin_domain_service: Some(admin_domain_service),
         image_processor,
         file_save_queue,
         started_at: std::time::Instant::now(),

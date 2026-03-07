@@ -2,6 +2,49 @@
  * 预设的 Lucide 图标导入
  * 常用的图标集合
  */
+import {
+  Check,
+  X,
+  AlertTriangle,
+  Info,
+  AlertCircle,
+  LogOut,
+  User,
+  ChevronDown,
+  Download,
+  Copy,
+  Trash2,
+  Upload,
+  MoreVertical,
+  Eye,
+  Image,
+  ImageOff,
+  Search,
+  UploadCloud,
+  Settings,
+  UserCircle,
+  Lock,
+  Unlock,
+  Shield,
+  Clock,
+  RefreshCw,
+  Edit,
+  Trash,
+  ArrowUp,
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight,
+  Plus,
+  Minus,
+  ExternalLink,
+  Link,
+  Home,
+  Moon,
+  Sun,
+  Monitor,
+} from 'lucide-svelte'
+
+// 命名导出
 export {
   Check,
   X,
@@ -39,8 +82,12 @@ export {
   ExternalLink,
   Link,
   Home,
-} from 'lucide-svelte'
+  Moon,
+  Sun,
+  Monitor,
+}
 
+// 默认导出图标映射
 export default {
   Check,
   X,
@@ -78,4 +125,7 @@ export default {
   ExternalLink,
   Link,
   Home,
+  Moon,
+  Sun,
+  Monitor,
 }

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { writable } from 'svelte/store'
   import { Globe } from 'lucide-svelte'
-  import { locale, loadLocaleAsync } from 'svelte-i18n'
+  import { locale, _, dictionary } from 'svelte-i18n'
 
   export let className: string = ''
 
@@ -19,8 +19,16 @@
 
   const switchLocale = async (newLocale: string) => {
     if (newLocale === $locale) return
-    await loadLocaleAsync(newLocale)
-    locale.set(newLocale)
+
+    // 动态加载语言文件
+    try {
+      const messages = await import(`../locales/${newLocale}.json`)
+      dictionary.set({ ...$dictionary, [newLocale]: messages.default || messages })
+      locale.set(newLocale)
+    } catch (e) {
+      console.error('Failed to load locale:', e)
+    }
+
     isOpen.set(false)
 
     // 保存到 localStorage

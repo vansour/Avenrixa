@@ -4,6 +4,9 @@ use crate::auth::AuthService;
 use crate::cache::Cache;
 use crate::config::Config;
 use crate::domain::auth::DefaultAuthDomainService;
+use crate::domain::image::ImageDomainService;
+use crate::domain::image::repository::{PostgresImageRepository, PostgresCategoryRepository};
+use crate::domain::admin::AdminDomainService;
 use crate::file_queue::FileSaveQueue;
 use crate::image_processor::ImageProcessor;
 use uuid::Uuid;
@@ -18,6 +21,8 @@ pub struct AppState {
     pub config: Config,
     pub auth: AuthService,
     pub auth_domain_service: Option<Arc<DefaultAuthDomainService>>,
+    pub image_domain_service: Option<Arc<ImageDomainService<PostgresImageRepository, PostgresCategoryRepository>>>,
+    pub admin_domain_service: Option<Arc<AdminDomainService>>,
     pub image_processor: ImageProcessor,
     pub file_save_queue: Arc<FileSaveQueue>,
     pub started_at: Instant,
@@ -183,9 +188,21 @@ pub async fn init_schema(pool: &PgPool) -> Result<(), sqlx::Error> {
 /// 创建默认管理员账号（使用 ON CONFLICT 避免竞态条件）
 pub async fn create_default_admin(pool: &PgPool) -> Result<(String, String), anyhow::Error> {
     const ADMIN_USERNAME: &str = "admin";
-    const ADMIN_PASSWORD: &str = "admin";
 
-    let password_hash = AuthService::hash_password(ADMIN_PASSWORD)?;
+    // 优先使用环境变量中的密码
+    let admin_password = if let Ok(password) = std::env::var("ADMIN_PASSWORD") {
+        if password.len() < 8 {
+            warn!("ADMIN_PASSWORD is too short (min 8 characters), generating random password instead");
+            generate_secure_password()
+        } else {
+            password
+        }
+    } else {
+        // 没有设置环境变量，生成随机密码
+        generate_secure_password()
+    };
+
+    let password_hash = AuthService::hash_password(&admin_password)?;
     let user_id = Uuid::new_v4();
 
     // 使用 INSERT ... ON CONFLICT DO NOTHING 避免竞态条件
@@ -205,7 +222,8 @@ pub async fn create_default_admin(pool: &PgPool) -> Result<(String, String), any
     match result {
         Ok(Some(_)) => {
             info!("Default admin account created successfully");
-            Ok((ADMIN_USERNAME.to_string(), ADMIN_PASSWORD.to_string()))
+            // 返回实际使用的密码（用于日志显示）
+            Ok((ADMIN_USERNAME.to_string(), admin_password))
         }
         Ok(None) => {
             // 管理员已存在（由唯一约束触发）
@@ -219,7 +237,26 @@ pub async fn create_default_admin(pool: &PgPool) -> Result<(String, String), any
     }
 }
 
+/// 生成安全的随机密码
+fn generate_secure_password() -> String {
+    use rand::{rngs::ThreadRng, RngExt};
+    const CHARSET: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()-_=+";
+    const PASSWORD_LENGTH: usize = 16;
+
+    let mut rng = ThreadRng::default();
+    let password: String = (0..PASSWORD_LENGTH)
+        .map(|_| {
+            let idx = rng.random_range(0..CHARSET.len());
+            CHARSET[idx] as char
+        })
+        .collect();
+
+    info!("Generated secure random password (length: {})", PASSWORD_LENGTH);
+    password
+}
+
 /// 输出管理员账号信息到日志（用于启动时显示）
+/// 注意：密码只在创建时返回一次，不会在这里记录，以避免泄露
 pub async fn log_admin_credentials(pool: &PgPool) -> Result<(), anyhow::Error> {
     let result = sqlx::query_as::<_, (String,)>(
         "SELECT username FROM users WHERE role = 'admin' LIMIT 1"
@@ -230,10 +267,13 @@ pub async fn log_admin_credentials(pool: &PgPool) -> Result<(), anyhow::Error> {
     match result {
         Ok(Some((username,))) => {
             info!("========================================");
-            info!("        Admin Credentials");
+            info!("        Admin Account");
             info!("========================================");
             info!("        Username: {}", username);
-            info!("        Password: admin");
+            info!("");
+            info!("        ⚠️  If you haven't set ADMIN_PASSWORD environment variable,");
+            info!("        the password was generated randomly on first startup.");
+            info!("        Check your logs for the generated password shown at that time.");
             info!("========================================");
             Ok(())
         }

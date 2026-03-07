@@ -46,9 +46,6 @@ export interface Image {
 export interface PaginationParams {
   page?: number
   page_size?: number
-  sort_by?: string
-  sort_order?: 'ASC' | 'DESC'
-  search?: string
   tag?: string
   cursor?: [string, string]
 }
@@ -301,4 +298,25 @@ export interface BatchOperationResult {
   success: number
   failed: number
   errors?: string[]
+}
+
+// ==================== 错误类型 ====================
+export interface ApiErrorResponse {
+  message: string
+  code?: string
+  statusCode?: number
+}
+
+export type UnknownError = Error | ApiErrorResponse | { message?: string } | unknown
+
+export function getErrorMessage(error: UnknownError): string {
+  if (error instanceof Error) {
+    return error.message
+  }
+  if (typeof error === 'object' && error !== null) {
+    if ('message' in error && typeof error.message === 'string') {
+      return error.message
+    }
+  }
+  return '发生未知错误'
 }

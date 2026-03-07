@@ -1,4 +1,5 @@
-import { onDestroy, onMount, writable } from 'svelte'
+import { onDestroy, onMount } from 'svelte'
+import { writable, get } from 'svelte/store'
 import { NETWORK_CHECK } from '../constants'
 
 export interface NetworkStatus {
@@ -6,6 +7,7 @@ export interface NetworkStatus {
   effectiveType?: string
   rtt?: number
   downlink?: number
+  lastChecked?: Date
 }
 
 export const useNetwork = () => {
@@ -56,14 +58,14 @@ export const useNetwork = () => {
     }
   }
 
-  const checkStatus = () => {
+  const checkStatus = (): NetworkStatus => {
     updateNetworkStatus()
     return {
-      online: $isOnline,
-      effectiveType: $effectiveType,
-      rtt: $rtt,
-      downlink: $downlink,
-      lastChecked: $lastChecked
+      online: get(isOnline),
+      effectiveType: get(effectiveType),
+      rtt: get(rtt),
+      downlink: get(downlink),
+      lastChecked: get(lastChecked)
     }
   }
 

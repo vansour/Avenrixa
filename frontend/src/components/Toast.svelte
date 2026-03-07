@@ -1,7 +1,9 @@
 <script lang="ts">
   import { toastState, removeToast } from '../stores/toast'
-  import type { Toast, ToastType } from '../types'
+  import type { ToastType } from '../types'
   import { Check, X, AlertTriangle, Info, AlertCircle } from 'lucide-svelte'
+  import { quintOut } from 'svelte/easing'
+  import { fly } from 'svelte/transition'
 
   function getIcon(type: ToastType) {
     switch (type) {
@@ -19,36 +21,26 @@
   }
 
   function getTypeClass(type: ToastType): string {
-    switch (type) {
-      case 'success':
-        return 'bg-green-500 text-white'
-      case 'error':
-        return 'bg-red-500 text-white'
-      case 'warning':
-        return 'bg-yellow-500 text-white'
-      case 'info':
-        return 'bg-blue-500 text-white'
-      default:
-        return 'bg-gray-500 text-white'
-    }
+    return `toast-${type}`
   }
 </script>
 
-<div class="toast-container">
-  {#each $toastState as toast (toast.id)}
+<div class="toast-container" role="region" aria-label="通知">
+  {#each $toastState.toasts as toast (toast.id)}
     <div
       class="toast {getTypeClass(toast.type)}"
-      transition:fade|local
+      transition:fly={{ y: -20, duration: 300, easing: quintOut }}
       role="alert"
-      on:mouseenter={() => {}}
-      on:mouseleave={() => {}}
     >
-      <svelte:component this={getIcon(toast.type)} size={16} />
+      <span class="toast-icon">
+        <svelte:component this={getIcon(toast.type)} size={18} />
+      </span>
       <span class="toast-message">{toast.message}</span>
       <button
         class="toast-close"
         on:click={() => removeToast(toast.id)}
-        aria-label="关闭"
+        aria-label="关闭通知"
+        type="button"
       >
         <X size={14} />
       </button>
@@ -61,50 +53,87 @@
     position: fixed;
     top: 1rem;
     right: 1rem;
-    z-index: 9999;
+    z-index: 10000;
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
+    pointer-events: none;
   }
 
   .toast {
     display: flex;
     align-items: center;
     gap: 0.75rem;
-    padding: 0.75rem 1rem;
+    padding: 0.875rem 1rem;
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-lg);
-    min-width: 300px;
-    animation: slideIn 0.3s ease-out;
+    min-width: 280px;
+    max-width: 400px;
+    pointer-events: auto;
+    backdrop-filter: blur(8px);
+  }
+
+  .toast-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
   }
 
   .toast-message {
     flex: 1;
     font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-medium);
+    line-height: 1.4;
   }
 
   .toast-close {
+    display: flex;
+    align-items: center;
+    justify-content: center;
     background: transparent;
     border: none;
-    color: inherit;
-    padding: 0;
+    padding: 0.25rem;
     cursor: pointer;
     opacity: 0.7;
-    transition: opacity 0.2s;
+    transition: opacity var(--transition-fast);
+    flex-shrink: 0;
   }
 
   .toast-close:hover {
     opacity: 1;
   }
 
-  @keyframes slideIn {
-    from {
-      transform: translateX(100%);
-      opacity: 0;
+  /* Toast 类型样式 */
+  .toast-success {
+    background: linear-gradient(135deg, rgba(34, 197, 94, 0.95) 0%, rgba(22, 163, 74, 0.95) 100%);
+    color: white;
+  }
+
+  .toast-error {
+    background: linear-gradient(135deg, rgba(239, 68, 68, 0.95) 0%, rgba(220, 38, 38, 0.95) 100%);
+    color: white;
+  }
+
+  .toast-warning {
+    background: linear-gradient(135deg, rgba(245, 158, 11, 0.95) 0%, rgba(217, 119, 6, 0.95) 100%);
+    color: white;
+  }
+
+  .toast-info {
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.95) 0%, rgba(37, 99, 235, 0.95) 100%);
+    color: white;
+  }
+
+  @media (max-width: 480px) {
+    .toast-container {
+      left: 1rem;
+      right: 1rem;
     }
-    to {
-      transform: translateX(0);
-      opacity: 1;
+
+    .toast {
+      min-width: auto;
+      max-width: none;
     }
   }
 </style>

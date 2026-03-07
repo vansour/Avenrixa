@@ -38,20 +38,19 @@
   </label>
 {/if}
 
-<div class="input-wrapper" class:input-wrapper-full={fullWidth} class:input-wrapper-error={hasError} class={className}>
+<div class="input-wrapper {className}" class:input-wrapper-full={fullWidth} class:input-wrapper-error={hasError}>
   {#if icon}
     <span class="input-icon input-icon-left">{@html icon}</span>
   {/if}
 
   <input
     bind:this={inputElement}
-    {type}
+    type={inputType}
     {value}
     {placeholder}
     {disabled}
     {readonly}
     {required}
-    {inputType}
     class="input input-{size}"
     class:input-has-icon-left={icon}
     class:input-has-icon-right={iconRight || type === 'password'}

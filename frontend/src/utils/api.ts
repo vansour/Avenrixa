@@ -2,7 +2,6 @@
  * API 请求工具
  */
 import { API } from '../constants'
-import type { ErrorResponse } from '../types'
 
 /**
  * API 错误类
@@ -16,34 +15,6 @@ export class ApiError extends Error {
     super(message)
     this.name = 'ApiError'
   }
-}
-
-/**
- * 请求优先级
- */
-export enum RequestPriority {
-  LOW = 'low',
-  NORMAL = 'normal',
-  HIGH = 'high',
-}
-
-/**
- * 请求选项
- */
-export interface RequestOptions {
-  key?: string
-  priority?: RequestPriority
-  timeout?: number
-  retries?: number
-  onProgress?: (loaded: number, total: number) => void
-}
-
-/**
- * 响应包装器
- */
-export interface ApiResponse<T> {
-  data?: T
-  error?: ErrorResponse
 }
 
 /**
@@ -150,6 +121,11 @@ export async function deleteRequest<T>(
   return handleResponse<T>(response)
 }
 
+export interface RequestOptions {
+  timeout?: number
+  onUploadProgress?: (progress: number) => void
+}
+
 /**
  * 上传文件
  */
@@ -158,18 +134,63 @@ export async function upload<T>(
   file: File,
   options?: RequestOptions
 ): Promise<T> {
-  const headers = getAuthHeaders()
-  const formData = new FormData()
-  formData.append('file', file)
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    const formData = new FormData()
+    formData.append('file', file)
 
-  const response = await fetch(API.BASE_URL + url, {
-    method: 'POST',
-    headers,
-    body: formData,
-    signal: createAbortSignal(options?.timeout),
+    xhr.open('POST', API.BASE_URL + url)
+
+    // 设置认证头
+    const authHeaders = getAuthHeaders()
+    if (authHeaders) {
+      for (const [key, value] of Object.entries(authHeaders)) {
+        xhr.setRequestHeader(key, value as string)
+      }
+    }
+
+    // 进度回调
+    if (options?.onUploadProgress) {
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) {
+          const progress = Math.round((event.loaded / event.total) * 100)
+          options.onUploadProgress!(progress)
+        }
+      }
+    }
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          const data = JSON.parse(xhr.responseText)
+          resolve(data as T)
+        } catch (e) {
+          reject(new ApiError('解析响应失败'))
+        }
+      } else {
+        let errorMsg = xhr.statusText
+        try {
+          const errorData = JSON.parse(xhr.responseText)
+          errorMsg = errorData.error || errorMsg
+        } catch (e) {}
+        reject(new ApiError(errorMsg, xhr.status))
+      }
+    }
+
+    xhr.onerror = () => {
+      reject(new ApiError('网络错误'))
+    }
+
+    xhr.ontimeout = () => {
+      reject(new ApiError('请求超时'))
+    }
+
+    if (options?.timeout) {
+      xhr.timeout = options.timeout
+    }
+
+    xhr.send(formData)
   })
-
-  return handleResponse<T>(response)
 }
 
 /**

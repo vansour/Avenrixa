@@ -22,21 +22,6 @@ async fn handle_spa(_req: Request) -> Html<String> {
     }
 }
 
-/// 创建静态文件服务路由
-pub fn create_static_routes(config: &Config) -> Router {
-    let images_serve_dir = ServeDir::new(format!("{}/images", config.storage.path));
-    let frontend_dist = ServeDir::new("frontend/dist");
-    let assets_dir = ServeDir::new("frontend/dist/assets");
-
-    // 先处理特定文件，然后是静态目录，最后是 SPA fallback
-    Router::new()
-        .nest_service("/images", images_serve_dir)
-        .nest_service("/assets", assets_dir)
-        .nest_service("/favicon.ico", frontend_dist.clone())
-        .fallback_service(frontend_dist.clone())
-        .fallback(handle_spa)
-}
-
 /// 创建CORS层
 pub fn create_cors_layer(config: &Config) -> CorsLayer {
     if config.server.cors_origins == "*" {
@@ -75,12 +60,24 @@ pub fn create_cors_layer(config: &Config) -> CorsLayer {
 
 /// 创建完整的应用路由
 pub fn create_app_router(state: AppState, config: &Config) -> Router {
-    let api_routes = Router::new().merge(create_routes()).with_state(state);
+    let api_routes = create_routes().with_state(state);
+    let api_routes_v1 = Router::new().nest("/api/v1", api_routes);
 
-    let static_routes = create_static_routes(config);
+    let images_serve_dir = ServeDir::new(format!("{}/images", config.storage.path));
+    let frontend_dist = ServeDir::new("frontend/dist");
+    let assets_dir = ServeDir::new("frontend/dist/assets");
+
     let cors = create_cors_layer(config);
 
-    api_routes.merge(static_routes).layer(cors)
+    // 路由顺序很重要：先 API 路由，再静态文件，最后 SPA fallback
+    Router::new()
+        .merge(api_routes_v1)
+        .nest_service("/images", images_serve_dir)
+        .nest_service("/assets", assets_dir)
+        .nest_service("/favicon.ico", frontend_dist.clone())
+        .fallback_service(frontend_dist)
+        .fallback(handle_spa)
+        .layer(cors)
 }
 
 /// 创建带中间件的应用路由

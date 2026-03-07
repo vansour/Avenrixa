@@ -2,7 +2,7 @@
  * API 请求封装
  */
 import { get, post, put, deleteRequest, upload } from '../utils/api'
-import type { Image, Pagination, SystemStats, AuditLogResponse, Setting, EditImageResponse } from '../types'
+import type { Image, Pagination, SystemStats, AuditLogResponse, Setting, EditImageRequest, EditImageResponse } from '../types'
 import { API } from '../constants'
 
 // ==================== 图片 API ====================
@@ -13,9 +13,6 @@ import { API } from '../constants'
 export async function getImages(params?: {
   page?: number
   page_size?: number
-  sort_by?: string
-  sort_order?: 'ASC' | 'DESC'
-  search?: string
 }): Promise<Pagination<Image>> {
   return await get<Pagination<Image>>(`${API.BASE_URL}/images`, params)
 }
@@ -25,9 +22,6 @@ export async function getImages(params?: {
  */
 export async function getImagesCursor(params?: {
   page_size?: number
-  sort_by?: string
-  sort_order?: 'ASC' | 'DESC'
-  search?: string
   cursor?: string
 }): Promise<{ data: Image[]; next_cursor?: string }> {
   return await get(`${API.BASE_URL}/images/cursor`, params)
@@ -36,8 +30,13 @@ export async function getImagesCursor(params?: {
 /**
  * 上传图片
  */
-export async function uploadImage(file: File): Promise<Image | null> {
-  return await upload<Image>(`${API.BASE_URL}/upload`, file)
+export async function uploadImage(
+  file: File,
+  onProgress?: (progress: number) => void
+): Promise<Image | null> {
+  return await upload<Image>(`${API.BASE_URL}/upload`, file, {
+    onUploadProgress: onProgress
+  })
 }
 
 /**
@@ -97,7 +96,7 @@ export async function duplicateImage(id: string): Promise<Image | null> {
 /**
  * 编辑图片
  */
-export async function editImage(id: string, params: any): Promise<EditImageResponse> {
+export async function editImage(id: string, params: EditImageRequest): Promise<EditImageResponse> {
   return await post<EditImageResponse>(`${API.BASE_URL}/images/${id}/edit`, params)
 }
 
@@ -189,5 +188,5 @@ export async function cleanupExpiredImages(): Promise<number> {
  * 健康检查
  */
 export async function healthCheck(): Promise<any> {
-  return await get(`${API.BASE_URL}/health`)
+  return await get('/health')
 }

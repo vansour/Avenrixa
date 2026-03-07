@@ -7,7 +7,7 @@
   $: items = Array.from({ length: count }, (_, i) => i)
 </script>
 
-{#each items as _ (index)}
+{#each items as _, index (index)}
   <div
     class="skeleton {rounded ? 'skeleton-rounded' : ''}"
     style:width={typeof width === 'number' ? `${width}px` : width}
@@ -24,19 +24,19 @@
     var(--bg-secondary) 75%
   );
   background-size: 200% 100%;
-  animation: shimmer 1.5s infinite;
+  animation: skeleton-shimmer 1.5s infinite;
 }
 
-.skeleton-rounded {
-  border-radius: var(--radius-lg);
-}
-
-@keyframes shimmer {
+@keyframes skeleton-shimmer {
   0% {
     background-position: 200% 0;
   }
   100% {
     background-position: -200% 0;
   }
+}
+
+.skeleton-rounded {
+  border-radius: var(--radius-lg);
 }
 </style>

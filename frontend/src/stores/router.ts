@@ -1,16 +1,31 @@
 /**
  * 路由状态管理
+ * 统一的路由配置和导航
  */
-import { writable, derived } from 'svelte/store'
-import type { Image } from '../types'
+import { writable } from 'svelte/store'
 
-// 当前路由
+// 路由路径常量
+export const ROUTES = {
+  HOME: '/',
+  LOGIN: '/login',
+  REGISTER: '/register',
+  SETTINGS: '/settings',
+  PROFILE: '/profile',
+  TRASH: '/trash',
+} as const
+
+// 当前路由状态
 export const page = writable({
   url: new URL(window.location.href),
   params: new URLSearchParams(window.location.search),
 })
 
-// 监听路由变化
+// 当前页面路径（简化版）
+export const currentPage = writable<string>('/')
+
+/**
+ * 导航到指定路径
+ */
 export function navigate(path: string, params?: Record<string, string>) {
   const url = new URL(window.location.origin + path)
   if (params) {
@@ -19,15 +34,9 @@ export function navigate(path: string, params?: Record<string, string>) {
     })
   }
   page.set({ url, params: new URLSearchParams(url.search) })
+  currentPage.set(path)
   window.history.pushState({}, '', url.toString())
 }
 
-// 路由定义
-export const routes = {
-  home: '/',
-  login: '/login',
-  register: '/register',
-  settings: '/settings',
-  profile: '/profile',
-  trash: '/trash',
-}
+// 兼容性别名
+export const routes = ROUTES

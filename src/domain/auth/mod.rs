@@ -6,6 +6,9 @@ pub mod service;
 pub mod repository;
 pub mod domain_service;
 
+#[cfg(test)]
+pub mod mock_repository;
+
 // 导出领域层类型
 pub use claims::Claims;
 pub use service::AuthService;

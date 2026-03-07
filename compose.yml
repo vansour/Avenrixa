@@ -4,6 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: vansour-image
+    image: ghcr.io/vansour/vansour-image:dev
     ports:
       - "8080:8080"
     depends_on:

@@ -30,6 +30,15 @@ impl ImageProcessor {
         }
     }
 
+    #[tracing::instrument(skip(self, path))]
+    pub fn process_from_file(&self, path: &std::path::Path) -> Result<(Vec<u8>, Vec<u8>)> {
+        let img = image::open(path)?;
+        let compressed = self.compress(&img)?;
+        let thumbnail = self.generate_thumbnail(&img)?;
+        Ok((compressed, thumbnail))
+    }
+
+    #[tracing::instrument(skip(self, data))]
     pub fn process(&self, data: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
         if data.starts_with(&[0x00, 0x00, 0x01, 0x00]) {
             return Ok((data.to_vec(), data.to_vec()));
@@ -40,6 +49,7 @@ impl ImageProcessor {
         Ok((compressed, thumbnail))
     }
 
+    #[tracing::instrument(skip(self, data))]
     pub fn edit_image(
         &self,
         data: &[u8],

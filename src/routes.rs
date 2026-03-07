@@ -34,133 +34,133 @@ pub fn create_routes() -> Router<AppState> {
         .route("/health", routing::get(crate::admin_handlers::health_check))
         .route("/thumbnails/{id}", routing::get(serve_thumbnail))
         .route(
-            "/api/auth/register",
+            "/auth/register",
             routing::post(crate::auth_handlers::register),
         )
         .route(
-            "/api/auth/login",
+            "/auth/login",
             routing::post(crate::auth_handlers::login),
         )
         .route(
-            "/api/auth/forgot-password",
+            "/auth/forgot-password",
             routing::post(crate::auth_handlers::forgot_password),
         )
         .route(
-            "/api/auth/reset-password",
+            "/auth/reset-password",
             routing::post(crate::auth_handlers::reset_password),
         )
         .route(
-            "/api/auth/refresh",
+            "/auth/refresh",
             routing::post(crate::auth_handlers::refresh_token),
         );
 
     // 需要认证的 API 路由
     let protected_routes = Router::new()
         .route(
-            "/api/upload",
+            "/upload",
             routing::post(crate::image_handlers::upload_image),
         )
         .route(
-            "/api/images",
+            "/images",
             routing::get(crate::image_handlers::get_images),
         )
         .route(
-            "/api/images/cursor",
+            "/images/cursor",
             routing::get(crate::handlers::images_cursor::get_images),
         )
         .route(
-            "/api/images",
+            "/images",
             routing::delete(crate::image_handlers::delete_images),
         )
         .route(
-            "/api/images/{id}",
+            "/images/{id}",
             routing::get(crate::image_handlers::get_image),
         )
         .route(
-            "/api/images/{id}/edit",
+            "/images/{id}/edit",
             routing::post(crate::image_handlers::edit_image),
         )
         .route(
-            "/api/images/{id}",
+            "/images/{id}",
             routing::put(crate::image_handlers::update_image),
         )
         .route(
-            "/api/images/{id}/rename",
+            "/images/{id}/rename",
             routing::put(crate::image_handlers::rename_image),
         )
         .route(
-            "/api/images/{id}/expiry",
+            "/images/{id}/expiry",
             routing::put(crate::image_handlers::set_expiry),
         )
         .route(
-            "/api/images/{id}/duplicate",
+            "/images/{id}/duplicate",
             routing::post(crate::image_handlers::duplicate_image),
         )
         .route(
-            "/api/images/deleted",
+            "/images/deleted",
             routing::get(crate::image_handlers::get_deleted_images),
         )
         .route(
-            "/api/images/restore",
+            "/images/restore",
             routing::post(crate::image_handlers::restore_images),
         )
         .route(
-            "/api/auth/me",
+            "/auth/me",
             routing::get(crate::auth_handlers::get_current_user),
         )
         .route(
-            "/api/auth/change-password",
+            "/auth/change-password",
             routing::post(crate::auth_handlers::change_password),
         )
         .route(
-            "/api/auth/logout",
+            "/auth/logout",
             routing::post(crate::auth_handlers::logout),
         )
         .route(
-            "/api/settings",
+            "/settings",
             routing::get(crate::admin_handlers::get_settings_public),
         );
 
     // 管理员路由
     let admin_routes = Router::new()
         .route(
-            "/api/cleanup",
+            "/cleanup",
             routing::post(crate::admin_handlers::cleanup_deleted_files),
         )
         .route(
-            "/api/cleanup/expired",
+            "/cleanup/expired",
             routing::post(crate::admin_handlers::cleanup_expired_images),
         )
         .route(
-            "/api/backup",
+            "/backup",
             routing::post(crate::admin_handlers::backup_database),
         )
         .route(
-            "/api/approve",
+            "/approve",
             routing::post(crate::admin_handlers::approve_images),
         )
         .route(
-            "/admin/users",
+            "/users",
             routing::get(crate::admin_handlers::get_users),
         )
         .route(
-            "/admin/users/{id}",
+            "/users/{id}",
             routing::put(crate::admin_handlers::update_user_role),
         )
         .route(
-            "/admin/audit-logs",
+            "/audit-logs",
             routing::get(crate::admin_handlers::get_audit_logs),
         )
         .route(
-            "/admin/stats",
+            "/stats",
             routing::get(crate::admin_handlers::get_system_stats),
         )
         .route(
-            "/admin/settings",
+            "/settings",
             routing::get(crate::admin_handlers::get_settings),
         )
         .route(
-            "/api/settings/{key}",
+            "/settings/{key}",
             routing::put(crate::admin_handlers::update_setting),
         );
 

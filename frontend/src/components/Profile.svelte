@@ -1,11 +1,10 @@
 <script lang="ts">
-  import { tick } from 'svelte'
+  import { tick, onMount } from 'svelte'
   import { User, Lock, AlertTriangle } from 'lucide-svelte'
   import { auth, logout } from '../stores/auth'
   import { post } from '../utils/api'
   import { toast } from '../stores/toast'
-  import * as CONSTANTS from '../constants'
-
+  import { createFocusTrap } from '../utils/focusTrap'
   export let close: () => void = () => {}
 
   let loading = false
@@ -57,6 +56,9 @@
     }
   }
 
+  let profileCardEl: HTMLElement
+  let focusTrapCleanup: (() => void) | null = null
+
   const handleEscape = (e: KeyboardEvent) => {
     if (e.key === 'Escape') {
       close()
@@ -67,11 +69,24 @@
     form.newPassword.length >= 6 &&
     form.confirmPassword.length >= 6 &&
     form.newPassword === form.confirmPassword
+
+  onMount(() => {
+    if (profileCardEl) {
+      focusTrapCleanup = createFocusTrap(profileCardEl, {
+        escapeDeactivates: close
+      })
+    }
+    return () => {
+      if (focusTrapCleanup) {
+        focusTrapCleanup()
+      }
+    }
+  })
 </script>
 
-<div class="profile" role="dialog" aria-modal="true" aria-labelledby="profile-title" on:click={handleBackdropClick} on:keydown={handleEscape}>
+<div class="profile" role="dialog" aria-modal="true" aria-labelledby="profile-title" tabindex="-1" on:click={handleBackdropClick} on:keydown={handleEscape}>
   <div class="profile-bg"></div>
-  <div class="profile-card">
+  <div bind:this={profileCardEl} class="profile-card">
     <button on:click={close} class="btn-close" aria-label="关闭对话框">
       ×
     </button>
@@ -87,7 +102,7 @@
       </h3>
       <div class="form-group">
         <label for="username-display">用户名</label>
-        <div id="username-display" class="username-display" role="text">
+        <div id="username-display" class="username-display">
           <User size={16} />
           <span>{$auth.user?.username || '-'}</span>
         </div>
@@ -408,12 +423,6 @@
 
   .password-hint.show {
     animation: shake 0.5s ease-in-out;
-  }
-
-  @keyframes shake {
-    0%, 100% { transform: translateX(0); }
-    25% { transform: translateX(-4px); }
-    75% { transform: translateX(4px); }
   }
 
   .btn {

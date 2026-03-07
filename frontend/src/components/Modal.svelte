@@ -11,17 +11,17 @@
 
   const dispatch = createEventDispatcher()
 
-  let dialogElement: HTMLDivElement
-  let contentElement: HTMLDivElement
   let animationClass = ''
+  let closeTimer: ReturnType<typeof setTimeout> | null = null
 
   const close = () => {
     if (!closable) return
     animationClass = 'modal-exit'
-    setTimeout(() => {
+    closeTimer = setTimeout(() => {
       visible = false
       dispatch('close')
       animationClass = ''
+      closeTimer = null
     }, 200)
   }
 
@@ -62,6 +62,10 @@
   onDestroy(() => {
     document.removeEventListener('keydown', handleKeyDown)
     document.body.style.overflow = ''
+    if (closeTimer) {
+      clearTimeout(closeTimer)
+      closeTimer = null
+    }
   })
 </script>
 

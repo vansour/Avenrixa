@@ -35,6 +35,7 @@ impl<R: AuthRepository> AuthDomainService<R> {
     }
 
     /// 用户注册
+    #[tracing::instrument(skip(self, req), fields(username = %req.username))]
     pub async fn register(&self, req: RegisterRequest) -> Result<AuthResponse, AppError> {
         // 1. 验证用户名
         if req.username.len() < 3 || req.username.len() > 50 {
@@ -77,6 +78,7 @@ impl<R: AuthRepository> AuthDomainService<R> {
     }
 
     /// 用户登录
+    #[tracing::instrument(skip(self, req), fields(username = %req.username))]
     pub async fn login(&self, req: LoginRequest) -> Result<(AuthResponse, String), AppError> {
         // 1. 查找用户
         let user = self.repository.find_user_by_username(&req.username).await?
@@ -235,5 +237,73 @@ impl<R: AuthRepository> AuthDomainService<R> {
             .ok_or(AppError::UserNotFound)?;
 
         Ok(user.into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::super::mock_repository::MockAuthRepository;
+    use crate::config::Config;
+    use super::super::service::AuthService;
+
+    #[tokio::test]
+    async fn test_register_success() {
+        let repo = MockAuthRepository::new();
+        let config = Config::default();
+        let auth_service = AuthService::new(&config).unwrap();
+        let service = AuthDomainService::new(repo, auth_service);
+
+        let req = RegisterRequest {
+            username: "testuser".to_string(),
+            password: "password123".to_string(),
+        };
+
+        let res = service.register(req).await.unwrap();
+        assert_eq!(res.user.username, "testuser");
+    }
+
+    #[tokio::test]
+    async fn test_login_success() {
+        let repo = MockAuthRepository::new();
+        let config = Config::default();
+        let auth_service = AuthService::new(&config).unwrap();
+        let service = AuthDomainService::new(repo, auth_service);
+
+        // 先注册
+        let reg_req = RegisterRequest {
+            username: "loginuser".to_string(),
+            password: "password123".to_string(),
+        };
+        service.register(reg_req).await.unwrap();
+
+        // 再登录
+        let login_req = LoginRequest {
+            username: "loginuser".to_string(),
+            password: "password123".to_string(),
+        };
+        let (res, _) = service.login(login_req).await.unwrap();
+        assert_eq!(res.user.username, "loginuser");
+    }
+
+    #[tokio::test]
+    async fn test_login_wrong_password() {
+        let repo = MockAuthRepository::new();
+        let config = Config::default();
+        let auth_service = AuthService::new(&config).unwrap();
+        let service = AuthDomainService::new(repo, auth_service);
+
+        let reg_req = RegisterRequest {
+            username: "wrongpass".to_string(),
+            password: "password123".to_string(),
+        };
+        service.register(reg_req).await.unwrap();
+
+        let login_req = LoginRequest {
+            username: "wrongpass".to_string(),
+            password: "wrongpassword".to_string(),
+        };
+        let res = service.login(login_req).await;
+        assert!(matches!(res, Err(AppError::InvalidPassword)));
     }
 }

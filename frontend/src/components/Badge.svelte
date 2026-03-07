@@ -6,23 +6,33 @@
   export let className = ''
   export let href = ''
   export let target = '_blank'
-
-  $: tag = href ? 'a' : 'span'
 </script>
 
-<svelte:element
-  this={tag}
-  class="badge badge-{variant} badge-{size} {className}"
-  class:badge-dot={dot}
-  class:badge-outlined={outlined}
-  {href}
-  {target}
->
-  {#if dot}
-    <span class="badge-dot-icon"></span>
-  {/if}
-  <slot />
-</svelte:element>
+{#if href}
+  <a
+    class="badge badge-{variant} badge-{size} {className}"
+    class:badge-dot={dot}
+    class:badge-outlined={outlined}
+    {href}
+    {target}
+  >
+    {#if dot}
+      <span class="badge-dot-icon"></span>
+    {/if}
+    <slot />
+  </a>
+{:else}
+  <span
+    class="badge badge-{variant} badge-{size} {className}"
+    class:badge-dot={dot}
+    class:badge-outlined={outlined}
+  >
+    {#if dot}
+      <span class="badge-dot-icon"></span>
+    {/if}
+    <slot />
+  </span>
+{/if}
 
 <style>
 .badge {
@@ -35,14 +45,10 @@
   font-weight: var(--font-weight-medium);
   white-space: nowrap;
   transition: all var(--transition-fast);
-}
-
-.badge:global(a) {
   text-decoration: none;
 }
 
-.badge:global(a:hover) {
-  text-decoration: none;
+a.badge:hover {
   opacity: 0.8;
 }
 
@@ -64,12 +70,12 @@
 
 /* Variants - Filled */
 .badge-default {
-  background: var(--bg-secondary);
-  color: var(--text-primary);
+  background: var(--muted);
+  color: var(--foreground);
 }
 
 .badge-primary {
-  background: var(--color-primary);
+  background: var(--primary);
   color: white;
 }
 
@@ -80,7 +86,7 @@
 
 .badge-warning {
   background: var(--color-warning);
-  color: var(--text-primary);
+  color: var(--foreground);
 }
 
 .badge-danger {
@@ -96,14 +102,14 @@
 /* Variants - Outlined */
 .badge-outlined.badge-default {
   background: transparent;
-  border: 1px solid var(--border-color);
-  color: var(--text-primary);
+  border: 1px solid var(--border);
+  color: var(--foreground);
 }
 
 .badge-outlined.badge-primary {
   background: transparent;
-  border: 1px solid var(--color-primary);
-  color: var(--color-primary);
+  border: 1px solid var(--primary);
+  color: var(--primary);
 }
 
 .badge-outlined.badge-success {
@@ -140,11 +146,11 @@
 }
 
 .badge-dot.badge-default {
-  background: var(--text-tertiary);
+  background: var(--muted-foreground);
 }
 
 .badge-dot.badge-primary {
-  background: var(--color-primary);
+  background: var(--primary);
 }
 
 .badge-dot.badge-success {

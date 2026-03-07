@@ -14,15 +14,16 @@
     Download,
     Check
   } from 'lucide-svelte'
-  import { toast } from '../stores/toast'
+  import { toastSuccess, toastError } from '../stores/toast'
   import { EDITOR_DEFAULTS } from '../constants'
+  import { debounce } from '../utils/debounce'
 
   export let visible = false
   export let imageUrl = ''
   export let filename = ''
 
   type EditorState = {
-    rotate: number
+    rotate: number | null
     brightness: number
     contrast: number
     saturation: number
@@ -31,6 +32,7 @@
     watermarkText: string
     watermarkPosition: string
     watermarkOpacity: number
+    convertFormat: string
   }
 
   let canvas: HTMLCanvasElement
@@ -115,7 +117,7 @@
     const textMetrics = ctx.measureText(text)
     const textWidth = textMetrics.width
 
-    let x, y
+    let x = 0, y = 0
     switch (position) {
       case 'top-left':
         x = padding
@@ -178,12 +180,12 @@
     link.href = $previewUrl
     link.download = `edited_${filename}`
     link.click()
-    toast.success('图片已下载')
+    toastSuccess('图片已下载')
   }
 
   const handleSave = () => {
     // 这里应该调用 API 保存编辑后的图片
-    toast.success('图片编辑已保存')
+    toastSuccess('图片编辑已保存')
     visible = false
   }
 
@@ -200,7 +202,7 @@
       applyFilters()
     } catch (error) {
       console.error('加载图片失败:', error)
-      toast.error('加载图片失败')
+      toastError('加载图片失败')
     }
   })
 

@@ -33,7 +33,7 @@
   </label>
 {/if}
 
-<div class="select-wrapper" class:select-wrapper-full={fullWidth} class:select-wrapper-error={hasError} class={className}>
+<div class="select-wrapper {className}" class:select-wrapper-full={fullWidth} class:select-wrapper-error={hasError}>
   <select
     bind:this={selectElement}
     bind:value

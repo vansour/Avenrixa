@@ -3,11 +3,18 @@
  * 使用 Svelte stores
  */
 import { writable, derived, get } from 'svelte/store'
-import type { User, AuthResponse, LoginRequest, RegisterRequest, ChangePasswordRequest, ChangePasswordResult } from '../types'
-import { API } from '../constants'
+import type { User, AuthResponse, LoginRequest, RegisterRequest, ChangePasswordRequest, ChangePasswordResult, UnknownError, getErrorMessage } from '../types'
+import { getErrorMessage } from '../types'
+import { API, STORAGE_KEYS } from '../constants'
 import { get as getReq, post } from '../utils/api'
 
-const STORAGE_KEY = 'vansour_auth'
+const STORAGE_KEY = STORAGE_KEYS.AUTH
+
+// 认证结果类型
+export interface AuthResult {
+  success: boolean
+  error?: string
+}
 
 interface AuthState {
   token: string | null
@@ -63,13 +70,13 @@ function saveAuth(token: string, user: User): void {
 /**
  * 用户注册
  */
-export async function register(data: RegisterRequest): Promise<boolean> {
+export async function register(data: RegisterRequest): Promise<AuthResult> {
   const $auth = get(auth)
   auth.set({ ...$auth, loading: true })
 
   try {
-    const response = await post<AuthResponse>(`${API.BASE_URL}/auth/register`, data)
-    const authData = response as any
+    const response = await post<AuthResponse>(`/auth/register`, data)
+    const authData = response
 
     saveAuth(authData.access_token, authData.user)
     auth.set({
@@ -77,23 +84,24 @@ export async function register(data: RegisterRequest): Promise<boolean> {
       user: authData.user,
       loading: false,
     })
-    return true
-  } catch (error) {
+    return { success: true }
+  } catch (error: UnknownError) {
     auth.set({ ...$auth, loading: false })
-    return false
+    const errorMessage = getErrorMessage(error)
+    return { success: false, error: errorMessage || '注册失败，请稍后重试' }
   }
 }
 
 /**
  * 用户登录
  */
-export async function login(data: LoginRequest): Promise<boolean> {
+export async function login(data: LoginRequest): Promise<AuthResult> {
   const $auth = get(auth)
   auth.set({ ...$auth, loading: true })
 
   try {
-    const response = await post<AuthResponse>(`${API.BASE_URL}/auth/login`, data)
-    const authData = response as any
+    const response = await post<AuthResponse>(`/auth/login`, data)
+    const authData = response
 
     saveAuth(authData.access_token, authData.user)
     auth.set({
@@ -101,10 +109,12 @@ export async function login(data: LoginRequest): Promise<boolean> {
       user: authData.user,
       loading: false,
     })
-    return true
-  } catch (error) {
+    return { success: true }
+  } catch (error: UnknownError) {
     auth.set({ ...$auth, loading: false })
-    return false
+    const errorMessage = getErrorMessage(error)
+    return { success: false, error: errorMessage || '登录失败，请检查用户名和密码' }
+    return { success: false, error: errorMessage }
   }
 }
 
@@ -116,7 +126,7 @@ export async function getCurrentUser(): Promise<User | null> {
   if (!$auth.token) return null
 
   try {
-    const user = await getReq<User>(`${API.BASE_URL}/auth/me`)
+    const user = await getReq<User>(`/auth/me`)
     auth.update(state => ({ ...state, user }))
     saveAuth($auth.token, user)
     return user
@@ -140,10 +150,11 @@ export async function changePassword(data: ChangePasswordRequest): Promise<Chang
   if (!$auth.token) return 'invalid_password'
 
   try {
-    await post(`${API.BASE_URL}/auth/change-password`, data)
+    await post(`/auth/change-password`, data)
     return 'success'
-  } catch (error: any) {
-    if (error.message?.includes('未授权')) {
+  } catch (error: UnknownError) {
+    const message = getErrorMessage(error)
+    if (message.includes('未授权')) {
       return 'invalid_password'
     }
     return 'error'
@@ -155,7 +166,7 @@ export async function changePassword(data: ChangePasswordRequest): Promise<Chang
  */
 export async function forgotPassword(email: string): Promise<boolean> {
   try {
-    await post(`${API.BASE_URL}/auth/forgot-password`, { email })
+    await post(`/auth/forgot-password`, { email })
     return true
   } catch {
     return false
@@ -167,7 +178,7 @@ export async function forgotPassword(email: string): Promise<boolean> {
  */
 export async function resetPassword(token: string, newPassword: string): Promise<boolean> {
   try {
-    await post(`${API.BASE_URL}/auth/reset-password`, { token, new_password: newPassword })
+    await post(`/auth/reset-password`, { token, new_password: newPassword })
     return true
   } catch {
     return false
@@ -179,7 +190,7 @@ export async function resetPassword(token: string, newPassword: string): Promise
  */
 export async function refreshTokenFunc(refreshToken: string): Promise<boolean> {
   try {
-    const response = await post<AuthResponse>(`${API.BASE_URL}/auth/refresh`, { refreshToken })
+    const response = await post<AuthResponse>(`/auth/refresh`, { refreshToken })
     const authData = response as any
 
     saveAuth(authData.access_token, authData.user)

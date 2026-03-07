@@ -2,9 +2,10 @@
   import { onMount, onDestroy } from 'svelte'
   import { writable } from 'svelte/store'
   import { RefreshCw } from 'lucide-svelte'
-  import { auth } from '../stores/auth'
+  import { auth, logout } from '../stores/auth'
   import { get, post } from '../utils/api'
   import { toast } from '../stores/toast'
+  import { formatFileSize, formatDate as formatDateUtil } from '../utils/format'
   import UserMenu from './UserMenu.svelte'
   import Profile from './Profile.svelte'
   import * as CONSTANTS from '../constants'
@@ -14,7 +15,7 @@
   type AdminUser = {
     id: string
     username: string
-    role: string
+    role: 'user' | 'admin'
     created_at: string
   }
 
@@ -55,7 +56,7 @@
   let loading = writable<boolean>(false)
   let saving = writable<boolean>(false)
   let backingUp = writable<boolean>(false)
-  let user = writable(auth.currentUser)
+  let user = writable($auth.user)
 
   // 设置分组
   const sections = [
@@ -119,7 +120,7 @@
   let lastBackup = writable<BackupInfo | null>(null)
 
   const handleLogout = () => {
-    auth.logout()
+    logout()
     window.location.hash = '#/'
   }
 
@@ -132,7 +133,6 @@
       }
       settings.forEach((s: Setting) => {
         if (!s || !s.key || !s.value) {
-          console.warn('跳过无效的设置项:', s)
           return
         }
         switch (s.key) {
@@ -167,11 +167,10 @@
             securitySettings.enableRegistration = s.value === 'true'
             break
           default:
-            console.warn('未知的设置 key:', s.key)
+            // 忽略未知的设置项
         }
       })
     } catch (error) {
-      console.error('加载设置失败:', error)
       toast.error('加载设置失败，请稍后重试')
     } finally {
       loading.set(false)
@@ -257,8 +256,8 @@
       const data = await get<any>('/health')
       systemInfo.dbStatus = data.database?.status || 'unknown'
       systemInfo.redisStatus = data.redis?.status || 'unknown'
-    } catch (error) {
-      console.error('Failed to load system info:', error)
+    } catch {
+      // 静默处理错误
     }
   }
 
@@ -276,32 +275,31 @@
   const loadAdminStats = () => {
     get<SystemStats>('/api/admin/stats').then(data => {
       adminStats.set(data)
-    }).catch(error => {
-      console.error('加载系统统计失败:', error)
+    }).catch(() => {
+      // 静默处理错误
     })
   }
 
   const loadUsers = () => {
     get<AdminUser[]>('/api/admin/users').then(data => {
       adminUsers.set(data)
-    }).catch(error => {
-      console.error('加载用户列表失败:', error)
+    }).catch(() => {
+      // 静默处理错误
     })
   }
 
   const loadAuditLogs = (page = 1) => {
     get<AuditLogResponse>('/api/admin/audit-logs', { page, page_size: 20 }).then(data => {
       auditLogs.set(data)
-    }).catch(error => {
-      console.error('加载审计日志失败:', error)
+    }).catch(() => {
+      // 静默处理错误
     })
   }
 
   const updateUserRole = (userId: string, role: 'user' | 'admin') => {
     post(`/api/admin/users/${userId}/role`, { role }).then(() => {
       toast.success('用户角色已更新')
-    }).catch(error => {
-      console.error('更新用户角色失败:', error)
+    }).catch(() => {
       toast.error('更新失败')
     })
   }
@@ -313,30 +311,21 @@
         lastBackup.set(result)
         toast.success('备份创建成功')
       }
-    }).catch(error => {
-      console.error('创建备份失败:', error)
+    }).catch(() => {
       toast.error('备份创建失败')
     }).finally(() => {
       backingUp.set(false)
     })
   }
 
-  const formatSize = (bytes: number) => {
-    const KB = 1024
-    const MB = KB * 1024
-    const GB = MB * 1024
-    if (bytes >= GB) return `${(bytes / GB).toFixed(2)} GB`
-    if (bytes >= MB) return `${(bytes / MB).toFixed(2)} MB`
-    if (bytes >= KB) return `${(bytes / KB).toFixed(2)} KB`
-    return `${bytes} B`
-  }
+  const formatSize = formatFileSize
 
   const formatDate = (dateStr: string) => {
     const date = new Date(dateStr)
     return date.toLocaleString('zh-CN')
   }
 
-  const formatDetails = (details: AuditLogDetail) => {
+  const formatDetails = (details: AuditLogDetail | undefined) => {
     return details ? JSON.stringify(details) : '-'
   }
 
@@ -368,9 +357,7 @@
     <div class="header-actions">
       {#if $user}
         <UserMenu
-          user={$user}
-          on:profile={() => showProfile.set(true)}
-          on:logout={handleLogout}
+          onSettings={() => showProfile.set(true)}
         />
       {/if}
       <button on:click={() => (window.location.hash = '#/')} class="btn-nav" aria-label="返回主页">
@@ -400,7 +387,7 @@
     <main class="settings-main">
       {#if $loading}
         <div class="loading-state">
-          <div class="spinner"></div>
+          <div class="spinner spinner-xl"></div>
           <span>加载设置中...</span>
         </div>
       {:else}
@@ -447,7 +434,7 @@
               <div class="section-actions">
                 <button on:click={saveBasicSettings} class="btn-save" disabled={$saving} aria-live={$saving ? 'polite' : 'off'}>
                   {#if $saving}
-                    <RefreshCw size={18} class="spinner-icon animate-spin" />
+                    <RefreshCw size={18} class="animate-spin" />
                   {:else}
                     <span>保存基本设置</span>
                   {/if}
@@ -521,7 +508,7 @@
               <div class="section-actions">
                 <button on:click={saveUploadSettings} class="btn-save" disabled={$saving} aria-live={$saving ? 'polite' : 'off'}>
                   {#if $saving}
-                    <RefreshCw size={18} class="spinner-icon animate-spin" />
+                    <RefreshCw size={18} class="animate-spin" />
                   {:else}
                     <span>保存上传设置</span>
                   {/if}
@@ -581,7 +568,7 @@
               <div class="section-actions">
                 <button on:click={saveStorageSettings} class="btn-save" disabled={$saving} aria-live={$saving ? 'polite' : 'off'}>
                   {#if $saving}
-                    <RefreshCw size={18} class="spinner-icon animate-spin" />
+                    <RefreshCw size={18} class="animate-spin" />
                   {:else}
                     <span>保存存储设置</span>
                   {/if}
@@ -624,7 +611,7 @@
               <div class="section-actions">
                 <button on:click={saveSecuritySettings} class="btn-save" disabled={$saving} aria-live={$saving ? 'polite' : 'off'}>
                   {#if $saving}
-                    <RefreshCw size={18} class="spinner-icon animate-spin" />
+                    <RefreshCw size={18} class="animate-spin" />
                   {:else}
                     <span>保存安全设置</span>
                   {/if}
@@ -941,20 +928,6 @@
   gap: 20px;
 }
 
-.spinner {
-  width: 48px;
-  height: 48px;
-  border: 4px solid var(--border-color);
-  border-top-color: var(--color-primary);
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
 /* 设置内容 */
 .settings-content {
   display: flex;
@@ -975,17 +948,7 @@
 
 .settings-section.active {
   display: block;
-}
-
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  animation: fadeInUp 0.3s ease-out;
 }
 
 .section-header {
@@ -1207,10 +1170,6 @@
   opacity: 0.6;
   cursor: not-allowed;
   transform: none !important;
-}
-
-.spinner-icon {
-  animation: spin 1s linear infinite;
 }
 
 /* 系统信息 */

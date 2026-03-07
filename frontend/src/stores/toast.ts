@@ -1,7 +1,7 @@
 /**
  * Toast 通知状态管理
  */
-import { writable, derived } from 'svelte/store'
+import { writable } from 'svelte/store'
 import type { Toast, ToastType, ToastPriority } from '../types'
 import { TOAST } from '../constants'
 
@@ -14,6 +14,9 @@ export const toastState = writable<ToastState>({
   toasts: [],
 })
 
+// 定时器映射，用于清理
+const toastTimers: Map<string, ReturnType<typeof setTimeout>> = new Map()
+
 // 优先级排序
 const priorityOrder: Record<ToastPriority, number> = {
   high: 3,
@@ -23,6 +26,7 @@ const priorityOrder: Record<ToastPriority, number> = {
 
 /**
  * 显示 Toast 通知
+ * @returns toast id，可用于取消
  */
 export function showToast(
   message: string,
@@ -44,10 +48,12 @@ export function showToast(
     toasts: [...state.toasts, newToast],
   }))
 
-  // 自动移除
-  setTimeout(() => {
+  // 自动移除，保存定时器引用
+  const timerId = setTimeout(() => {
     removeToast(id)
+    toastTimers.delete(id)
   }, duration)
+  toastTimers.set(id, timerId)
 
   return id
 }
@@ -88,6 +94,13 @@ export function toastInfo(message: string, duration?: number): string {
  * 移除 Toast
  */
 export function removeToast(id: string): void {
+  // 清理定时器
+  const timer = toastTimers.get(id)
+  if (timer) {
+    clearTimeout(timer)
+    toastTimers.delete(id)
+  }
+
   toastState.update(state => ({
     toasts: state.toasts.filter(t => t.id !== id),
   }))
@@ -97,6 +110,10 @@ export function removeToast(id: string): void {
  * 清除所有 Toast
  */
 export function clearToasts(): void {
+  // 清理所有定时器
+  toastTimers.forEach(timer => clearTimeout(timer))
+  toastTimers.clear()
+
   toastState.update(() => ({ toasts: [] }))
 }
 

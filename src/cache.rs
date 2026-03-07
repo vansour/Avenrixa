@@ -1,5 +1,6 @@
 use redis::AsyncCommands;
 use serde::{de::DeserializeOwned, Serialize};
+use tracing::warn;
 
 /// 缓存辅助工具
 pub struct Cache {
@@ -26,15 +27,21 @@ impl Cache {
         T: DeserializeOwned,
         C: redis::aio::ConnectionLike + Send + Sync,
     {
+        // 如果连接处于某种不可用状态，我们可以直接返回 None 而不是 Error
+        // 这样在测试中如果没有 Redis，业务逻辑仍然可以继续运行（只是没有缓存）
         let cache = Self::new("");
         let key = cache.key(key);
-        let value: Option<String> = conn.get(key).await
-            .map_err(|e| anyhow::anyhow!("Redis error: {}", e))?;
+        let value: Result<Option<String>, _> = conn.get(&key).await;
+
         match value {
-            Some(v) => serde_json::from_str(&v)
+            Ok(Some(v)) => serde_json::from_str(&v)
                 .map_err(|e| anyhow::anyhow!("Deserialization failed: {}", e))
                 .map(Some),
-            None => Ok(None),
+            Ok(None) => Ok(None),
+            Err(e) => {
+                warn!("Redis get error (key: {}): {}", key, e);
+                Ok(None)
+            }
         }
     }
 
@@ -52,8 +59,13 @@ impl Cache {
         let key = cache.key(key);
         let value = serde_json::to_string(&value)
             .map_err(|e| anyhow::anyhow!("Serialization failed: {}", e))?;
-        conn.set_ex(key, value, ttl_seconds).await
-            .map_err(|e| anyhow::anyhow!("Redis error: {}", e))
+        let result: Result<(), _> = conn.set_ex(&key, value, ttl_seconds).await;
+
+        if let Err(e) = result {
+            warn!("Redis set error (key: {}): {}", key, e);
+        }
+
+        Ok(())
     }
 
     /// 删除匹配前缀的所有缓存（使用 SCAN 替代 KEYS 避免阻塞）

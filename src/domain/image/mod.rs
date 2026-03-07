@@ -1,12 +1,11 @@
-#![allow(unused_imports)]
-#![allow(dead_code)]
 //! 图片领域模块
 
+pub mod domain_service;
 pub mod repository;
 
-// 重新导出现有类型
-pub use crate::models::{Image, Paginated, CursorPaginated, PaginationParams};
-pub use crate::models::{DeleteRequest, RestoreRequest, RenameRequest, SetExpiryRequest, ApproveRequest, DuplicateRequest, EditImageRequest, EditImageResponse};
-pub use crate::models::{FilterParams, WatermarkParams};
-pub use crate::image_processor::ImageProcessor;
-pub use repository::{ImageRepository, CategoryRepository, PostgresImageRepository, PostgresCategoryRepository};
+#[cfg(test)]
+pub mod mock_repository;
+
+// 仅导出外部需要使用的类型
+pub use domain_service::ImageDomainService;
+pub use repository::{PostgresImageRepository, PostgresCategoryRepository};

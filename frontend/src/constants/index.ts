@@ -326,7 +326,7 @@ export const VALIDATION = {
 
 /** API 配置 */
 export const API = {
-  BASE_URL: getEnvOverride('API_BASE_URL', '/api'),
+  BASE_URL: getEnvOverride('API_BASE_URL', '/api/v1'),
   TIMEOUT: getEnvOverride('API_TIMEOUT', 30000),
   MAX_RETRIES: getEnvOverride('API_MAX_RETRIES', 3),
   RETRY_DELAY: getEnvOverride('API_RETRY_DELAY', 1000),
