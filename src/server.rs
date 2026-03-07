@@ -8,6 +8,7 @@ use tokio::net::TcpListener;
 use tracing::info;
 
 /// 启动清理任务
+#[allow(dead_code)]
 pub fn spawn_cleanup_tasks(state: &AppState) {
     let config = &state.config;
 

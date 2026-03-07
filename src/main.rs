@@ -5,7 +5,6 @@ mod config;
 mod db;
 mod domain;
 mod infrastructure;
-mod email;
 mod file_queue;
 pub mod error;
 mod handlers;
@@ -34,10 +33,10 @@ use redis::Client;
 use sqlx::postgres::PgPoolOptions;
 use std::sync::Arc;
 use tower_http::trace::TraceLayer;
-use tracing::{error, info, warn, Level};
+use tracing::{error, info, Level};
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 use router::create_app_with_middleware;
-use server::{spawn_cleanup_tasks, start_server};
+use server::{start_server};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -60,7 +59,10 @@ async fn main() -> anyhow::Result<()> {
         return Err(e.into());
     }
 
-    info!("Configuration loaded (log level: {})", log_level);
+    error!("Configuration loaded (log level: {})", log_level);
+
+    // 打印管理员账户信息
+    db::log_admin_credentials(&config);
 
     info!("Connecting to database...");
     let pool = PgPoolOptions::new()
@@ -71,21 +73,13 @@ async fn main() -> anyhow::Result<()> {
     info!("Initializing database schema...");
     db::init_schema(&pool).await?;
 
-    // 检查并创建默认管理员账号
-    match db::create_default_admin(&pool).await {
+    // 创建管理员账户
+    match db::create_admin_account(&pool, &config).await {
         Ok(_) => {
-            info!("Default admin account initialized successfully");
+            info!("Admin account initialized successfully");
         }
         Err(e) => {
-            warn!("Failed to initialize default admin account: {}", e);
-        }
-    }
-
-    // 每次启动时输出管理员账号信息到日志
-    match db::log_admin_credentials(&pool).await {
-        Ok(_) => {}
-        Err(e) => {
-            warn!("Failed to log admin credentials: {}", e);
+            error!("Failed to initialize admin account: {}", e);
         }
     }
 
@@ -122,16 +116,8 @@ async fn main() -> anyhow::Result<()> {
 
     // 初始化认证领域服务
     let auth_repository = PostgresAuthRepository::new(pool.clone());
-    let mut auth_domain_service = AuthDomainService::new(auth_repository, auth.clone());
+    let auth_domain_service = Arc::new(AuthDomainService::new(auth_repository, auth.clone()));
 
-    // 如果配置了邮件服务，则设置邮件服务
-    if config.mail.enabled {
-        let mail_service = email::MailService::new(config.clone());
-        auth_domain_service = auth_domain_service.with_mail_service(mail_service);
-        info!("Mail service enabled for auth domain service");
-    }
-
-    let auth_domain_service = Arc::new(auth_domain_service);
     info!("Auth domain service initialized");
 
     // 初始化图片领域服务
@@ -170,9 +156,6 @@ async fn main() -> anyhow::Result<()> {
     // 创建应用路由和中间件
     let app = create_app_with_middleware(state.clone(), &config, config.server.max_upload_size)
         .layer(TraceLayer::new_for_http());
-
-    // 启动清理任务
-    spawn_cleanup_tasks(&state);
 
     // 启动服务器
     let addr = config.addr();

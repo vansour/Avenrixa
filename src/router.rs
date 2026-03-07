@@ -5,22 +5,11 @@ use crate::config::Config;
 use crate::db::AppState;
 use crate::routes::create_routes;
 use axum::http::{Method, header};
-use axum::{Router, extract::Request, response::Html};
+use axum::{Router, routing};
 use tower_http::{
     cors::{Any, CorsLayer},
     services::ServeDir,
 };
-
-/// SPA fallback 处理器
-async fn handle_spa(_req: Request) -> Html<String> {
-    match tokio::fs::read_to_string("frontend/dist/index.html").await {
-        Ok(content) => Html(content),
-        Err(e) => {
-            tracing::error!("Failed to read index.html: {}", e);
-            Html("<h1>Frontend not found</h1><p>Please run 'npm run build' in frontend directory.</p>".to_string())
-        }
-    }
-}
 
 /// 创建CORS层
 pub fn create_cors_layer(config: &Config) -> CorsLayer {
@@ -60,23 +49,29 @@ pub fn create_cors_layer(config: &Config) -> CorsLayer {
 
 /// 创建完整的应用路由
 pub fn create_app_router(state: AppState, config: &Config) -> Router {
+    let state_cloned = state.clone();
     let api_routes = create_routes().with_state(state);
     let api_routes_v1 = Router::new().nest("/api/v1", api_routes);
 
+    let health_route = Router::new()
+        .route("/health", routing::get(crate::admin_handlers::health_check))
+        .with_state(state_cloned);
+
     let images_serve_dir = ServeDir::new(format!("{}/images", config.storage.path));
-    let frontend_dist = ServeDir::new("frontend/dist");
-    let assets_dir = ServeDir::new("frontend/dist/assets");
+    let frontend_dist = ServeDir::new("frontend-remix/build");
+    let frontend_assets = ServeDir::new("frontend-remix/build/assets");
 
     let cors = create_cors_layer(config);
 
     // 路由顺序很重要：先 API 路由，再静态文件，最后 SPA fallback
+    // ServeDir 会自动处理 SPA fallback（找不到文件时返回 index.html）
     Router::new()
+        .merge(health_route)
         .merge(api_routes_v1)
         .nest_service("/images", images_serve_dir)
-        .nest_service("/assets", assets_dir)
-        .nest_service("/favicon.ico", frontend_dist.clone())
-        .fallback_service(frontend_dist)
-        .fallback(handle_spa)
+        .nest_service("/assets", frontend_assets)
+        .nest_service("/favicon.ico", frontend_dist)
+        .fallback_service(ServeDir::new("frontend-remix/build").append_index_html_on_directories(true))
         .layer(cors)
 }
 

@@ -104,6 +104,7 @@ impl<I: ImageRepository, C: CategoryRepository> ImageDomainService<I, C> {
 
     /// 获取图片列表
     #[tracing::instrument(skip(self))]
+    #[allow(clippy::too_many_arguments)]
     pub async fn get_images(
         &self,
         user_id: Uuid,
@@ -119,12 +120,12 @@ impl<I: ImageRepository, C: CategoryRepository> ImageDomainService<I, C> {
 
         // 尝试从缓存获取 (仅对简单列表查询进行缓存)
         let cache_key = ImageCache::list(user_id, page, page_size, category_id, sort_by, sort_order);
-        if search.is_none() && tag.is_none() {
-            if let Some(manager) = self.redis.as_ref() {
-                let mut redis = manager.clone();
-                if let Ok(Some(cached)) = Cache::get::<Paginated<Image>, _>(&mut redis, &cache_key).await {
-                    return Ok(cached);
-                }
+        if search.is_none() && tag.is_none()
+            && let Some(manager) = self.redis.as_ref()
+        {
+            let mut redis = manager.clone();
+            if let Ok(Some(cached)) = Cache::get::<Paginated<Image>, _>(&mut redis, &cache_key).await {
+                return Ok(cached);
             }
         }
 
@@ -178,12 +179,12 @@ impl<I: ImageRepository, C: CategoryRepository> ImageDomainService<I, C> {
         };
 
         // 缓存结果
-        if search.is_none() && tag.is_none() {
-            if let Some(manager) = self.redis.as_ref() {
-                let mut redis = manager.clone();
-                let ttl = self.config.cache.list_ttl;
-                let _ = Cache::set(&mut redis, &cache_key, &result, ttl).await;
-            }
+        if search.is_none() && tag.is_none()
+            && let Some(manager) = self.redis.as_ref()
+        {
+            let mut redis = manager.clone();
+            let ttl = self.config.cache.list_ttl;
+            let _ = Cache::set(&mut redis, &cache_key, &result, ttl).await;
         }
 
         Ok(result)
@@ -233,10 +234,10 @@ impl<I: ImageRepository, C: CategoryRepository> ImageDomainService<I, C> {
     #[tracing::instrument(skip(self))]
     pub async fn soft_delete_images(&self, image_ids: &[Uuid], user_id: Uuid) -> Result<(), AppError> {
         for id in image_ids {
-            if let Some(img) = self.image_repository.find_image_by_id(*id).await? {
-                if img.user_id == user_id {
-                    self.image_repository.soft_delete_image(*id).await?;
-                }
+            if let Some(img) = self.image_repository.find_image_by_id(*id).await?
+                && img.user_id == user_id
+            {
+                self.image_repository.soft_delete_image(*id).await?;
             }
         }
         Ok(())
@@ -274,11 +275,11 @@ impl<I: ImageRepository, C: CategoryRepository> ImageDomainService<I, C> {
     /// 恢复已删除的图片
     pub async fn restore_images(&self, image_ids: &[Uuid], user_id: Uuid) -> Result<(), AppError> {
         for id in image_ids {
-            if let Some(mut img) = self.image_repository.find_image_by_id(*id).await? {
-                if img.user_id == user_id {
-                    img.deleted_at = None;
-                    self.image_repository.update_image(&img).await?;
-                }
+            if let Some(mut img) = self.image_repository.find_image_by_id(*id).await?
+                && img.user_id == user_id
+            {
+                img.deleted_at = None;
+                self.image_repository.update_image(&img).await?;
             }
         }
         Ok(())
@@ -290,12 +291,12 @@ impl<I: ImageRepository, C: CategoryRepository> ImageDomainService<I, C> {
             return Err(AppError::InvalidPagination);
         }
 
-        if let Some(mut img) = self.image_repository.find_image_by_id(id).await? {
-            if img.user_id == user_id {
-                img.original_filename = Some(new_filename.to_string());
-                self.image_repository.update_image(&img).await?;
-                return Ok(());
-            }
+        if let Some(mut img) = self.image_repository.find_image_by_id(id).await?
+            && img.user_id == user_id
+        {
+            img.original_filename = Some(new_filename.to_string());
+            self.image_repository.update_image(&img).await?;
+            return Ok(());
         }
 
         Err(AppError::ImageNotFound)
@@ -303,12 +304,12 @@ impl<I: ImageRepository, C: CategoryRepository> ImageDomainService<I, C> {
 
     /// 设置图片过期时间
     pub async fn set_expiry(&self, id: Uuid, user_id: Uuid, expires_at: Option<chrono::DateTime<Utc>>) -> Result<(), AppError> {
-        if let Some(mut img) = self.image_repository.find_image_by_id(id).await? {
-            if img.user_id == user_id {
-                img.expires_at = expires_at;
-                self.image_repository.update_image(&img).await?;
-                return Ok(());
-            }
+        if let Some(mut img) = self.image_repository.find_image_by_id(id).await?
+            && img.user_id == user_id
+        {
+            img.expires_at = expires_at;
+            self.image_repository.update_image(&img).await?;
+            return Ok(());
         }
 
         Err(AppError::ImageNotFound)
@@ -323,12 +324,12 @@ impl<I: ImageRepository, C: CategoryRepository> ImageDomainService<I, C> {
         _tags: Option<&[String]>,
     ) -> Result<(), AppError> {
         // 由于标签是在关联表中，且 trait 尚未包含标签操作，暂时只更新分类
-        if let Some(mut img) = self.image_repository.find_image_by_id(id).await? {
-            if img.user_id == user_id {
-                img.category_id = category_id;
-                self.image_repository.update_image(&img).await?;
-                return Ok(());
-            }
+        if let Some(mut img) = self.image_repository.find_image_by_id(id).await?
+            && img.user_id == user_id
+        {
+            img.category_id = category_id;
+            self.image_repository.update_image(&img).await?;
+            return Ok(());
         }
 
         Err(AppError::ImageNotFound)

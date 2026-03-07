@@ -6,6 +6,7 @@ use sqlx::PgPool;
 use tracing::{info, warn};
 
 /// 清理过期图片
+#[allow(dead_code)]
 pub async fn cleanup_expired_images(
     pool: &PgPool,
     retention_days: i64,
@@ -46,6 +47,7 @@ pub async fn cleanup_expired_images(
 }
 
 /// 将过期图片移至回收站
+#[allow(dead_code)]
 pub async fn move_expired_to_trash(pool: &PgPool) -> Result<u64> {
     let now = chrono::Utc::now();
 

@@ -4,7 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: vansour-image
-    image: ghcr.io/vansour/vansour-image:dev
+    image: ghcr.io/vansour/vansour-image:latest
     ports:
       - "8080:8080"
     depends_on:
@@ -16,18 +16,20 @@ services:
       - DATABASE_URL=postgresql://user:pass@postgres:5432/image
       - REDIS_URL=redis://dragonfly:6379
       - JWT_SECRET=your-secret-key-change-in-production
+      - ADMIN_USERNAME=username
+      - ADMIN_PASSWORD=password
     volumes:
       - ./image_data:/data/images
+      - ./postgres_data:/var/lib/postgresql
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      test: curl -f http://localhost:8080/health || exit 1
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
-
   postgres:
-    image: ghcr.io/vansour/postgres:trixie
+    image: postgres:trixie
     container_name: vansour-image-postgres
     environment:
       - POSTGRES_DB=image
@@ -36,18 +38,17 @@ services:
     volumes:
       - ./postgres_data:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U user -d image"]
+      test: pg_isready -U user -d image
       interval: 5s
       timeout: 5s
       retries: 5
     restart: unless-stopped
-
   dragonfly:
     image: ghcr.io/dragonflydb/dragonfly:latest
     container_name: vansour-image-dragonfly
     command: --dir=/data
     healthcheck:
-      test: ["CMD-SHELL", "redis-cli ping"]
+      test: redis-cli ping
       interval: 5s
       timeout: 5s
       retries: 5

@@ -54,6 +54,7 @@ pub struct Config {
     pub cleanup: CleanupConfig,
     pub mail: MailConfig,
     pub image: ImageConfig,
+    pub admin: AdminConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -141,6 +142,21 @@ fn default_dedup_strategy() -> String {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminConfig {
+    pub username: String,
+    pub password: String,
+}
+
+impl Default for AdminConfig {
+    fn default() -> Self {
+        Self {
+            username: "username".to_string(),
+            password: "password".to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MailConfig {
     pub enabled: bool,
     pub smtp_host: String,
@@ -216,6 +232,10 @@ impl Default for Config {
                 from_email: "noreply@example.com".to_string(),
                 from_name: "Vansour Image".to_string(),
                 reset_link_base_url: "http://localhost:8080/reset-password".to_string(),
+            },
+            admin: AdminConfig {
+                username: "username".to_string(),
+                password: "password".to_string(),
             },
         }
     }
@@ -364,6 +384,14 @@ impl Config {
         if let Ok(dedup_strategy) = std::env::var("IMAGE_DEDUP_STRATEGY")
             && (dedup_strategy == "user" || dedup_strategy == "global") {
             config.image.dedup_strategy = dedup_strategy;
+        }
+
+        // 管理员账户配置
+        if let Ok(admin_username) = std::env::var("ADMIN_USERNAME") {
+            config.admin.username = admin_username;
+        }
+        if let Ok(admin_password) = std::env::var("ADMIN_PASSWORD") {
+            config.admin.password = admin_password;
         }
 
         config

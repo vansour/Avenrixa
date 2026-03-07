@@ -1,19 +1,17 @@
 use async_trait::async_trait;
 use uuid::Uuid;
 use crate::models::User;
-use crate::domain::auth::repository::{AuthRepository, PasswordResetToken};
-use std::sync::{Arc, Mutex};
+use crate::domain::auth::repository::AuthRepository;
+use std::sync::Arc;
 
 pub struct MockAuthRepository {
-    pub users: Arc<Mutex<Vec<User>>>,
-    pub tokens: Arc<Mutex<Vec<PasswordResetToken>>>,
+    pub users: Arc<std::sync::Mutex<Vec<User>>>,
 }
 
 impl MockAuthRepository {
     pub fn new() -> Self {
         Self {
-            users: Arc::new(Mutex::new(Vec::new())),
-            tokens: Arc::new(Mutex::new(Vec::new())),
+            users: Arc::new(std::sync::Mutex::new(Vec::new())),
         }
     }
 }
@@ -40,25 +38,6 @@ impl AuthRepository for MockAuthRepository {
         let mut users = self.users.lock().unwrap();
         if let Some(user) = users.iter_mut().find(|u| u.id == user_id) {
             user.password_hash = password_hash.to_string();
-        }
-        Ok(())
-    }
-
-    async fn create_password_reset_token(&self, token: &PasswordResetToken) -> Result<(), sqlx::Error> {
-        let mut tokens = self.tokens.lock().unwrap();
-        tokens.push(token.clone());
-        Ok(())
-    }
-
-    async fn find_password_reset_token(&self, token: &str) -> Result<Option<PasswordResetToken>, sqlx::Error> {
-        let tokens = self.tokens.lock().unwrap();
-        Ok(tokens.iter().find(|t| t.token == token).cloned())
-    }
-
-    async fn mark_token_used(&self, token_id: Uuid) -> Result<(), sqlx::Error> {
-        let mut tokens = self.tokens.lock().unwrap();
-        if let Some(token) = tokens.iter_mut().find(|t| t.id == token_id) {
-            token.used_at = Some(chrono::Utc::now());
         }
         Ok(())
     }

@@ -16,6 +16,7 @@ pub trait ImageRepository: Send + Sync {
     async fn find_image_by_id(&self, id: Uuid) -> Result<Option<Image>, sqlx::Error>;
 
     /// 根据用户ID查找图片列表
+    #[allow(clippy::too_many_arguments)]
     async fn find_images_by_user_paginated(
         &self,
         user_id: Uuid,

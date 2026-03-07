@@ -123,12 +123,9 @@ impl ImageRepository for MockImageRepository {
         let mut found_cursor = cursor.is_none();
 
         for img in filtered {
-            if !found_cursor {
-                if let Some((c_time, c_id)) = cursor {
-                    if img.created_at < c_time || (img.created_at == c_time && img.id < c_id) {
-                        found_cursor = true;
-                    }
-                }
+            if !found_cursor && let Some((c_time, c_id)) = cursor
+                && (img.created_at < c_time || (img.created_at == c_time && img.id < c_id)) {
+                found_cursor = true;
             }
 
             if found_cursor {

@@ -34,27 +34,50 @@ pub fn create_routes() -> Router<AppState> {
         .route("/health", routing::get(crate::admin_handlers::health_check))
         .route("/thumbnails/{id}", routing::get(serve_thumbnail))
         .route(
-            "/auth/register",
-            routing::post(crate::auth_handlers::register),
-        )
-        .route(
             "/auth/login",
             routing::post(crate::auth_handlers::login),
-        )
-        .route(
-            "/auth/forgot-password",
-            routing::post(crate::auth_handlers::forgot_password),
-        )
-        .route(
-            "/auth/reset-password",
-            routing::post(crate::auth_handlers::reset_password),
-        )
-        .route(
-            "/auth/refresh",
-            routing::post(crate::auth_handlers::refresh_token),
         );
 
-    // 需要认证的 API 路由
+    // 管理员路由（使用 AdminUser 中间件）
+    let admin_routes = Router::new()
+        .route(
+            "/cleanup",
+            routing::post(crate::admin_handlers::cleanup_deleted_files),
+        )
+        .route(
+            "/cleanup/expired",
+            routing::post(crate::admin_handlers::cleanup_expired_images),
+        )
+        .route(
+            "/backup",
+            routing::post(crate::admin_handlers::backup_database),
+        )
+        .route(
+            "/users",
+            routing::get(crate::admin_handlers::get_users),
+        )
+        .route(
+            "/users/{id}",
+            routing::put(crate::admin_handlers::update_user_role),
+        )
+        .route(
+            "/audit-logs",
+            routing::get(crate::admin_handlers::get_audit_logs),
+        )
+        .route(
+            "/stats",
+            routing::get(crate::admin_handlers::get_system_stats),
+        )
+        .route(
+            "/settings",
+            routing::get(crate::admin_handlers::get_settings_admin),
+        )
+        .route(
+            "/settings/{key}",
+            routing::put(crate::admin_handlers::update_setting),
+        );
+
+    // 需要认证的路由（使用 AuthUser 中间件）
     let protected_routes = Router::new()
         .route(
             "/upload",
@@ -115,49 +138,6 @@ pub fn create_routes() -> Router<AppState> {
         .route(
             "/auth/logout",
             routing::post(crate::auth_handlers::logout),
-        );
-
-    // 管理员路由
-    let admin_routes = Router::new()
-        .route(
-            "/cleanup",
-            routing::post(crate::admin_handlers::cleanup_deleted_files),
-        )
-        .route(
-            "/cleanup/expired",
-            routing::post(crate::admin_handlers::cleanup_expired_images),
-        )
-        .route(
-            "/backup",
-            routing::post(crate::admin_handlers::backup_database),
-        )
-        .route(
-            "/approve",
-            routing::post(crate::admin_handlers::approve_images),
-        )
-        .route(
-            "/users",
-            routing::get(crate::admin_handlers::get_users),
-        )
-        .route(
-            "/users/{id}",
-            routing::put(crate::admin_handlers::update_user_role),
-        )
-        .route(
-            "/audit-logs",
-            routing::get(crate::admin_handlers::get_audit_logs),
-        )
-        .route(
-            "/stats",
-            routing::get(crate::admin_handlers::get_system_stats),
-        )
-        .route(
-            "/settings",
-            routing::get(crate::admin_handlers::get_settings),
-        )
-        .route(
-            "/settings/{key}",
-            routing::put(crate::admin_handlers::update_setting),
         );
 
     Router::new()

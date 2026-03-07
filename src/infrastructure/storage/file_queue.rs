@@ -2,6 +2,7 @@
 //! 负责处理文件保存任务，确保文件写入完成后再返回给用户
 
 use redis::AsyncCommands;
+use redis::RedisError;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -77,6 +78,10 @@ impl FileSaveQueue {
         mut redis: ConnectionManager,
         queue_key: String,
     ) {
+        /// 检查是否为超时错误
+        fn is_timeout_error(e: &RedisError) -> bool {
+            e.to_string().to_lowercase().contains("timed out")
+        }
         info!("Redis 文件保存任务队列已启动: {}", queue_key);
         let mut task_count: usize = 0;
         let mut success_count: usize = 0;
@@ -104,10 +109,16 @@ impl FileSaveQueue {
                     }
                 }
                 Ok(None) => {
-                    // 超时，继续循环
+                    // 队列为空，继续等待
                     continue;
                 }
                 Err(e) => {
+                    // 超时是正常行为（队列空闲），不记录错误日志
+                    if is_timeout_error(&e) {
+                        // 静默继续，队列空闲是正常状态
+                        continue;
+                    }
+                    // 其他错误需要记录
                     error!("Redis BRPOP error: {}", e);
                     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                 }

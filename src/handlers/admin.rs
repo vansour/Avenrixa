@@ -110,7 +110,7 @@ pub async fn get_settings_public(
 }
 
 /// 管理员专用设置端点
-pub async fn get_settings(
+pub async fn get_settings_admin(
     State(state): State<AppState>,
     _admin_user: AdminUser,
 ) -> Result<Json<Vec<Setting>>, AppError> {

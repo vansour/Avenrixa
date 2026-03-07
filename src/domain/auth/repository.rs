@@ -9,17 +9,6 @@ use uuid::Uuid;
 
 use crate::models::User;
 
-/// 密码重置令牌
-#[derive(Debug, Clone, sqlx::FromRow)]
-pub struct PasswordResetToken {
-    pub id: Uuid,
-    pub user_id: Uuid,
-    pub token: String,
-    pub expires_at: DateTime<Utc>,
-    pub used_at: Option<DateTime<Utc>>,
-    pub created_at: DateTime<Utc>,
-}
-
 /// 认证数据访问 trait
 #[async_trait]
 pub trait AuthRepository: Send + Sync {
@@ -34,15 +23,6 @@ pub trait AuthRepository: Send + Sync {
 
     /// 更新用户密码
     async fn update_user_password(&self, user_id: Uuid, password_hash: &str) -> Result<(), sqlx::Error>;
-
-    /// 创建密码重置令牌
-    async fn create_password_reset_token(&self, token: &PasswordResetToken) -> Result<(), sqlx::Error>;
-
-    /// 查找密码重置令牌
-    async fn find_password_reset_token(&self, token: &str) -> Result<Option<PasswordResetToken>, sqlx::Error>;
-
-    /// 标记密码重置令牌已使用
-    async fn mark_token_used(&self, token_id: Uuid) -> Result<(), sqlx::Error>;
 }
 
 /// PostgreSQL 认证仓库实现
@@ -98,44 +78,6 @@ impl AuthRepository for PostgresAuthRepository {
         )
         .bind(password_hash)
         .bind(user_id)
-        .execute(&self.pool)
-        .await?;
-
-        Ok(())
-    }
-
-    async fn create_password_reset_token(&self, token: &PasswordResetToken) -> Result<(), sqlx::Error> {
-        sqlx::query(
-            "INSERT INTO password_reset_tokens (id, user_id, token, expires_at, used_at, created_at)
-             VALUES ($1, $2, $3, $4, $5, $6)"
-        )
-        .bind(token.id)
-        .bind(token.user_id)
-        .bind(&token.token)
-        .bind(token.expires_at)
-        .bind(token.used_at)
-        .bind(token.created_at)
-        .execute(&self.pool)
-        .await?;
-
-        Ok(())
-    }
-
-    async fn find_password_reset_token(&self, token: &str) -> Result<Option<PasswordResetToken>, sqlx::Error> {
-        sqlx::query_as::<_, PasswordResetToken>(
-            "SELECT id, user_id, token, expires_at, used_at, created_at
-             FROM password_reset_tokens WHERE token = $1"
-        )
-        .bind(token)
-        .fetch_optional(&self.pool)
-        .await
-    }
-
-    async fn mark_token_used(&self, token_id: Uuid) -> Result<(), sqlx::Error> {
-        sqlx::query(
-            "UPDATE password_reset_tokens SET used_at = NOW() WHERE id = $1"
-        )
-        .bind(token_id)
         .execute(&self.pool)
         .await?;
 

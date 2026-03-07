@@ -3,17 +3,9 @@ use uuid::Uuid;
 use crate::db::AppState;
 use redis::AsyncCommands;
 
-/// 认证用户信息提取器
+/// 认证用户信息提取器（只有一个管理员）
 #[derive(Debug, Clone)]
 pub struct AuthUser {
-    pub id: Uuid,
-    pub username: String,
-    pub role: String,
-}
-
-/// 管理员用户信息提取器（自动检查角色）
-#[derive(Debug, Clone)]
-pub struct AdminUser {
     pub id: Uuid,
     pub username: String,
     pub role: String,
@@ -81,26 +73,5 @@ impl axum::extract::FromRequestParts<AppState> for AuthUser {
     }
 }
 
-// AdminUser 提取器 - 使用 AuthUser 并检查管理员角色
-impl axum::extract::FromRequestParts<AppState> for AdminUser {
-    type Rejection = StatusCode;
-
-    async fn from_request_parts(
-        parts: &mut axum::http::request::Parts,
-        state: &AppState,
-    ) -> Result<Self, Self::Rejection> {
-        // 使用 AuthUser 提取器
-        let user = AuthUser::from_request_parts(parts, state).await?;
-
-        // 检查管理员角色
-        if user.role != "admin" {
-            return Err(StatusCode::FORBIDDEN);
-        }
-
-        Ok(AdminUser {
-            id: user.id,
-            username: user.username,
-            role: user.role,
-        })
-    }
-}
+/// 管理员用户信息提取器（与 AuthUser 相同，简化）
+pub type AdminUser = AuthUser;

@@ -12,12 +12,6 @@ pub struct User {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct RegisterRequest {
-    pub username: String,
-    pub password: String,
-}
-
-#[derive(Debug, Deserialize)]
 pub struct LoginRequest {
     pub username: String,
     pub password: String,
@@ -28,30 +22,6 @@ pub struct UpdateProfileRequest {
     pub username: Option<String>,
     pub current_password: String,
     pub new_password: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct ForgotPasswordRequest {
-    pub email: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct ResetPasswordRequest {
-    pub token: String,
-    pub new_password: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct AuthResponse {
-    pub access_token: String,
-    pub refresh_token: String,
-    pub expires_in: i64,
-    pub user: UserResponse,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct RefreshTokenRequest {
-    pub refresh_token: String,
 }
 
 #[derive(Debug, Serialize)]
