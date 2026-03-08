@@ -54,23 +54,31 @@ fn test_image_store_add_images() {
     use vansour_image_frontend::store::images::ImageStore;
     use vansour_image_frontend::types::models::ImageItem;
     use chrono::Utc;
+    use uuid::Uuid;
 
     let store = ImageStore::new();
+    let id = Uuid::new_v4();
     let image = ImageItem {
-        id: "1".to_string(),
+        id,
+        user_id: id,
+        category_id: None,
         filename: "test.jpg".to_string(),
+        thumbnail: None,
         original_filename: Some("test_original.jpg".to_string()),
         size: 1024,
+        hash: "test".to_string(),
         format: "jpg".to_string(),
+        views: 0,
+        status: "active".to_string(),
+        expires_at: None,
+        deleted_at: None,
         created_at: Utc::now(),
-        thumbnail_url: None,
-        url: "http://example.com/test.jpg".to_string(),
     };
 
     store.add_images(vec![image.clone()]);
     let images = store.images();
     assert_eq!(images.len(), 1);
-    assert_eq!(images[0].id, "1");
+    assert_eq!(images[0].id, id);
 }
 
 #[test]

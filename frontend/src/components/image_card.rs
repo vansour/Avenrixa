@@ -22,19 +22,27 @@ pub fn ImageCard(
         on_delete(());
     };
 
+    // 预计算值以避免在 rsx! 中调用函数
+    let thumbnail_url = match image.thumbnail_url() {
+        Some(url) => url,
+        None => image.url(),
+    };
+    let original_filename = image.original_filename.as_ref().unwrap_or(&image.filename);
+    let size_formatted = image.size_formatted();
+
     rsx! {
         div { class: format!("image-card {}", if selected { "selected" } else { "" }),
             div { class: "image-thumbnail",
                 img {
-                    src: "{image.thumbnail_url.as_deref().unwrap_or(&image.url)}",
+                    src: "{thumbnail_url}",
                     alt: "{image.filename}",
                     loading: "lazy"
                 }
             }
             div { class: "image-info",
-                div { class: "image-name", "{image.original_filename.as_deref().unwrap_or(&image.filename)}" }
+                div { class: "image-name", "{original_filename}" }
                 div { class: "image-meta",
-                    span { class: "image-size", "{image.size} bytes" }
+                    span { class: "image-size", "{size_formatted}" }
                     span { class: "image-date", "{image.created_at}" }
                 }
             }
