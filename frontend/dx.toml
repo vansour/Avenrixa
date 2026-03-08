@@ -1,0 +1,15 @@
+[application]
+name = "Vansour Image"
+default_platform = "web"
+
+[web.app]
+title = "Vansour Image"
+
+[web.watcher]
+watch_path = ["src", "index.html"]
+
+[web.resource]
+style = [{ bundle = "styles.css" }]
+
+[web.resource.dev]
+style = [{ bundle = "styles.css" }]
