@@ -9,10 +9,10 @@ fn test_auth_store_new() {
 
 #[test]
 fn test_auth_store_login_logout() {
+    use chrono::Utc;
+    use uuid::Uuid;
     use vansour_image_frontend::store::auth::AuthStore;
     use vansour_image_frontend::types::api::UserResponse;
-    use uuid::Uuid;
-    use chrono::Utc;
 
     let store = AuthStore::new();
 
@@ -51,10 +51,10 @@ fn test_image_store_new() {
 
 #[test]
 fn test_image_store_add_images() {
-    use vansour_image_frontend::store::images::ImageStore;
-    use vansour_image_frontend::types::models::ImageItem;
     use chrono::Utc;
     use uuid::Uuid;
+    use vansour_image_frontend::store::images::ImageStore;
+    use vansour_image_frontend::types::models::ImageItem;
 
     let store = ImageStore::new();
     let id = Uuid::new_v4();

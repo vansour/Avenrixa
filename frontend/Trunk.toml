@@ -17,5 +17,5 @@ dist = "dist"
 cargo = false
 
 [tools]
-wasm_bindgen = "0.2"
-wasm_opt = ["-Oz"]
+wasm_bindgen = "0.2.114"
+wasm_opt = "z"

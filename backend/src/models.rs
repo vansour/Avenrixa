@@ -91,7 +91,9 @@ impl Image {
     }
 
     pub fn thumbnail_url(&self) -> Option<String> {
-        self.thumbnail.as_ref().map(|_| format!("/thumbnails/{}", self.id))
+        self.thumbnail
+            .as_ref()
+            .map(|_| format!("/thumbnails/{}", self.id))
     }
 
     pub fn size_formatted(&self) -> String {

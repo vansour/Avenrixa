@@ -19,13 +19,13 @@ pub fn Layout(children: Element) -> Element {
                 nav { class: "sidebar-nav",
                     ul {
                         li {
-                            button { class: "nav-item", "📊 仪表板" }
+                            button { class: "nav-item", "仪表板" }
                         }
                         li {
-                            button { class: "nav-item active", "🖼️ 图片" }
+                            button { class: "nav-item active", "图片" }
                         }
                         li {
-                            button { class: "nav-item", "🗑️ 回收站" }
+                            button { class: "nav-item", "回收站" }
                         }
                     }
                 }

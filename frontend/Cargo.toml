@@ -1,5 +1,5 @@
 [package]
-name = "vansour-image-frontend"
+name = "frontend"
 version.workspace = true
 edition.workspace = true
 
@@ -8,18 +8,18 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 dioxus = { version = "0.7.3", features = ["router", "web"] }
-dioxus-logger = "0.5"
-reqwest = { version = "0.13", features = ["json", "cookies", "multipart"] }
+dioxus-logger = "0.7"
+reqwest = { version = "0.13", default-features = false, features = ["json", "cookies", "multipart", "rustls"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
-uuid = { workspace = true }
+uuid = { workspace = true, features = ["js"] }
 chrono = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true }
+tokio = { version = "1", features = ["rt", "macros", "sync", "time"] }
 parking_lot = "0.12"
 urlencoding = "2.1"
-wasm-bindgen = "0.2"
+wasm-bindgen = "=0.2.114"
 web-sys = "0.3"
 js-sys = "0.3"
 gloo-utils = "0.2"

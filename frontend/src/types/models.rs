@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// 图片项
@@ -15,7 +15,7 @@ pub struct ImageItem {
     pub hash: String,
     pub format: String,
     pub views: i32,
-    pub status: String,  // "active", "deleted"
+    pub status: String, // "active", "deleted"
     pub expires_at: Option<DateTime<Utc>>,
     pub deleted_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
@@ -27,11 +27,16 @@ impl ImageItem {
     }
 
     pub fn thumbnail_url(&self) -> Option<String> {
-        self.thumbnail.as_ref().map(|_| format!("/thumbnails/{}", self.id))
+        self.thumbnail
+            .as_ref()
+            .map(|_| format!("/thumbnails/{}", self.id))
     }
 
     pub fn original_filename(&self) -> String {
-        self.original_filename.as_ref().cloned().unwrap_or_else(|| self.filename.clone())
+        self.original_filename
+            .as_ref()
+            .cloned()
+            .unwrap_or_else(|| self.filename.clone())
     }
 
     pub fn size_formatted(&self) -> String {

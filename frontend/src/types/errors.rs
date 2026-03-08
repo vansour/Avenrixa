@@ -1,5 +1,5 @@
-use thiserror::Error;
 use reqwest::StatusCode;
+use thiserror::Error;
 
 /// 应用错误类型
 #[derive(Debug, Clone, Error)]
@@ -21,6 +21,9 @@ pub enum AppError {
 
     #[error("验证错误: {0}")]
     Validation(String),
+
+    #[error("请求错误: {0}")]
+    Request(String),
 }
 
 /// 结果类型别名
@@ -31,15 +34,11 @@ impl AppError {
     pub fn should_redirect_login(&self) -> bool {
         matches!(self, AppError::Unauthorized | AppError::Forbidden)
     }
-}
 
-// 从 reqwest::Error 转换
-impl From<reqwest::Error> for AppError {
-    fn from(e: reqwest::Error) -> Self {
+    /// 从 reqwest 错误转换
+    pub fn from_reqwest(e: reqwest::Error) -> Self {
         if e.is_timeout() {
             AppError::Network("请求超时".to_string())
-        } else if e.is_connect() {
-            AppError::Network("连接失败".to_string())
         } else if e.status() == Some(StatusCode::UNAUTHORIZED) {
             AppError::Unauthorized
         } else if e.status() == Some(StatusCode::FORBIDDEN) {
@@ -47,8 +46,16 @@ impl From<reqwest::Error> for AppError {
         } else if e.status() == Some(StatusCode::NOT_FOUND) {
             AppError::NotFound
         } else {
-            AppError::Server(e.to_string())
+            // reqwest 0.13 没有 is_connect()，统一作为网络错误处理
+            AppError::Network("网络请求失败".to_string())
         }
+    }
+}
+
+// 从 reqwest::Error 转换
+impl From<reqwest::Error> for AppError {
+    fn from(e: reqwest::Error) -> Self {
+        AppError::from_reqwest(e)
     }
 }
 

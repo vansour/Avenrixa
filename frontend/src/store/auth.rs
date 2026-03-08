@@ -1,6 +1,6 @@
-use std::sync::Arc;
-use parking_lot::RwLock;
 use crate::types::api::UserResponse;
+use parking_lot::RwLock;
+use std::sync::Arc;
 
 /// 认证状态管理 Store
 #[derive(Clone)]
@@ -57,6 +57,24 @@ impl AuthStore {
     /// 获取当前 token
     pub fn token(&self) -> Option<String> {
         self.token.read().clone()
+    }
+
+    /// 从 token 直接登录（用于 Cookie 认证）
+    pub fn login_from_token(&self, token: &str) {
+        // TODO: 需要从后端获取用户信息
+        // 暂时设置一个假用户
+        use chrono::Utc;
+        use uuid::Uuid;
+
+        let user = crate::types::api::UserResponse {
+            id: Uuid::new_v4(),
+            username: "user".to_string(),
+            role: "user".to_string(),
+            created_at: Utc::now(),
+        };
+
+        *self.user.write() = Some(user);
+        *self.token.write() = Some(token.to_string());
     }
 }
 

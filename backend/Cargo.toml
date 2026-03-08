@@ -1,7 +1,11 @@
 [package]
-name = "vansour-image-backend"
+name = "backend"
 version.workspace = true
 edition.workspace = true
+
+[[bin]]
+name = "vansour-image"
+path = "src/main.rs"
 
 [dependencies]
 axum = "0.8"
@@ -13,7 +17,7 @@ serde_json = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 mime_guess = "2"
-tower-http = { version = "0.6", features = ["fs", "cors", "trace", "limit", "set-header", "request-id"] }
+tower-http = { version = "0.6", features = ["fs", "trace", "limit", "set-header", "request-id"] }
 sha2 = "0.10"
 hex = "0.4"
 anyhow = { workspace = true }

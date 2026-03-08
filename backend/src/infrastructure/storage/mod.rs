@@ -5,7 +5,7 @@ pub mod file_queue;
 pub mod image_processor;
 
 // 导出基础设施层的图片处理器
-pub use image_processor::{ImageProcessor, FilterParams, WatermarkParams};
+pub use image_processor::{FilterParams, ImageProcessor, WatermarkParams};
 
 // 导出文件队列
 pub use file_queue::{FileSaveQueue, FileSaveResult, FileSaveTask};

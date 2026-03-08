@@ -1,30 +1,57 @@
-use reqwest::Client;
+use crate::services::api_client::ApiClient;
 use crate::store::auth::AuthStore;
-use crate::types::api::{LoginRequest, UserResponse};
+use crate::types::api::{LoginRequest, UpdateProfileRequest, UserResponse};
 use crate::types::errors::Result;
 
-/// 认证服务（简化版）
+/// 认证服务
+#[derive(Clone)]
 pub struct AuthService {
-    client: Client,
+    api_client: ApiClient,
     auth_store: AuthStore,
 }
 
 impl AuthService {
-    pub fn new(client: Client, auth_store: AuthStore) -> Self {
-        Self { client, auth_store }
+    pub fn new(api_client: ApiClient, auth_store: AuthStore) -> Self {
+        Self {
+            api_client,
+            auth_store,
+        }
     }
 
     /// 登录
-    pub async fn login(&self, _req: LoginRequest) -> Result<()> {
-        self.auth_store.login(
-            UserResponse {
-                id: uuid::Uuid::new_v4(),
-                username: "test_user".to_string(),
-                role: "user".to_string(),
-                created_at: chrono::Utc::now(),
-            },
-            "test_token".to_string(),
-        );
+    pub async fn login(&self, req: LoginRequest) -> Result<UserResponse> {
+        let response_text = self
+            .api_client
+            .post_json("/api/v1/auth/login", &req)
+            .await?;
+        let user: UserResponse = serde_json::from_str(&response_text).map_err(|e| {
+            crate::types::errors::AppError::Server(format!("解析用户响应失败: {}", e))
+        })?;
+
+        // 注意：token 已由 ApiClient.handle_response_headers 自动处理
+        self.auth_store.login(user.clone(), "".to_string()); // token 已在 cookie 中
+        Ok(user)
+    }
+
+    /// 获取当前用户
+    pub async fn get_me(&self) -> Result<UserResponse> {
+        self.api_client.get_json("/api/v1/auth/me").await
+    }
+
+    /// 登出
+    pub async fn logout(&self) -> Result<()> {
+        self.api_client
+            .post("/api/v1/auth/logout", String::new())
+            .await?;
+        self.auth_store.logout();
+        Ok(())
+    }
+
+    /// 修改密码
+    pub async fn change_password(&self, req: UpdateProfileRequest) -> Result<()> {
+        self.api_client
+            .post_json("/api/v1/auth/change-password", &req)
+            .await?;
         Ok(())
     }
 }

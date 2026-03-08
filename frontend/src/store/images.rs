@@ -1,7 +1,7 @@
-use std::sync::Arc;
+use crate::types::models::{ImageFilters, ImageItem};
 use parking_lot::RwLock;
 use std::collections::HashSet;
-use crate::types::models::{ImageItem, ImageFilters};
+use std::sync::Arc;
 
 /// 图片状态管理 Store
 #[derive(Clone)]
@@ -10,6 +10,7 @@ pub struct ImageStore {
     current_page: Arc<RwLock<u32>>,
     total_items: Arc<RwLock<u64>>,
     filters: Arc<RwLock<ImageFilters>>,
+    #[allow(dead_code)]
     selected_ids: Arc<RwLock<HashSet<String>>>,
     is_loading: Arc<RwLock<bool>>,
     has_more: Arc<RwLock<bool>>,
@@ -92,6 +93,11 @@ impl ImageStore {
     pub fn clear_images(&self) {
         self.images.write().clear();
         *self.current_page.write() = 1;
+    }
+
+    /// 设置图片列表
+    pub fn set_images(&self, new_images: Vec<ImageItem>) {
+        *self.images.write() = new_images;
     }
 }
 

@@ -37,10 +37,18 @@ pub enum ConfigError {
 
 // 获取默认数据库连接池大小
 // 对于 I/O 密集型应用（图片处理 + 文件 I/O），使用更高的连接数
+// 支持通过环境变量 DATABASE_MAX_CONNECTIONS 覆盖
 fn default_max_connections() -> u32 {
-    // 基础连接：每个物理核心 4 个（用于并发查询）
-    // 额外连接：至少 10 个（用于处理突发请求和后台任务）
-    std::cmp::max(num_cpus::get_physical() * 4, 10) as u32
+    // 优先使用环境变量配置
+    std::env::var("DATABASE_MAX_CONNECTIONS")
+        .ok()
+        .and_then(|val| val.parse::<u32>().ok())
+        .map(|num| num.max(1))
+        .unwrap_or_else(|| {
+            // 基础连接：每个物理核心 4 个（用于并发查询）
+            // 额外连接：至少 10 个（用于处理突发请求和后台任务）
+            std::cmp::max(num_cpus::get_physical() * 4, 10) as u32
+        })
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -54,7 +62,6 @@ pub struct Config {
     pub cleanup: CleanupConfig,
     pub mail: MailConfig,
     pub image: ImageConfig,
-    pub admin: AdminConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -65,24 +72,34 @@ pub struct ServerConfig {
     pub rate_limit_per_second: u32,
     pub rate_limit_burst: u32,
     pub jwt_secret_min_length: usize,
-    #[serde(default = "default_cors_origins")]
-    pub cors_origins: String,
+    /// 前端静态文件目录
+    #[serde(default = "default_frontend_dir")]
+    pub frontend_dir: String,
 }
 
-fn default_cors_origins() -> String {
-    "*".to_string()
+fn default_frontend_dir() -> String {
+    "/app/frontend/dist".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DatabaseConfig {
+    /// PostgreSQL 数据库连接 URL
+    /// 格式: postgresql://user:password@host:port/database
     pub url: String,
+    /// 数据库连接池最大连接数
+    /// 默认: max(核心数 × 4, 10)
+    /// 可通过环境变量 DATABASE_MAX_CONNECTIONS 覆盖
     pub max_connections: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RedisConfig {
+    /// Redis/Dragonfly 连接 URL
+    /// 格式: redis://host:port
     pub url: String,
+    /// Redis 键前缀，用于隔离不同应用的数据
     pub key_prefix: String,
+    /// 默认 TTL（秒），用于缓存失效时间
     pub ttl: u64,
 }
 
@@ -142,21 +159,6 @@ fn default_dedup_strategy() -> String {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AdminConfig {
-    pub username: String,
-    pub password: String,
-}
-
-impl Default for AdminConfig {
-    fn default() -> Self {
-        Self {
-            username: "username".to_string(),
-            password: "password".to_string(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MailConfig {
     pub enabled: bool,
     pub smtp_host: String,
@@ -178,7 +180,7 @@ impl Default for Config {
                 rate_limit_per_second: 10,
                 rate_limit_burst: 30,
                 jwt_secret_min_length: 32,
-                cors_origins: "*".to_string(),
+                frontend_dir: "/app/frontend/dist".to_string(),
             },
             database: DatabaseConfig {
                 url: "postgresql://user:pass@postgres:5432/image".to_string(),
@@ -204,9 +206,9 @@ impl Default for Config {
                 file_check_concurrent_threshold: 50,
             },
             cache: CacheConfig {
-                list_ttl: 300,           // 5分钟
-                detail_ttl: 1800,        // 30分钟
-                categories_ttl: 3600,     // 1小时
+                list_ttl: 300,        // 5分钟
+                detail_ttl: 1800,     // 30分钟
+                categories_ttl: 3600, // 1小时
             },
             rate_limit: RateLimitConfig {
                 requests_per_minute: 100,
@@ -232,10 +234,6 @@ impl Default for Config {
                 from_email: "noreply@example.com".to_string(),
                 from_name: "Vansour Image".to_string(),
                 reset_link_base_url: "http://localhost:8080/reset-password".to_string(),
-            },
-            admin: AdminConfig {
-                username: "username".to_string(),
-                password: "password".to_string(),
             },
         }
     }
@@ -287,7 +285,9 @@ impl Config {
             return Err(ConfigError::InvalidJpegQuality);
         }
         if self.image.dedup_strategy != "user" && self.image.dedup_strategy != "global" {
-            return Err(ConfigError::InvalidDedupStrategy(self.image.dedup_strategy.clone()));
+            return Err(ConfigError::InvalidDedupStrategy(
+                self.image.dedup_strategy.clone(),
+            ));
         }
 
         // 验证清理配置
@@ -299,7 +299,8 @@ impl Config {
         }
 
         // 验证缓存配置
-        if self.cache.list_ttl == 0 || self.cache.detail_ttl == 0 || self.cache.categories_ttl == 0 {
+        if self.cache.list_ttl == 0 || self.cache.detail_ttl == 0 || self.cache.categories_ttl == 0
+        {
             return Err(ConfigError::InvalidTtl);
         }
 
@@ -320,14 +321,12 @@ impl Config {
         if let Ok(port) = std::env::var("SERVER_PORT") {
             config.server.port = port.parse().unwrap_or(8080);
         }
-        if let Ok(cors_origins) = std::env::var("CORS_ORIGINS") {
-            config.server.cors_origins = cors_origins;
-        }
         if let Ok(db_url) = std::env::var("DATABASE_URL") {
             config.database.url = db_url;
         }
         if let Ok(max_connections) = std::env::var("DATABASE_MAX_CONNECTIONS") {
-            config.database.max_connections = max_connections.parse().unwrap_or(default_max_connections());
+            config.database.max_connections =
+                max_connections.parse().unwrap_or(default_max_connections());
         }
         if let Ok(redis_url) = std::env::var("REDIS_URL") {
             config.redis.url = redis_url;
@@ -339,7 +338,8 @@ impl Config {
             config.storage.enable_file_check = enable_file_check.parse().unwrap_or(true);
         }
         if let Ok(file_check_threshold) = std::env::var("STORAGE_FILE_CHECK_THRESHOLD") {
-            config.storage.file_check_concurrent_threshold = file_check_threshold.parse().unwrap_or(50);
+            config.storage.file_check_concurrent_threshold =
+                file_check_threshold.parse().unwrap_or(50);
         }
 
         // 邮件配置
@@ -382,16 +382,9 @@ impl Config {
             config.image.jpeg_quality = jpeg_quality.parse().unwrap_or(85);
         }
         if let Ok(dedup_strategy) = std::env::var("IMAGE_DEDUP_STRATEGY")
-            && (dedup_strategy == "user" || dedup_strategy == "global") {
+            && (dedup_strategy == "user" || dedup_strategy == "global")
+        {
             config.image.dedup_strategy = dedup_strategy;
-        }
-
-        // 管理员账户配置
-        if let Ok(admin_username) = std::env::var("ADMIN_USERNAME") {
-            config.admin.username = admin_username;
-        }
-        if let Ok(admin_password) = std::env::var("ADMIN_PASSWORD") {
-            config.admin.password = admin_password;
         }
 
         config

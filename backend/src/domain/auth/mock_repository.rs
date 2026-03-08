@@ -1,8 +1,8 @@
-use async_trait::async_trait;
-use uuid::Uuid;
-use crate::models::User;
 use crate::domain::auth::repository::AuthRepository;
+use crate::models::User;
+use async_trait::async_trait;
 use std::sync::Arc;
+use uuid::Uuid;
 
 pub struct MockAuthRepository {
     pub users: Arc<std::sync::Mutex<Vec<User>>>,
@@ -34,7 +34,11 @@ impl AuthRepository for MockAuthRepository {
         Ok(())
     }
 
-    async fn update_user_password(&self, user_id: Uuid, password_hash: &str) -> Result<(), sqlx::Error> {
+    async fn update_user_password(
+        &self,
+        user_id: Uuid,
+        password_hash: &str,
+    ) -> Result<(), sqlx::Error> {
         let mut users = self.users.lock().unwrap();
         if let Some(user) = users.iter_mut().find(|u| u.id == user_id) {
             user.password_hash = password_hash.to_string();

@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::models::{Image, Category};
+use crate::models::{Category, Image};
 
 /// 图片数据访问 trait
 #[async_trait]
@@ -45,7 +45,11 @@ pub trait ImageRepository: Send + Sync {
     async fn hard_delete_image(&self, id: Uuid) -> Result<(), sqlx::Error>;
 
     /// 根据哈希查找图片（用于去重）
-    async fn find_image_by_hash(&self, hash: &str, user_id: Uuid) -> Result<Option<Image>, sqlx::Error>;
+    async fn find_image_by_hash(
+        &self,
+        hash: &str,
+        user_id: Uuid,
+    ) -> Result<Option<Image>, sqlx::Error>;
 
     /// 全局根据哈希查找图片
     async fn find_image_by_hash_global(&self, hash: &str) -> Result<Option<Image>, sqlx::Error>;
@@ -235,7 +239,7 @@ impl ImageRepository for PostgresImageRepository {
 
     async fn count_images_by_user(&self, user_id: Uuid) -> Result<i64, sqlx::Error> {
         let result: (i64,) = sqlx::query_as(
-            "SELECT COUNT(*) as count FROM images WHERE user_id = $1 AND deleted_at IS NULL"
+            "SELECT COUNT(*) as count FROM images WHERE user_id = $1 AND deleted_at IS NULL",
         )
         .bind(user_id)
         .fetch_one(&self.pool)
@@ -287,26 +291,28 @@ impl ImageRepository for PostgresImageRepository {
     }
 
     async fn soft_delete_image(&self, id: Uuid) -> Result<(), sqlx::Error> {
-        sqlx::query(
-            "UPDATE images SET deleted_at = NOW() WHERE id = $1"
-        )
-        .bind(id)
-        .execute(&self.pool)
-        .await?;
+        sqlx::query("UPDATE images SET deleted_at = NOW() WHERE id = $1")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
 
         Ok(())
     }
 
     async fn hard_delete_image(&self, id: Uuid) -> Result<(), sqlx::Error> {
         sqlx::query("DELETE FROM images WHERE id = $1")
-        .bind(id)
-        .execute(&self.pool)
-        .await?;
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
 
         Ok(())
     }
 
-    async fn find_image_by_hash(&self, hash: &str, user_id: Uuid) -> Result<Option<Image>, sqlx::Error> {
+    async fn find_image_by_hash(
+        &self,
+        hash: &str,
+        user_id: Uuid,
+    ) -> Result<Option<Image>, sqlx::Error> {
         sqlx::query_as::<_, Image>(
             "SELECT id, user_id, category_id, filename, thumbnail, original_filename, size, hash, format, views, status, expires_at, deleted_at, created_at
              FROM images WHERE hash = $1 AND user_id = $2 AND deleted_at IS NULL"
@@ -348,7 +354,7 @@ impl ImageRepository for PostgresImageRepository {
                     "SELECT * FROM images
                      WHERE user_id = $1 AND deleted_at IS NULL AND (created_at, id) < ($2, $3)
                      ORDER BY created_at DESC, id DESC
-                     LIMIT $4"
+                     LIMIT $4",
                 )
                 .bind(user_id)
                 .bind(created_at)
@@ -362,7 +368,7 @@ impl ImageRepository for PostgresImageRepository {
                     "SELECT * FROM images
                      WHERE user_id = $1 AND deleted_at IS NULL
                      ORDER BY created_at DESC, id DESC
-                     LIMIT $2"
+                     LIMIT $2",
                 )
                 .bind(user_id)
                 .bind(limit)
@@ -397,7 +403,7 @@ impl CategoryRepository for PostgresCategoryRepository {
 
     async fn find_category_by_id(&self, id: Uuid) -> Result<Option<Category>, sqlx::Error> {
         sqlx::query_as::<_, Category>(
-            "SELECT id, user_id, name, created_at FROM categories WHERE id = $1"
+            "SELECT id, user_id, name, created_at FROM categories WHERE id = $1",
         )
         .bind(id)
         .fetch_optional(&self.pool)
@@ -406,7 +412,7 @@ impl CategoryRepository for PostgresCategoryRepository {
 
     async fn create_category(&self, category: &Category) -> Result<(), sqlx::Error> {
         sqlx::query(
-            "INSERT INTO categories (id, user_id, name, created_at) VALUES ($1, $2, $3, $4)"
+            "INSERT INTO categories (id, user_id, name, created_at) VALUES ($1, $2, $3, $4)",
         )
         .bind(category.id)
         .bind(category.user_id)
@@ -420,9 +426,9 @@ impl CategoryRepository for PostgresCategoryRepository {
 
     async fn delete_category(&self, id: Uuid) -> Result<(), sqlx::Error> {
         sqlx::query("DELETE FROM categories WHERE id = $1")
-        .bind(id)
-        .execute(&self.pool)
-        .await?;
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
 
         Ok(())
     }

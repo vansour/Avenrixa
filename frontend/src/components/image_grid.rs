@@ -1,17 +1,14 @@
-use dioxus::prelude::*;
 use crate::components::image_card::ImageCard;
 use crate::types::models::ImageItem;
+use dioxus::prelude::*;
 
 /// 图片网格组件
 #[component]
-pub fn ImageGrid(
-    images: Vec<ImageItem>,
-) -> Element {
+pub fn ImageGrid(images: Vec<ImageItem>) -> Element {
     rsx! {
         div { class: "image-grid",
             if images.is_empty() {
                 div { class: "empty-state",
-                    div { class: "empty-icon", "🖼️" }
                     h3 { "暂无图片" }
                     p { "上传图片开始使用吧！" }
                 }

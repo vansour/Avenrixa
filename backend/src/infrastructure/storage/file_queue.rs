@@ -3,12 +3,12 @@
 
 use redis::AsyncCommands;
 use redis::RedisError;
+use redis::aio::ConnectionManager;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tracing::{error, info, warn};
-use serde::{Deserialize, Serialize};
-use redis::aio::ConnectionManager;
 
 /// 文件保存任务
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -48,7 +48,11 @@ impl FileSaveQueue {
             Self::process_queue(redis_clone, queue_key_clone).await;
         });
 
-        Self::Real { redis, queue_key, _handle }
+        Self::Real {
+            redis,
+            queue_key,
+            _handle,
+        }
     }
 
     /// 创建 Mock 文件保存队列 (用于测试)
@@ -59,11 +63,16 @@ impl FileSaveQueue {
     /// 提交文件保存任务并存入 Redis
     pub async fn submit(&self, task: FileSaveTask) -> Result<(), String> {
         match self {
-            Self::Real { redis, queue_key, .. } => {
+            Self::Real {
+                redis, queue_key, ..
+            } => {
                 let mut conn = redis.clone();
                 let payload = serde_json::to_string(&task).map_err(|e| e.to_string())?;
 
-                let _: () = conn.lpush(queue_key, payload).await.map_err(|e| e.to_string())?;
+                let _: () = conn
+                    .lpush(queue_key, payload)
+                    .await
+                    .map_err(|e| e.to_string())?;
                 Ok(())
             }
             Self::Mock => {
@@ -74,10 +83,7 @@ impl FileSaveQueue {
     }
 
     /// 处理任务队列
-    async fn process_queue(
-        mut redis: ConnectionManager,
-        queue_key: String,
-    ) {
+    async fn process_queue(mut redis: ConnectionManager, queue_key: String) {
         /// 检查是否为超时错误
         fn is_timeout_error(e: &RedisError) -> bool {
             e.to_string().to_lowercase().contains("timed out")
@@ -143,7 +149,9 @@ impl FileSaveQueue {
         match tokio::fs::rename(&task.temp_image_path, &task.storage_path).await {
             Ok(_) => {
                 // 主图片移动成功，保存缩略图
-                match Self::save_file_with_retry(&task.thumbnail_path, &task.thumbnail_data, 3).await {
+                match Self::save_file_with_retry(&task.thumbnail_path, &task.thumbnail_data, 3)
+                    .await
+                {
                     Ok(_) => FileSaveResult::Success,
                     Err(e) => {
                         error!("保存缩略图失败 [{}]: {}", image_id, e);
@@ -158,7 +166,13 @@ impl FileSaveQueue {
                     Ok(_) => {
                         let _ = tokio::fs::remove_file(&task.temp_image_path).await;
                         // 复制成功，保存缩略图
-                        match Self::save_file_with_retry(&task.thumbnail_path, &task.thumbnail_data, 3).await {
+                        match Self::save_file_with_retry(
+                            &task.thumbnail_path,
+                            &task.thumbnail_data,
+                            3,
+                        )
+                        .await
+                        {
                             Ok(_) => FileSaveResult::Success,
                             Err(e) => {
                                 error!("保存缩略图失败 [{}]: {}", image_id, e);
@@ -176,7 +190,11 @@ impl FileSaveQueue {
     }
 
     /// 带重试的文件保存
-    async fn save_file_with_retry(path: &str, data: &[u8], max_retries: u32) -> std::io::Result<()> {
+    async fn save_file_with_retry(
+        path: &str,
+        data: &[u8],
+        max_retries: u32,
+    ) -> std::io::Result<()> {
         let mut last_error = None;
 
         for attempt in 1..=max_retries {
@@ -193,9 +211,7 @@ impl FileSaveQueue {
             }
         }
 
-        Err(last_error.unwrap_or_else(|| {
-            std::io::Error::other("文件写入失败")
-        }))
+        Err(last_error.unwrap_or_else(|| std::io::Error::other("文件写入失败")))
     }
 }
 

@@ -1,7 +1,7 @@
-use axum::http::StatusCode;
-use uuid::Uuid;
 use crate::db::AppState;
+use axum::http::StatusCode;
 use redis::AsyncCommands;
+use uuid::Uuid;
 
 /// 认证用户信息提取器（只有一个管理员）
 #[derive(Debug, Clone)]
@@ -39,7 +39,9 @@ impl axum::extract::FromRequestParts<AppState> for AuthUser {
         };
 
         // 验证 JWT 令牌
-        let claims = state.auth.verify_token(token)
+        let claims = state
+            .auth
+            .verify_token(token)
             .map_err(|_| StatusCode::UNAUTHORIZED)?;
 
         // 检查令牌是否已被撤销
@@ -73,5 +75,34 @@ impl axum::extract::FromRequestParts<AppState> for AuthUser {
     }
 }
 
-/// 管理员用户信息提取器（与 AuthUser 相同，简化）
-pub type AdminUser = AuthUser;
+/// 管理员用户信息提取器
+#[derive(Debug, Clone)]
+pub struct AdminUser {
+    pub id: Uuid,
+    pub username: String,
+    pub role: String,
+}
+
+// AdminUser 提取器 - 验证用户角色为 admin
+impl axum::extract::FromRequestParts<AppState> for AdminUser {
+    type Rejection = StatusCode;
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        // 使用 AuthUser 提取器验证身份
+        let auth_user = AuthUser::from_request_parts(parts, state).await?;
+
+        // 验证用户角色为 admin
+        if auth_user.role != "admin" {
+            return Err(StatusCode::FORBIDDEN);
+        }
+
+        Ok(AdminUser {
+            id: auth_user.id,
+            username: auth_user.username,
+            role: auth_user.role,
+        })
+    }
+}

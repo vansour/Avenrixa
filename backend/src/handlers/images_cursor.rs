@@ -14,7 +14,12 @@ pub async fn get_images(
     auth_user: AuthUser,
     Query(params): Query<crate::models::PaginationParams>,
 ) -> Result<Json<crate::models::CursorPaginated<Image>>, AppError> {
-    let service = state.image_domain_service.as_ref().ok_or(AppError::Internal(anyhow::anyhow!("Image service not found")))?;
+    let service = state
+        .image_domain_service
+        .as_ref()
+        .ok_or(AppError::Internal(anyhow::anyhow!(
+            "Image service not found"
+        )))?;
     let result = service.get_images_cursor(auth_user.id, params).await?;
     Ok(Json(result))
 }

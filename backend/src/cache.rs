@@ -1,5 +1,5 @@
 use redis::AsyncCommands;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use tracing::warn;
 
 /// 缓存辅助工具
@@ -19,10 +19,7 @@ impl Cache {
     }
 
     /// 获取缓存值
-    pub async fn get<T, C>(
-        conn: &mut C,
-        key: impl AsRef<str>,
-    ) -> Result<Option<T>, anyhow::Error>
+    pub async fn get<T, C>(conn: &mut C, key: impl AsRef<str>) -> Result<Option<T>, anyhow::Error>
     where
         T: DeserializeOwned,
         C: redis::aio::ConnectionLike + Send + Sync,
@@ -70,10 +67,7 @@ impl Cache {
 
     /// 删除匹配前缀的所有缓存（使用 SCAN 替代 KEYS 避免阻塞）
     #[allow(dead_code)]
-    pub async fn del_pattern<C>(
-        conn: &mut C,
-        pattern: impl AsRef<str>,
-    ) -> Result<(), anyhow::Error>
+    pub async fn del_pattern<C>(conn: &mut C, pattern: impl AsRef<str>) -> Result<(), anyhow::Error>
     where
         C: redis::aio::ConnectionLike + Send + Sync,
     {
@@ -94,7 +88,8 @@ impl Cache {
                 .map_err(|e| anyhow::anyhow!("Redis SCAN error: {}", e))?;
 
             if !keys.is_empty() {
-                conn.del::<_, ()>(keys).await
+                conn.del::<_, ()>(keys)
+                    .await
                     .map_err(|e| anyhow::anyhow!("Redis DEL error: {}", e))?;
             }
 
@@ -135,10 +130,23 @@ pub struct ImageCache;
 
 #[allow(dead_code)]
 impl ImageCache {
-    pub fn list(user_id: uuid::Uuid, page: i32, page_size: i32, category_id: Option<uuid::Uuid>, sort_by: &str, sort_order: &str) -> String {
+    pub fn list(
+        user_id: uuid::Uuid,
+        page: i32,
+        page_size: i32,
+        category_id: Option<uuid::Uuid>,
+        sort_by: &str,
+        sort_order: &str,
+    ) -> String {
         match category_id {
-            Some(cat_id) => format!("images:list:{}:{}:{}:{}:{}:{}", user_id, cat_id, page, page_size, sort_by, sort_order),
-            None => format!("images:list:{}:{}:{}:{}:{}", user_id, page, page_size, sort_by, sort_order),
+            Some(cat_id) => format!(
+                "images:list:{}:{}:{}:{}:{}:{}",
+                user_id, cat_id, page, page_size, sort_by, sort_order
+            ),
+            None => format!(
+                "images:list:{}:{}:{}:{}:{}",
+                user_id, page, page_size, sort_by, sort_order
+            ),
         }
     }
 

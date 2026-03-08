@@ -10,10 +10,13 @@ use uuid::Uuid;
 use crate::audit::log_audit;
 use crate::config::Config;
 use crate::error::AppError;
-use crate::models::{AuditLog, HealthMetrics, HealthStatus, ComponentStatus, Setting, SystemStats, User, AuditLogResponse};
+use crate::models::{
+    AuditLog, AuditLogResponse, ComponentStatus, HealthMetrics, HealthStatus, Setting, SystemStats,
+    User,
+};
 
-use redis::aio::ConnectionManager;
 use redis::AsyncCommands;
+use redis::aio::ConnectionManager;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 /// 管理领域服务
@@ -25,7 +28,11 @@ pub struct AdminDomainService {
 
 impl AdminDomainService {
     pub fn new(pool: PgPool, redis: Option<ConnectionManager>, config: Config) -> Self {
-        Self { pool, redis, config }
+        Self {
+            pool,
+            redis,
+            config,
+        }
     }
 
     /// 健康检查
@@ -91,7 +98,11 @@ impl AdminDomainService {
     }
 
     /// 数据库备份
-    pub async fn backup_database(&self, admin_user_id: Uuid, admin_username: &str) -> Result<crate::models::BackupResponse, AppError> {
+    pub async fn backup_database(
+        &self,
+        admin_user_id: Uuid,
+        admin_username: &str,
+    ) -> Result<crate::models::BackupResponse, AppError> {
         let filename = format!("backup_{}.sql", Uuid::new_v4());
         let backup_dir = "/data/backup";
         let backup_path = format!("{}/{}", backup_dir, filename);
@@ -116,7 +127,10 @@ impl AdminDomainService {
             Ok(child) => child,
             Err(e) => {
                 error!("Failed to spawn pg_dump process: {}", e);
-                return Err(AppError::Internal(anyhow::anyhow!("Failed to execute pg_dump: {}", e)));
+                return Err(AppError::Internal(anyhow::anyhow!(
+                    "Failed to execute pg_dump: {}",
+                    e
+                )));
             }
         };
 
@@ -136,17 +150,26 @@ impl AdminDomainService {
                 if !status.success() {
                     error!("pg_dump failed with status: {}", status);
                     let _ = tokio::fs::remove_file(&backup_path).await;
-                    return Err(AppError::Internal(anyhow::anyhow!("pg_dump failed with exit code: {}", status)));
+                    return Err(AppError::Internal(anyhow::anyhow!(
+                        "pg_dump failed with exit code: {}",
+                        status
+                    )));
                 }
             }
             Err(e) => {
                 error!("Failed to wait for pg_dump: {}", e);
                 let _ = tokio::fs::remove_file(&backup_path).await;
-                return Err(AppError::Internal(anyhow::anyhow!("pg_dump wait error: {}", e)));
+                return Err(AppError::Internal(anyhow::anyhow!(
+                    "pg_dump wait error: {}",
+                    e
+                )));
             }
         }
 
-        info!("Database backup created: {} by {}", filename, admin_username);
+        info!(
+            "Database backup created: {} by {}",
+            filename, admin_username
+        );
 
         // 记录审计日志
         let pool = self.pool.clone();
@@ -160,8 +183,9 @@ impl AdminDomainService {
                 "backup",
                 None,
                 None,
-                Some(serde_json::json!({"filename": filename_clone}))
-            ).await;
+                Some(serde_json::json!({"filename": filename_clone})),
+            )
+            .await;
         });
 
         Ok(crate::models::BackupResponse {
@@ -172,10 +196,11 @@ impl AdminDomainService {
 
     /// 收集健康指标
     async fn collect_health_metrics(&self) -> Result<HealthMetrics, AppError> {
-        let images_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM images WHERE deleted_at IS NULL")
-            .fetch_one(&self.pool)
-            .await
-            .unwrap_or(0);
+        let images_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM images WHERE deleted_at IS NULL")
+                .fetch_one(&self.pool)
+                .await
+                .unwrap_or(0);
 
         let users_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
             .fetch_one(&self.pool)
@@ -198,13 +223,17 @@ impl AdminDomainService {
     }
 
     /// 清理已删除的文件
-    pub async fn cleanup_deleted_files(&self, admin_user_id: Uuid, admin_username: &str) -> Result<Vec<String>, AppError> {
+    pub async fn cleanup_deleted_files(
+        &self,
+        admin_user_id: Uuid,
+        admin_username: &str,
+    ) -> Result<Vec<String>, AppError> {
         let now = Utc::now();
         let retention_days = self.config.cleanup.deleted_images_retention_days;
         let days_ago = now - chrono::Duration::days(retention_days);
 
         let result = sqlx::query_as::<_, (Uuid, String)>(
-            "SELECT id, filename FROM images WHERE deleted_at < $1"
+            "SELECT id, filename FROM images WHERE deleted_at < $1",
         )
         .bind(days_ago)
         .fetch_all(&self.pool)
@@ -222,8 +251,9 @@ impl AdminDomainService {
                     "cleanup",
                     None,
                     None,
-                    Some(serde_json::json!({"error": error_msg}))
-                ).await;
+                    Some(serde_json::json!({"error": error_msg})),
+                )
+                .await;
             });
             AppError::DatabaseError(e)
         })?;
@@ -245,7 +275,11 @@ impl AdminDomainService {
             }
         }
 
-        info!("Cleanup complete: {} images removed by {}", removed.len(), admin_username);
+        info!(
+            "Cleanup complete: {} images removed by {}",
+            removed.len(),
+            admin_username
+        );
 
         // 记录审计日志
         let removed_count = removed.len();
@@ -258,8 +292,9 @@ impl AdminDomainService {
                 "cleanup",
                 None,
                 None,
-                Some(serde_json::json!({"removed_count": removed_count}))
-            ).await;
+                Some(serde_json::json!({"removed_count": removed_count})),
+            )
+            .await;
         });
 
         Ok(removed)
@@ -270,7 +305,7 @@ impl AdminDomainService {
         let now = Utc::now();
 
         let result = sqlx::query(
-            "UPDATE images SET deleted_at = $1 WHERE expires_at < $1 AND deleted_at IS NULL"
+            "UPDATE images SET deleted_at = $1 WHERE expires_at < $1 AND deleted_at IS NULL",
         )
         .bind(now)
         .execute(&self.pool)
@@ -287,8 +322,9 @@ impl AdminDomainService {
                     "expiry",
                     None,
                     None,
-                    Some(serde_json::json!({"error": error_msg}))
-                ).await;
+                    Some(serde_json::json!({"error": error_msg})),
+                )
+                .await;
             });
             AppError::DatabaseError(e)
         })?;
@@ -308,8 +344,9 @@ impl AdminDomainService {
                 "expiry",
                 None,
                 None,
-                Some(serde_json::json!({"affected_count": affected}))
-            ).await;
+                Some(serde_json::json!({"affected_count": affected})),
+            )
+            .await;
         });
 
         Ok(affected)
@@ -357,16 +394,19 @@ impl AdminDomainService {
     }
 
     /// 获取审计日志
-    pub async fn get_audit_logs(&self, page: i64, page_size: i64) -> Result<AuditLogResponse, AppError> {
+    pub async fn get_audit_logs(
+        &self,
+        page: i64,
+        page_size: i64,
+    ) -> Result<AuditLogResponse, AppError> {
         let offset = (page - 1) * page_size;
 
-        let logs: Vec<AuditLog> = sqlx::query_as(
-            "SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT $1 OFFSET $2"
-        )
-        .bind(page_size)
-        .bind(offset)
-        .fetch_all(&self.pool)
-        .await?;
+        let logs: Vec<AuditLog> =
+            sqlx::query_as("SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT $1 OFFSET $2")
+                .bind(page_size)
+                .bind(offset)
+                .fetch_all(&self.pool)
+                .await?;
 
         let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM audit_logs")
             .fetch_one(&self.pool)
@@ -390,27 +430,32 @@ impl AdminDomainService {
             .fetch_one(&self.pool)
             .await?;
 
-        let total_images: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM images WHERE deleted_at IS NULL")
-            .fetch_one(&self.pool)
-            .await?;
+        let total_images: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM images WHERE deleted_at IS NULL")
+                .fetch_one(&self.pool)
+                .await?;
 
-        let total_storage: i64 = sqlx::query_scalar("SELECT COALESCE(SUM(size), 0) FROM images WHERE deleted_at IS NULL")
-            .fetch_one(&self.pool)
-            .await?;
+        let total_storage: i64 = sqlx::query_scalar(
+            "SELECT COALESCE(SUM(size), 0) FROM images WHERE deleted_at IS NULL",
+        )
+        .fetch_one(&self.pool)
+        .await?;
 
-        let total_views: i64 = sqlx::query_scalar("SELECT COALESCE(SUM(views), 0) FROM images WHERE deleted_at IS NULL")
-            .fetch_one(&self.pool)
-            .await?;
+        let total_views: i64 = sqlx::query_scalar(
+            "SELECT COALESCE(SUM(views), 0) FROM images WHERE deleted_at IS NULL",
+        )
+        .fetch_one(&self.pool)
+        .await?;
 
         let images_last_24h: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM images WHERE created_at > $1 AND deleted_at IS NULL"
+            "SELECT COUNT(*) FROM images WHERE created_at > $1 AND deleted_at IS NULL",
         )
         .bind(day_ago)
         .fetch_one(&self.pool)
         .await?;
 
         let images_last_7d: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM images WHERE created_at > $1 AND deleted_at IS NULL"
+            "SELECT COUNT(*) FROM images WHERE created_at > $1 AND deleted_at IS NULL",
         )
         .bind(week_ago)
         .fetch_one(&self.pool)
@@ -438,12 +483,11 @@ impl AdminDomainService {
     /// 更新设置
     pub async fn update_setting(&self, key: &str, value: &str) -> Result<(), AppError> {
         let now = Utc::now();
-        let exists = sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS(SELECT 1 FROM settings WHERE key = $1)"
-        )
-        .bind(key)
-        .fetch_one(&self.pool)
-        .await?;
+        let exists =
+            sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM settings WHERE key = $1)")
+                .bind(key)
+                .fetch_one(&self.pool)
+                .await?;
 
         if exists {
             sqlx::query("UPDATE settings SET value = $1, updated_at = $2 WHERE key = $3")

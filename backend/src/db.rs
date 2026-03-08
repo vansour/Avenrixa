@@ -1,18 +1,18 @@
-use redis::aio::ConnectionManager;
-use sqlx::{PgPool, Executor, Row};
 use crate::auth::AuthService;
 use crate::cache::Cache;
 use crate::config::Config;
+use crate::domain::admin::AdminDomainService;
 use crate::domain::auth::DefaultAuthDomainService;
 use crate::domain::image::ImageDomainService;
-use crate::domain::image::repository::{PostgresImageRepository, PostgresCategoryRepository};
-use crate::domain::admin::AdminDomainService;
+use crate::domain::image::repository::{PostgresCategoryRepository, PostgresImageRepository};
 use crate::file_queue::FileSaveQueue;
 use crate::image_processor::ImageProcessor;
-use uuid::Uuid;
-use tracing::{info, error};
-use std::time::Instant;
+use redis::aio::ConnectionManager;
+use sqlx::{Executor, PgPool, Row};
 use std::sync::Arc;
+use std::time::Instant;
+use tracing::{error, info};
+use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -21,7 +21,8 @@ pub struct AppState {
     pub config: Config,
     pub auth: AuthService,
     pub auth_domain_service: Option<Arc<DefaultAuthDomainService>>,
-    pub image_domain_service: Option<Arc<ImageDomainService<PostgresImageRepository, PostgresCategoryRepository>>>,
+    pub image_domain_service:
+        Option<Arc<ImageDomainService<PostgresImageRepository, PostgresCategoryRepository>>>,
     pub admin_domain_service: Option<Arc<AdminDomainService>>,
     pub image_processor: ImageProcessor,
     pub file_save_queue: Arc<FileSaveQueue>,
@@ -130,19 +131,29 @@ pub async fn init_schema(pool: &PgPool) -> Result<(), sqlx::Error> {
     Ok(())
 }
 
-/// 创建或更新管理员账户
-pub async fn create_admin_account(pool: &PgPool, config: &Config) -> Result<(String, String), anyhow::Error> {
-    let admin_username = &config.admin.username;
-    let admin_password = &config.admin.password;
+/// 默认管理员用户名
+pub const DEFAULT_ADMIN_USERNAME: &str = "username";
+
+/// 默认管理员密码
+pub const DEFAULT_ADMIN_PASSWORD: &str = "password";
+
+/// 创建管理员账户（仅首次）
+///
+/// 如果管理员已存在，则不更新密码
+pub async fn create_admin_account(
+    pool: &PgPool,
+) -> Result<(String, String), anyhow::Error> {
+    let admin_username = DEFAULT_ADMIN_USERNAME;
+    let admin_password = DEFAULT_ADMIN_PASSWORD;
     let password_hash = AuthService::hash_password(admin_password)?;
 
-    // 使用 INSERT ... ON CONFLICT DO UPDATE 来创建或更新管理员
+    // 使用 INSERT ... ON CONFLICT DO NOTHING 来创建管理员（仅首次）
+    // 如果用户已存在，则不会更新密码
     let result = sqlx::query(
         "INSERT INTO users (id, username, password_hash, role, created_at)
          VALUES ($1, $2, $3, 'admin', NOW())
-         ON CONFLICT (username) DO UPDATE
-         SET password_hash = $3
-         RETURNING username"
+         ON CONFLICT (username) DO NOTHING
+         RETURNING username",
     )
     .bind(ADMIN_USER_ID)
     .bind(admin_username)
@@ -153,12 +164,29 @@ pub async fn create_admin_account(pool: &PgPool, config: &Config) -> Result<(Str
     match result {
         Ok(Some(row)) => {
             let username: String = row.get("username");
-            info!("Admin account initialized: {}", username);
-            Ok((username, admin_password.clone()))
+            info!("Admin account created: {}", username);
+            Ok((username, admin_password.to_string()))
         }
         Ok(None) => {
-            error!("Failed to create admin account: no result returned");
-            Err(anyhow::anyhow!("Failed to create admin account: no result returned"))
+            // 用户已存在，使用现有凭证
+            info!("Admin account already exists, using existing credentials");
+            let existing = sqlx::query("SELECT username FROM users WHERE id = $1")
+                .bind(ADMIN_USER_ID)
+                .fetch_optional(pool)
+                .await?;
+
+            match existing {
+                Some(row) => {
+                    let username: String = row.get("username");
+                    info!("Using existing admin account: {}", username);
+                    Ok((username, admin_password.to_string()))
+                }
+                None => {
+                    // 不应该发生，但返回错误
+                    error!("Admin account not found in database");
+                    Err(anyhow::anyhow!("Admin account not found"))
+                }
+            }
         }
         Err(e) => {
             error!("Failed to create admin account: {}", e);
@@ -168,18 +196,16 @@ pub async fn create_admin_account(pool: &PgPool, config: &Config) -> Result<(Str
 }
 
 /// 打印管理员账户信息到日志
-pub fn log_admin_credentials(config: &Config) {
+pub fn log_admin_credentials() {
     info!("========================================");
     info!("        Admin Account");
     info!("========================================");
-    info!("        Username: {}", config.admin.username);
-    info!("        Password: {}", config.admin.password);
+    info!("        Username: {}", DEFAULT_ADMIN_USERNAME);
+    info!("        Password: {}", DEFAULT_ADMIN_PASSWORD);
     info!("========================================");
     info!("");
     info!("You can login with these credentials.");
-    info!("To change credentials, use environment variables:");
-    info!("  - ADMIN_USERNAME=your_username");
-    info!("  - ADMIN_PASSWORD=your_password");
+    info!("IMPORTANT: Please change the default password after first login!");
     info!("");
 }
 
@@ -187,13 +213,21 @@ impl AppState {
     /// 清除用户图片缓存
     pub async fn invalidate_user_image_cache(&self, user_id: Uuid) -> Result<(), anyhow::Error> {
         let mut redis = self.redis.clone();
-        Cache::del_pattern(&mut redis, &crate::cache::ImageCache::images_invalidate(user_id)).await
+        Cache::del_pattern(
+            &mut redis,
+            &crate::cache::ImageCache::images_invalidate(user_id),
+        )
+        .await
     }
 
     /// 清除用户分类缓存
     pub async fn invalidate_user_category_cache(&self, user_id: Uuid) -> Result<(), anyhow::Error> {
         let mut redis = self.redis.clone();
-        Cache::del_pattern(&mut redis, &crate::cache::ImageCache::categories_invalidate(user_id)).await
+        Cache::del_pattern(
+            &mut redis,
+            &crate::cache::ImageCache::categories_invalidate(user_id),
+        )
+        .await
     }
 
     /// 清除用户所有缓存

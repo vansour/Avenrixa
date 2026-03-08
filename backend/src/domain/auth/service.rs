@@ -2,9 +2,9 @@
 //!
 //! 提供密码哈希、JWT令牌生成和验证等功能
 
-use bcrypt::{hash, verify, DEFAULT_COST};
+use bcrypt::{DEFAULT_COST, hash, verify};
 use chrono::{Duration, Utc};
-use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
+use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use uuid::Uuid;
 
 use super::claims::Claims;
@@ -38,7 +38,9 @@ impl AuthService {
         #[cfg(debug_assertions)]
         {
             if jwt_secret.len() < 32 {
-                eprintln!("WARNING: Using short JWT secret in debug mode. Use a longer secret in production!");
+                eprintln!(
+                    "WARNING: Using short JWT secret in debug mode. Use a longer secret in production!"
+                );
             }
         }
 
@@ -56,7 +58,12 @@ impl AuthService {
         Ok(verify(password, hash)?)
     }
 
-    pub fn generate_token(&self, user_id: Uuid, username: &str, role: &str) -> anyhow::Result<String> {
+    pub fn generate_token(
+        &self,
+        user_id: Uuid,
+        username: &str,
+        role: &str,
+    ) -> anyhow::Result<String> {
         let now = Utc::now();
         let exp = now + Duration::hours(self.expiration_hours);
 
@@ -88,7 +95,11 @@ impl AuthService {
 
     /// 生成随机重置令牌
     pub fn generate_reset_token() -> String {
-        Uuid::new_v4().to_string()[..32].to_uppercase().chars().map(|c| if c == '-' { 'A' } else { c }).collect()
+        Uuid::new_v4().to_string()[..32]
+            .to_uppercase()
+            .chars()
+            .map(|c| if c == '-' { 'A' } else { c })
+            .collect()
     }
 
     /// 验证重置令牌强度
@@ -97,7 +108,12 @@ impl AuthService {
     }
 
     /// 生成访问令牌（短期，15分钟有效）
-    pub fn generate_access_token(&self, user_id: Uuid, username: &str, role: &str) -> anyhow::Result<String> {
+    pub fn generate_access_token(
+        &self,
+        user_id: Uuid,
+        username: &str,
+        role: &str,
+    ) -> anyhow::Result<String> {
         let now = Utc::now();
         let exp = now + Duration::minutes(15);
 
@@ -165,7 +181,10 @@ mod tests {
         let config = test_config();
         // SAFETY: 测试中设置环境变量
         unsafe {
-            std::env::set_var("JWT_SECRET", "test_secret_key_for_testing_must_be_long_enough_32chars");
+            std::env::set_var(
+                "JWT_SECRET",
+                "test_secret_key_for_testing_must_be_long_enough_32chars",
+            );
         }
         AuthService::new(&config).expect("Failed to create test auth service")
     }
@@ -199,10 +218,14 @@ mod tests {
         let username = "testuser";
         let role = "user";
 
-        let token = service.generate_token(user_id, username, role).expect("Failed to generate token");
+        let token = service
+            .generate_token(user_id, username, role)
+            .expect("Failed to generate token");
 
         // 验证令牌
-        let claims = service.verify_token(&token).expect("Failed to verify token");
+        let claims = service
+            .verify_token(&token)
+            .expect("Failed to verify token");
         assert_eq!(claims.sub, user_id);
         assert_eq!(claims.username, username);
         assert_eq!(claims.role, role);
@@ -216,13 +239,19 @@ mod tests {
         assert_eq!(token.len(), 32);
 
         // 令牌应该都是大写字母和数字
-        assert!(token.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit()));
+        assert!(
+            token
+                .chars()
+                .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
+        );
     }
 
     #[test]
     fn test_is_reset_token_strong() {
         // 有效令牌
-        assert!(AuthService::is_reset_token_strong("ABCDEFGHIJKLMNOPQRSTUVWXYZ123456"));
+        assert!(AuthService::is_reset_token_strong(
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZ123456"
+        ));
         assert!(AuthService::is_reset_token_strong(&"A".repeat(64)));
 
         // 无效令牌
@@ -235,10 +264,13 @@ mod tests {
         let service = create_test_service();
         let user_id = Uuid::new_v4();
 
-        let token = service.generate_access_token(user_id, "testuser", "user")
+        let token = service
+            .generate_access_token(user_id, "testuser", "user")
             .expect("Failed to generate access token");
 
-        let claims = service.verify_token(&token).expect("Failed to verify token");
+        let claims = service
+            .verify_token(&token)
+            .expect("Failed to verify token");
         assert_eq!(claims.sub, user_id);
         assert_eq!(claims.username, "testuser");
         assert_eq!(claims.role, "user");
@@ -255,10 +287,14 @@ mod tests {
         let service = create_test_service();
         let user_id = Uuid::new_v4();
 
-        let token = service.generate_refresh_token(user_id).expect("Failed to generate refresh token");
+        let token = service
+            .generate_refresh_token(user_id)
+            .expect("Failed to generate refresh token");
 
         // 验证刷新令牌
-        let result = service.verify_refresh_token(&token).expect("Failed to verify refresh token");
+        let result = service
+            .verify_refresh_token(&token)
+            .expect("Failed to verify refresh token");
         assert_eq!(result, user_id);
     }
 
@@ -268,7 +304,8 @@ mod tests {
         let user_id = Uuid::new_v4();
 
         // 生成普通访问令牌
-        let access_token = service.generate_access_token(user_id, "testuser", "user")
+        let access_token = service
+            .generate_access_token(user_id, "testuser", "user")
             .expect("Failed to generate access token");
 
         // 尝试用 verify_refresh_token 验证应该失败

@@ -22,7 +22,11 @@ pub trait AuthRepository: Send + Sync {
     async fn create_user(&self, user: &User) -> Result<(), sqlx::Error>;
 
     /// 更新用户密码
-    async fn update_user_password(&self, user_id: Uuid, password_hash: &str) -> Result<(), sqlx::Error>;
+    async fn update_user_password(
+        &self,
+        user_id: Uuid,
+        password_hash: &str,
+    ) -> Result<(), sqlx::Error>;
 }
 
 /// PostgreSQL 认证仓库实现
@@ -40,7 +44,7 @@ impl PostgresAuthRepository {
 impl AuthRepository for PostgresAuthRepository {
     async fn find_user_by_id(&self, id: Uuid) -> Result<Option<User>, sqlx::Error> {
         sqlx::query_as::<_, User>(
-            "SELECT id, username, password_hash, role, created_at FROM users WHERE id = $1"
+            "SELECT id, username, password_hash, role, created_at FROM users WHERE id = $1",
         )
         .bind(id)
         .fetch_optional(&self.pool)
@@ -49,7 +53,7 @@ impl AuthRepository for PostgresAuthRepository {
 
     async fn find_user_by_username(&self, username: &str) -> Result<Option<User>, sqlx::Error> {
         sqlx::query_as::<_, User>(
-            "SELECT id, username, password_hash, role, created_at FROM users WHERE username = $1"
+            "SELECT id, username, password_hash, role, created_at FROM users WHERE username = $1",
         )
         .bind(username)
         .fetch_optional(&self.pool)
@@ -59,7 +63,7 @@ impl AuthRepository for PostgresAuthRepository {
     async fn create_user(&self, user: &User) -> Result<(), sqlx::Error> {
         sqlx::query(
             "INSERT INTO users (id, username, password_hash, role, created_at)
-             VALUES ($1, $2, $3, $4, $5)"
+             VALUES ($1, $2, $3, $4, $5)",
         )
         .bind(user.id)
         .bind(&user.username)
@@ -72,14 +76,16 @@ impl AuthRepository for PostgresAuthRepository {
         Ok(())
     }
 
-    async fn update_user_password(&self, user_id: Uuid, password_hash: &str) -> Result<(), sqlx::Error> {
-        sqlx::query(
-            "UPDATE users SET password_hash = $1 WHERE id = $2"
-        )
-        .bind(password_hash)
-        .bind(user_id)
-        .execute(&self.pool)
-        .await?;
+    async fn update_user_password(
+        &self,
+        user_id: Uuid,
+        password_hash: &str,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query("UPDATE users SET password_hash = $1 WHERE id = $2")
+            .bind(password_hash)
+            .bind(user_id)
+            .execute(&self.pool)
+            .await?;
 
         Ok(())
     }

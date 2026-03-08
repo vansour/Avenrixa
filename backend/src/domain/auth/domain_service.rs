@@ -5,10 +5,10 @@
 use tracing::info;
 use uuid::Uuid;
 
-use super::repository::{AuthRepository};
+use super::repository::AuthRepository;
 use super::service::AuthService;
 use crate::error::AppError;
-use crate::models::{User, LoginRequest, UserResponse, UpdateProfileRequest};
+use crate::models::{LoginRequest, UpdateProfileRequest, User, UserResponse};
 
 /// 认证领域服务
 pub struct AuthDomainService<R: AuthRepository> {
@@ -28,7 +28,10 @@ impl<R: AuthRepository> AuthDomainService<R> {
     #[tracing::instrument(skip(self, req), fields(username = %req.username))]
     pub async fn login(&self, req: LoginRequest) -> Result<(UserResponse, String), AppError> {
         // 1. 查找用户
-        let user = self.repository.find_user_by_username(&req.username).await?
+        let user = self
+            .repository
+            .find_user_by_username(&req.username)
+            .await?
             .ok_or(AppError::InvalidPassword)?;
 
         // 2. 验证密码
@@ -38,7 +41,9 @@ impl<R: AuthRepository> AuthDomainService<R> {
         }
 
         // 3. 生成令牌
-        let _access_token = self.auth_service.generate_access_token(user.id, &user.username, &user.role)?;
+        let _access_token =
+            self.auth_service
+                .generate_access_token(user.id, &user.username, &user.role)?;
         let refresh_token = self.auth_service.generate_refresh_token(user.id)?;
 
         info!("User logged in: {}", user.username);
@@ -61,7 +66,10 @@ impl<R: AuthRepository> AuthDomainService<R> {
         req: UpdateProfileRequest,
     ) -> Result<(), AppError> {
         // 1. 查找用户
-        let user = self.repository.find_user_by_id(user_id).await?
+        let user = self
+            .repository
+            .find_user_by_id(user_id)
+            .await?
             .ok_or(AppError::UserNotFound)?;
 
         // 2. 验证当前密码
@@ -80,7 +88,9 @@ impl<R: AuthRepository> AuthDomainService<R> {
             let new_hash = AuthService::hash_password(&new_password)?;
 
             // 5. 更新密码
-            self.repository.update_user_password(user_id, &new_hash).await?;
+            self.repository
+                .update_user_password(user_id, &new_hash)
+                .await?;
 
             info!("Password changed for user_id: {}", user_id);
         }
@@ -90,7 +100,10 @@ impl<R: AuthRepository> AuthDomainService<R> {
 
     /// 获取当前用户
     pub async fn get_current_user(&self, user_id: Uuid) -> Result<UserResponse, AppError> {
-        let user = self.repository.find_user_by_id(user_id).await?
+        let user = self
+            .repository
+            .find_user_by_id(user_id)
+            .await?
             .ok_or(AppError::UserNotFound)?;
 
         Ok(UserResponse {
@@ -104,15 +117,17 @@ impl<R: AuthRepository> AuthDomainService<R> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::mock_repository::MockAuthRepository;
-    use crate::config::Config;
     use super::super::service::AuthService;
+    use super::*;
+    use crate::config::Config;
 
     #[tokio::test]
     async fn test_login_success() {
         // 设置测试环境变量
-        unsafe { std::env::set_var("JWT_SECRET", "test-secret-key-at-least-32-characters-long"); }
+        unsafe {
+            std::env::set_var("JWT_SECRET", "test-secret-key-at-least-32-characters-long");
+        }
 
         let repo = MockAuthRepository::new();
         let config = Config::default();

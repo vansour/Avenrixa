@@ -1,5 +1,5 @@
-use dioxus::prelude::*;
 use crate::types::models::ImageItem;
+use dioxus::prelude::*;
 
 /// 图片卡片组件
 #[component]
@@ -50,17 +50,17 @@ pub fn ImageCard(
                 button {
                     class: "btn btn-icon",
                     onclick: handle_click,
-                    "👁️"
+                    "选择"
                 }
                 button {
                     class: "btn btn-icon",
                     onclick: handle_download,
-                    "⬇️"
+                    "下载"
                 }
                 button {
                     class: "btn btn-icon btn-danger",
                     onclick: handle_delete,
-                    "🗑️"
+                    "删除"
                 }
             }
         }

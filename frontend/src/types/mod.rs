@@ -1,7 +1,7 @@
 pub mod api;
-pub mod models;
 pub mod errors;
+pub mod models;
 
 pub use api::*;
-pub use models::*;
 pub use errors::*;
+pub use models::*;

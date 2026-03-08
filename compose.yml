@@ -16,11 +16,8 @@ services:
       - DATABASE_URL=postgresql://user:pass@postgres:5432/image
       - REDIS_URL=redis://dragonfly:6379
       - JWT_SECRET=your-secret-key-change-in-production
-      - ADMIN_USERNAME=username
-      - ADMIN_PASSWORD=password
     volumes:
       - ./image_data:/data/images
-      - ./postgres_data:/var/lib/postgresql
     restart: unless-stopped
     healthcheck:
       test: curl -f http://localhost:8080/health || exit 1

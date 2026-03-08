@@ -33,10 +33,7 @@ pub fn create_routes() -> Router<AppState> {
     let public_routes = Router::new()
         .route("/health", routing::get(crate::admin_handlers::health_check))
         .route("/thumbnails/{id}", routing::get(serve_thumbnail))
-        .route(
-            "/auth/login",
-            routing::post(crate::auth_handlers::login),
-        );
+        .route("/auth/login", routing::post(crate::auth_handlers::login));
 
     // 管理员路由（使用 AdminUser 中间件）
     let admin_routes = Router::new()
@@ -52,10 +49,7 @@ pub fn create_routes() -> Router<AppState> {
             "/backup",
             routing::post(crate::admin_handlers::backup_database),
         )
-        .route(
-            "/users",
-            routing::get(crate::admin_handlers::get_users),
-        )
+        .route("/users", routing::get(crate::admin_handlers::get_users))
         .route(
             "/users/{id}",
             routing::put(crate::admin_handlers::update_user_role),
@@ -83,10 +77,7 @@ pub fn create_routes() -> Router<AppState> {
             "/upload",
             routing::post(crate::image_handlers::upload_image),
         )
-        .route(
-            "/images",
-            routing::get(crate::image_handlers::get_images),
-        )
+        .route("/images", routing::get(crate::image_handlers::get_images))
         .route(
             "/images/cursor",
             routing::get(crate::handlers::images_cursor::get_images),
@@ -135,10 +126,7 @@ pub fn create_routes() -> Router<AppState> {
             "/auth/change-password",
             routing::post(crate::auth_handlers::change_password),
         )
-        .route(
-            "/auth/logout",
-            routing::post(crate::auth_handlers::logout),
-        );
+        .route("/auth/logout", routing::post(crate::auth_handlers::logout));
 
     Router::new()
         .merge(public_routes)

@@ -4,8 +4,9 @@
 
 use anyhow::Result;
 use image::{
+    DynamicImage, RgbaImage,
     codecs::{jpeg, png},
-    imageops, DynamicImage, RgbaImage,
+    imageops,
 };
 use sha2::{Digest, Sha256};
 
@@ -172,10 +173,17 @@ impl ImageProcessor {
                         continue;
                     }
 
-                    let is_core = rel_x >= 2 && rel_x < char_width - 2 && rel_y >= 2 && rel_y < char_height - 2;
+                    let is_core = rel_x >= 2
+                        && rel_x < char_width - 2
+                        && rel_y >= 2
+                        && rel_y < char_height - 2;
                     let alpha = if is_core {
                         opacity
-                    } else if rel_x < 2 || rel_x >= char_width - 2 || rel_y < 2 || rel_y >= char_height - 2 {
+                    } else if rel_x < 2
+                        || rel_x >= char_width - 2
+                        || rel_y < 2
+                        || rel_y >= char_height - 2
+                    {
                         (opacity as u16 * 3 / 4) as u8
                     } else {
                         opacity / 2
@@ -186,9 +194,15 @@ impl ImageProcessor {
                     let out_a = src_a + dst_a * (1.0 - src_a);
 
                     if out_a > 0.0 {
-                        rgba_bytes[pixel_idx] = (255.0 * src_a + rgba_bytes[pixel_idx] as f32 * dst_a * (1.0 - src_a)) as u8;
-                        rgba_bytes[pixel_idx + 1] = (255.0 * src_a + rgba_bytes[pixel_idx + 1] as f32 * dst_a * (1.0 - src_a)) as u8;
-                        rgba_bytes[pixel_idx + 2] = (255.0 * src_a + rgba_bytes[pixel_idx + 2] as f32 * dst_a * (1.0 - src_a)) as u8;
+                        rgba_bytes[pixel_idx] = (255.0 * src_a
+                            + rgba_bytes[pixel_idx] as f32 * dst_a * (1.0 - src_a))
+                            as u8;
+                        rgba_bytes[pixel_idx + 1] = (255.0 * src_a
+                            + rgba_bytes[pixel_idx + 1] as f32 * dst_a * (1.0 - src_a))
+                            as u8;
+                        rgba_bytes[pixel_idx + 2] = (255.0 * src_a
+                            + rgba_bytes[pixel_idx + 2] as f32 * dst_a * (1.0 - src_a))
+                            as u8;
                         rgba_bytes[pixel_idx + 3] = (out_a * 255.0) as u8;
                     }
                 }
@@ -226,28 +240,40 @@ impl ImageProcessor {
 
                 if let Some(c) = f.contrast {
                     let factor = (c as f32 / 128.0).clamp(0.5, 3.0);
-                    pixel[0] = (((pixel[0] as f32 - 128.0) * factor) + 128.0).clamp(0.0, 255.0) as u8;
-                    pixel[1] = (((pixel[1] as f32 - 128.0) * factor) + 128.0).clamp(0.0, 255.0) as u8;
-                    pixel[2] = (((pixel[2] as f32 - 128.0) * factor) + 128.0).clamp(0.0, 255.0) as u8;
+                    pixel[0] =
+                        (((pixel[0] as f32 - 128.0) * factor) + 128.0).clamp(0.0, 255.0) as u8;
+                    pixel[1] =
+                        (((pixel[1] as f32 - 128.0) * factor) + 128.0).clamp(0.0, 255.0) as u8;
+                    pixel[2] =
+                        (((pixel[2] as f32 - 128.0) * factor) + 128.0).clamp(0.0, 255.0) as u8;
                 }
 
                 if let Some(s) = f.saturation {
                     let factor = (s as f32 / 128.0).clamp(0.0, 2.0);
-                    let gray = (pixel[0] as f32 * 0.299 + pixel[1] as f32 * 0.587 + pixel[2] as f32 * 0.114) as u8;
-                    pixel[0] = ((pixel[0] as f32 - gray as f32) * factor + gray as f32).clamp(0.0, 255.0) as u8;
-                    pixel[1] = ((pixel[1] as f32 - gray as f32) * factor + gray as f32).clamp(0.0, 255.0) as u8;
-                    pixel[2] = ((pixel[2] as f32 - gray as f32) * factor + gray as f32).clamp(0.0, 255.0) as u8;
+                    let gray = (pixel[0] as f32 * 0.299
+                        + pixel[1] as f32 * 0.587
+                        + pixel[2] as f32 * 0.114) as u8;
+                    pixel[0] = ((pixel[0] as f32 - gray as f32) * factor + gray as f32)
+                        .clamp(0.0, 255.0) as u8;
+                    pixel[1] = ((pixel[1] as f32 - gray as f32) * factor + gray as f32)
+                        .clamp(0.0, 255.0) as u8;
+                    pixel[2] = ((pixel[2] as f32 - gray as f32) * factor + gray as f32)
+                        .clamp(0.0, 255.0) as u8;
                 }
 
                 if let Some(true) = f.grayscale {
-                    let gray = (pixel[0] as f32 * 0.299 + pixel[1] as f32 * 0.587 + pixel[2] as f32 * 0.114) as u8;
+                    let gray = (pixel[0] as f32 * 0.299
+                        + pixel[1] as f32 * 0.587
+                        + pixel[2] as f32 * 0.114) as u8;
                     pixel[0] = gray;
                     pixel[1] = gray;
                     pixel[2] = gray;
                 }
 
                 if let Some(true) = f.sepia {
-                    let gray = (pixel[0] as f32 * 0.299 + pixel[1] as f32 * 0.587 + pixel[2] as f32 * 0.114) as u8;
+                    let gray = (pixel[0] as f32 * 0.299
+                        + pixel[1] as f32 * 0.587
+                        + pixel[2] as f32 * 0.114) as u8;
                     pixel[0] = (gray as f32 * 1.07).min(255.0) as u8;
                     pixel[1] = (gray as f32 * 0.74).min(255.0) as u8;
                     pixel[2] = (gray as f32 * 0.43).min(255.0) as u8;
@@ -290,11 +316,12 @@ impl ImageProcessor {
 
     pub fn get_extension(filename: &str) -> String {
         if let Some(dot_pos) = filename.rfind('.')
-            && dot_pos < filename.len() - 1 {
-                filename[dot_pos + 1..].to_lowercase()
-            } else {
-                "jpg".to_string()
-            }
+            && dot_pos < filename.len() - 1
+        {
+            filename[dot_pos + 1..].to_lowercase()
+        } else {
+            "jpg".to_string()
+        }
     }
 
     pub fn is_image(content_type: Option<&str>) -> bool {
@@ -308,13 +335,12 @@ impl ImageProcessor {
         const WEBP_SIGNATURE: &[u8] = &[0x52, 0x49, 0x46, 0x46];
         const ICO_SIGNATURE: &[u8] = &[0x00, 0x00, 0x01, 0x00];
 
-        let valid = data.len() >= 4 && (
-            data.starts_with(JPEG_SIGNATURE) ||
-            data.starts_with(PNG_SIGNATURE) ||
-            data.starts_with(GIF_SIGNATURE) ||
-            data.starts_with(WEBP_SIGNATURE) ||
-            data.starts_with(ICO_SIGNATURE)
-        );
+        let valid = data.len() >= 4
+            && (data.starts_with(JPEG_SIGNATURE)
+                || data.starts_with(PNG_SIGNATURE)
+                || data.starts_with(GIF_SIGNATURE)
+                || data.starts_with(WEBP_SIGNATURE)
+                || data.starts_with(ICO_SIGNATURE));
 
         if !valid {
             return Err(anyhow::anyhow!("Invalid image file signature"));
@@ -332,7 +358,7 @@ impl ImageProcessor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use image::{ImageBuffer, RgbImage, Rgb, codecs::jpeg::JpegEncoder};
+    use image::{ImageBuffer, Rgb, RgbImage, codecs::jpeg::JpegEncoder};
 
     #[test]
     fn test_calculate_hash() {

@@ -1,8 +1,8 @@
+use super::repository::{CategoryRepository, ImageRepository};
+use crate::models::{Category, Image};
 use async_trait::async_trait;
-use uuid::Uuid;
 use std::sync::{Arc, Mutex};
-use crate::models::{Image, Category};
-use super::repository::{ImageRepository, CategoryRepository};
+use uuid::Uuid;
 
 pub struct MockImageRepository {
     pub images: Arc<Mutex<Vec<Image>>>,
@@ -35,7 +35,8 @@ impl ImageRepository for MockImageRepository {
         _tag: Option<&str>,
     ) -> Result<Vec<Image>, sqlx::Error> {
         let images = self.images.lock().unwrap();
-        let mut filtered: Vec<Image> = images.iter()
+        let mut filtered: Vec<Image> = images
+            .iter()
             .filter(|i| i.user_id == user_id && i.deleted_at.is_none())
             .cloned()
             .collect();
@@ -56,7 +57,10 @@ impl ImageRepository for MockImageRepository {
 
     async fn count_images_by_user(&self, user_id: Uuid) -> Result<i64, sqlx::Error> {
         let images = self.images.lock().unwrap();
-        Ok(images.iter().filter(|i| i.user_id == user_id && i.deleted_at.is_none()).count() as i64)
+        Ok(images
+            .iter()
+            .filter(|i| i.user_id == user_id && i.deleted_at.is_none())
+            .count() as i64)
     }
 
     async fn create_image(&self, image: &Image) -> Result<(), sqlx::Error> {
@@ -87,19 +91,33 @@ impl ImageRepository for MockImageRepository {
         Ok(())
     }
 
-    async fn find_image_by_hash(&self, hash: &str, user_id: Uuid) -> Result<Option<Image>, sqlx::Error> {
+    async fn find_image_by_hash(
+        &self,
+        hash: &str,
+        user_id: Uuid,
+    ) -> Result<Option<Image>, sqlx::Error> {
         let images = self.images.lock().unwrap();
-        Ok(images.iter().find(|i| i.hash == hash && i.user_id == user_id && i.deleted_at.is_none()).cloned())
+        Ok(images
+            .iter()
+            .find(|i| i.hash == hash && i.user_id == user_id && i.deleted_at.is_none())
+            .cloned())
     }
 
     async fn find_image_by_hash_global(&self, hash: &str) -> Result<Option<Image>, sqlx::Error> {
         let images = self.images.lock().unwrap();
-        Ok(images.iter().find(|i| i.hash == hash && i.deleted_at.is_none()).cloned())
+        Ok(images
+            .iter()
+            .find(|i| i.hash == hash && i.deleted_at.is_none())
+            .cloned())
     }
 
     async fn find_deleted_images_by_user(&self, user_id: Uuid) -> Result<Vec<Image>, sqlx::Error> {
         let images = self.images.lock().unwrap();
-        Ok(images.iter().filter(|i| i.user_id == user_id && i.deleted_at.is_some()).cloned().collect())
+        Ok(images
+            .iter()
+            .filter(|i| i.user_id == user_id && i.deleted_at.is_some())
+            .cloned()
+            .collect())
     }
 
     async fn find_images_by_user_cursor(
@@ -109,22 +127,27 @@ impl ImageRepository for MockImageRepository {
         limit: i32,
     ) -> Result<Vec<Image>, sqlx::Error> {
         let images = self.images.lock().unwrap();
-        let mut filtered: Vec<Image> = images.iter()
+        let mut filtered: Vec<Image> = images
+            .iter()
             .filter(|i| i.user_id == user_id && i.deleted_at.is_none())
             .cloned()
             .collect();
 
         // 模拟按 created_at DESC, id DESC 排序
         filtered.sort_by(|a, b| {
-            b.created_at.cmp(&a.created_at).then_with(|| b.id.cmp(&a.id))
+            b.created_at
+                .cmp(&a.created_at)
+                .then_with(|| b.id.cmp(&a.id))
         });
 
         let mut result = Vec::new();
         let mut found_cursor = cursor.is_none();
 
         for img in filtered {
-            if !found_cursor && let Some((c_time, c_id)) = cursor
-                && (img.created_at < c_time || (img.created_at == c_time && img.id < c_id)) {
+            if !found_cursor
+                && let Some((c_time, c_id)) = cursor
+                && (img.created_at < c_time || (img.created_at == c_time && img.id < c_id))
+            {
                 found_cursor = true;
             }
 
@@ -156,7 +179,11 @@ impl MockCategoryRepository {
 impl CategoryRepository for MockCategoryRepository {
     async fn find_categories_by_user(&self, user_id: Uuid) -> Result<Vec<Category>, sqlx::Error> {
         let categories = self.categories.lock().unwrap();
-        Ok(categories.iter().filter(|c| c.user_id == user_id).cloned().collect())
+        Ok(categories
+            .iter()
+            .filter(|c| c.user_id == user_id)
+            .cloned()
+            .collect())
     }
 
     async fn find_category_by_id(&self, id: Uuid) -> Result<Option<Category>, sqlx::Error> {

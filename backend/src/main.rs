@@ -4,39 +4,39 @@ mod cache;
 mod config;
 mod db;
 mod domain;
-mod infrastructure;
-mod file_queue;
 pub mod error;
+mod file_queue;
 mod handlers;
 mod image_processor;
+mod infrastructure;
 mod middleware;
 mod models;
-mod routes;
 mod router;
+mod routes;
 mod server;
 mod tasks;
 mod utils;
 
 // handlers 子模块
+pub use handlers::admin as admin_handlers;
 pub use handlers::auth as auth_handlers;
 pub use handlers::images as image_handlers;
-pub use handlers::images_cursor as images_cursor;
-pub use handlers::admin as admin_handlers;
+pub use handlers::images_cursor;
 
 use auth::AuthService;
 use config::Config;
-use domain::auth::{PostgresAuthRepository, AuthDomainService};
-use domain::image::{ImageDomainService, PostgresImageRepository, PostgresCategoryRepository};
 use domain::admin::AdminDomainService;
+use domain::auth::{AuthDomainService, PostgresAuthRepository};
+use domain::image::{ImageDomainService, PostgresCategoryRepository, PostgresImageRepository};
 use image_processor::ImageProcessor;
 use redis::Client;
+use router::create_app_with_middleware;
+use server::start_server;
 use sqlx::postgres::PgPoolOptions;
 use std::sync::Arc;
 use tower_http::trace::TraceLayer;
-use tracing::{error, info, Level};
-use tracing_subscriber::{fmt, prelude::*, EnvFilter};
-use router::create_app_with_middleware;
-use server::{start_server};
+use tracing::{Level, error, info};
+use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -61,9 +61,6 @@ async fn main() -> anyhow::Result<()> {
 
     error!("Configuration loaded (log level: {})", log_level);
 
-    // 打印管理员账户信息
-    db::log_admin_credentials(&config);
-
     info!("Connecting to database...");
     let pool = PgPoolOptions::new()
         .max_connections(config.database.max_connections)
@@ -73,8 +70,8 @@ async fn main() -> anyhow::Result<()> {
     info!("Initializing database schema...");
     db::init_schema(&pool).await?;
 
-    // 创建管理员账户
-    match db::create_admin_account(&pool, &config).await {
+    // 创建管理员账户（仅首次）
+    match db::create_admin_account(&pool).await {
         Ok(_) => {
             info!("Admin account initialized successfully");
         }
@@ -83,11 +80,15 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
+    // 打印管理员凭证
+    db::log_admin_credentials();
+
     info!("Connecting to Redis...");
     let redis_client = Client::open(config.redis.url.clone())?;
     let redis_conn = redis_client.get_connection_manager().await?;
 
-    let auth = AuthService::new(&config).map_err(|e| anyhow::anyhow!("Failed to initialize auth service: {}", e))?;
+    let auth = AuthService::new(&config)
+        .map_err(|e| anyhow::anyhow!("Failed to initialize auth service: {}", e))?;
 
     info!("Creating storage directories...");
     tokio::fs::create_dir_all(&config.storage.path).await?;
@@ -110,9 +111,12 @@ async fn main() -> anyhow::Result<()> {
     // 初始化文件保存任务队列
     let file_save_queue = Arc::new(file_queue::FileSaveQueue::new(
         redis_conn.clone(),
-        format!("{}image_save_queue", config.redis.key_prefix)
+        format!("{}image_save_queue", config.redis.key_prefix),
     ));
-    info!("File save task queue initialized (Redis backed: {}image_save_queue)", config.redis.key_prefix);
+    info!(
+        "File save task queue initialized (Redis backed: {}image_save_queue)",
+        config.redis.key_prefix
+    );
 
     // 初始化认证领域服务
     let auth_repository = PostgresAuthRepository::new(pool.clone());
@@ -136,7 +140,8 @@ async fn main() -> anyhow::Result<()> {
     info!("Image domain service initialized");
 
     // 初始化管理领域服务
-    let admin_domain_service = AdminDomainService::new(pool.clone(), Some(redis_conn.clone()), config.clone());
+    let admin_domain_service =
+        AdminDomainService::new(pool.clone(), Some(redis_conn.clone()), config.clone());
     let admin_domain_service = Arc::new(admin_domain_service);
     info!("Admin domain service initialized");
 
