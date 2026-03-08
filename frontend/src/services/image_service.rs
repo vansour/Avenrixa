@@ -16,7 +16,8 @@ impl ImageService {
 
     /// 获取图片列表
     pub async fn get_images(&self) -> Result<Vec<ImageItem>> {
-        let response = self.api_client.get("/api/v1/images").await?;
+        // TODO: 集成实际 API 调用
+        let _url = self.api_client.url("/api/v1/images");
         self.image_store.set_loading(false);
         Ok(vec![])
     }

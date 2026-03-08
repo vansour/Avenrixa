@@ -1,4 +1,5 @@
 use thiserror::Error;
+use reqwest::StatusCode;
 
 /// 应用错误类型
 #[derive(Debug, Clone, Error)]
@@ -32,6 +33,28 @@ impl AppError {
     }
 }
 
-// 由于 reqwest::Error 的 From 实现需要访问 reqwest 的内部状态，
-// 我们在 api_client 中手动处理错误转换
-// 这里的 From 实现主要用于演示目的，实际中会由 API 客户端处理
+// 从 reqwest::Error 转换
+impl From<reqwest::Error> for AppError {
+    fn from(e: reqwest::Error) -> Self {
+        if e.is_timeout() {
+            AppError::Network("请求超时".to_string())
+        } else if e.is_connect() {
+            AppError::Network("连接失败".to_string())
+        } else if e.status() == Some(StatusCode::UNAUTHORIZED) {
+            AppError::Unauthorized
+        } else if e.status() == Some(StatusCode::FORBIDDEN) {
+            AppError::Forbidden
+        } else if e.status() == Some(StatusCode::NOT_FOUND) {
+            AppError::NotFound
+        } else {
+            AppError::Server(e.to_string())
+        }
+    }
+}
+
+// 从 serde_json::Error 转换
+impl From<serde_json::Error> for AppError {
+    fn from(e: serde_json::Error) -> Self {
+        AppError::Server(e.to_string())
+    }
+}

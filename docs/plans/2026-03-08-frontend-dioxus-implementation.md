@@ -6,7 +6,7 @@
 
 **Architecture:** 组件优先 + Store 状态管理方案。使用 Dioxus 内置 Signal 进行响应式状态管理，组件化设计便于复用和测试。
 
-**Tech Stack:** Dioxus 0.6, reqwest 0.13, tracing 0.1, Rust 2024 Edition
+**Tech Stack:** Dioxus 0.7.3, reqwest 0.13, tracing 0.1, Rust 2024 Edition
 
 ---
 
@@ -44,7 +44,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-dioxus = { version = "0.6", features = ["fullstack", "router"] }
+dioxus = { version = "0.7.3", features = ["router", "web"] }
 dioxus-logger = "0.5"
 reqwest = { version = "0.13", features = ["json", "cookies"] }
 serde = { version = "1", features = ["derive"] }
@@ -56,7 +56,7 @@ thiserror = "2"
 anyhow = "1"
 
 [dev-dependencies]
-dioxus-cli = "0.6"
+dioxus-cli = "0.7.3"
 ```
 
 **Step 4: Run test to verify it passes**

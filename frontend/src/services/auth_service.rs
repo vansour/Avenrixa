@@ -16,12 +16,15 @@ impl AuthService {
 
     /// 登录
     pub async fn login(&self, _req: LoginRequest) -> Result<()> {
-        self.auth_store.login(UserResponse {
-            id: uuid::Uuid::new_v4(),
-            username: "test_user".to_string(),
-            role: "user".to_string(),
-            created_at: chrono::Utc::now(),
-        });
+        self.auth_store.login(
+            UserResponse {
+                id: uuid::Uuid::new_v4(),
+                username: "test_user".to_string(),
+                role: "user".to_string(),
+                created_at: chrono::Utc::now(),
+            },
+            "test_token".to_string(),
+        );
         Ok(())
     }
 }
