@@ -3,8 +3,11 @@
 //! 封装图片相关的业务逻辑
 
 use chrono::Utc;
+use futures::stream::{self, StreamExt};
 use redis::AsyncCommands;
-use sqlx::PgPool;
+use sqlx::{PgPool, Postgres, QueryBuilder};
+use std::collections::HashSet;
+use std::time::Duration;
 use uuid::Uuid;
 
 use super::repository::{CategoryRepository, ImageRepository};
@@ -26,6 +29,9 @@ pub struct ImageInfo {
     pub user_id: Uuid,
 }
 
+const MAX_TAGS_PER_IMAGE: usize = 20;
+const MAX_TAG_LENGTH: usize = 50;
+
 /// 图片领域服务
 pub struct ImageDomainService<I: ImageRepository, C: CategoryRepository> {
     pool: PgPool,
@@ -38,6 +44,32 @@ pub struct ImageDomainService<I: ImageRepository, C: CategoryRepository> {
 }
 
 impl<I: ImageRepository, C: CategoryRepository> ImageDomainService<I, C> {
+    fn normalize_tags(tags: &[String]) -> Result<Vec<String>, AppError> {
+        let mut seen = HashSet::new();
+        let mut normalized = Vec::new();
+
+        for raw_tag in tags {
+            let tag = raw_tag.trim();
+            if tag.is_empty() {
+                continue;
+            }
+            if tag.chars().count() > MAX_TAG_LENGTH || tag.chars().any(char::is_control) {
+                return Err(AppError::InvalidPagination);
+            }
+
+            let lowered = tag.to_lowercase();
+            if seen.insert(lowered.clone()) {
+                normalized.push(lowered);
+            }
+        }
+
+        if normalized.len() > MAX_TAGS_PER_IMAGE {
+            return Err(AppError::InvalidPagination);
+        }
+
+        Ok(normalized)
+    }
+
     pub fn new(
         pool: PgPool,
         redis: Option<redis::aio::ConnectionManager>,
@@ -170,24 +202,57 @@ impl<I: ImageRepository, C: CategoryRepository> ImageDomainService<I, C> {
 
         // 文件存在性检查逻辑 (如果启用)
         let valid_images = if self.config.storage.enable_file_check {
-            let storage_path_base = &self.config.storage.path;
-            let thumbnail_path_base = &self.config.storage.thumbnail_path;
+            let storage_path_base = self.config.storage.path.clone();
+            let thumbnail_path_base = self.config.storage.thumbnail_path.clone();
+            let concurrent_threshold = self.config.storage.file_check_concurrent_threshold.max(1);
 
-            let mut checked_images = Vec::new();
-            for img in images {
-                let storage_path = format!("{}/{}", storage_path_base, img.filename);
-                let thumbnail_path = format!("{}/{}.jpg", thumbnail_path_base, img.id);
+            if images.len() <= concurrent_threshold {
+                let mut checked_images = Vec::with_capacity(images.len());
+                for img in images {
+                    let storage_path = format!("{}/{}", storage_path_base, img.filename);
+                    let thumbnail_path = format!("{}/{}.jpg", thumbnail_path_base, img.id);
 
-                let storage_exists = tokio::fs::try_exists(&storage_path).await.unwrap_or(false);
-                let thumbnail_exists = tokio::fs::try_exists(&thumbnail_path)
-                    .await
-                    .unwrap_or(false);
+                    let storage_exists = tokio::fs::try_exists(&storage_path).await.unwrap_or(false);
+                    let thumbnail_exists = tokio::fs::try_exists(&thumbnail_path)
+                        .await
+                        .unwrap_or(false);
 
-                if storage_exists && thumbnail_exists {
-                    checked_images.push(img);
+                    if storage_exists && thumbnail_exists {
+                        checked_images.push(img);
+                    }
                 }
+                checked_images
+            } else {
+                // 并发检查文件存在性后按原索引恢复顺序，避免影响分页排序稳定性
+                let mut checked_images = stream::iter(images.into_iter().enumerate())
+                    .map(|(idx, img)| {
+                        let storage_path_base = storage_path_base.clone();
+                        let thumbnail_path_base = thumbnail_path_base.clone();
+                        async move {
+                            let storage_path =
+                                format!("{}/{}", storage_path_base, img.filename.as_str());
+                            let thumbnail_path = format!("{}/{}.jpg", thumbnail_path_base, img.id);
+
+                            let storage_exists =
+                                tokio::fs::try_exists(&storage_path).await.unwrap_or(false);
+                            let thumbnail_exists =
+                                tokio::fs::try_exists(&thumbnail_path).await.unwrap_or(false);
+
+                            if storage_exists && thumbnail_exists {
+                                Some((idx, img))
+                            } else {
+                                None
+                            }
+                        }
+                    })
+                    .buffer_unordered(concurrent_threshold)
+                    .filter_map(|item| async move { item })
+                    .collect::<Vec<_>>()
+                    .await;
+
+                checked_images.sort_by_key(|(idx, _)| *idx);
+                checked_images.into_iter().map(|(_, img)| img).collect()
             }
-            checked_images
         } else {
             images
         };
@@ -276,13 +341,14 @@ impl<I: ImageRepository, C: CategoryRepository> ImageDomainService<I, C> {
         image_ids: &[Uuid],
         user_id: Uuid,
     ) -> Result<(), AppError> {
-        for id in image_ids {
-            if let Some(img) = self.image_repository.find_image_by_id(*id).await?
-                && img.user_id == user_id
-            {
-                self.image_repository.soft_delete_image(*id).await?;
-            }
+        if image_ids.is_empty() {
+            return Ok(());
         }
+
+        self.image_repository
+            .soft_delete_images_by_user(user_id, image_ids)
+            .await?;
+
         Ok(())
     }
 
@@ -293,22 +359,59 @@ impl<I: ImageRepository, C: CategoryRepository> ImageDomainService<I, C> {
         image_ids: &[Uuid],
         user_id: Uuid,
     ) -> Result<(), AppError> {
-        for id in image_ids {
-            let img = self.image_repository.find_image_by_id(*id).await?;
-
-            if let Some(img) = img {
-                if img.user_id != user_id {
-                    continue;
-                }
-                let storage_path = format!("{}/{}", self.config.storage.path, img.filename);
-                let thumbnail_path = format!("{}/{}.jpg", self.config.storage.thumbnail_path, id);
-
-                let _ = tokio::fs::remove_file(&storage_path).await;
-                let _ = tokio::fs::remove_file(&thumbnail_path).await;
-
-                self.image_repository.hard_delete_image(*id).await?;
-            }
+        if image_ids.is_empty() {
+            return Ok(());
         }
+
+        let owned_images = self
+            .image_repository
+            .find_images_by_user_and_ids(user_id, image_ids)
+            .await?;
+        if owned_images.is_empty() {
+            return Ok(());
+        }
+        let delete_targets: Vec<(Uuid, String, Option<String>)> = owned_images
+            .into_iter()
+            .map(|img| (img.id, img.filename, img.thumbnail))
+            .collect();
+
+        let delete_concurrency = self.config.storage.file_check_concurrent_threshold.max(1);
+
+        if delete_targets.len() <= delete_concurrency {
+            for (_, filename, thumbnail) in &delete_targets {
+                let storage_path = format!("{}/{}", self.config.storage.path, filename);
+                let _ = tokio::fs::remove_file(&storage_path).await;
+                if let Some(thumb) = thumbnail.as_deref() {
+                    let thumbnail_path = format!("{}/{}", self.config.storage.thumbnail_path, thumb);
+                    let _ = tokio::fs::remove_file(&thumbnail_path).await;
+                }
+            }
+        } else {
+            let storage_base = self.config.storage.path.clone();
+            let thumbnail_base = self.config.storage.thumbnail_path.clone();
+            stream::iter(delete_targets.iter().cloned())
+                .map(|(_, filename, thumbnail)| {
+                    let storage_base = storage_base.clone();
+                    let thumbnail_base = thumbnail_base.clone();
+                    async move {
+                        let storage_path = format!("{}/{}", storage_base, filename);
+                        let _ = tokio::fs::remove_file(&storage_path).await;
+
+                        if let Some(thumb) = thumbnail {
+                            let thumbnail_path = format!("{}/{}", thumbnail_base, thumb);
+                            let _ = tokio::fs::remove_file(&thumbnail_path).await;
+                        }
+                    }
+                })
+                .buffer_unordered(delete_concurrency)
+                .for_each(|_| async {})
+                .await;
+        }
+
+        let owned_ids: Vec<Uuid> = delete_targets.iter().map(|(id, _, _)| *id).collect();
+        self.image_repository
+            .hard_delete_images_by_user(user_id, &owned_ids)
+            .await?;
 
         Ok(())
     }
@@ -324,14 +427,14 @@ impl<I: ImageRepository, C: CategoryRepository> ImageDomainService<I, C> {
 
     /// 恢复已删除的图片
     pub async fn restore_images(&self, image_ids: &[Uuid], user_id: Uuid) -> Result<(), AppError> {
-        for id in image_ids {
-            if let Some(mut img) = self.image_repository.find_image_by_id(*id).await?
-                && img.user_id == user_id
-            {
-                img.deleted_at = None;
-                self.image_repository.update_image(&img).await?;
-            }
+        if image_ids.is_empty() {
+            return Ok(());
         }
+
+        self.image_repository
+            .restore_images_by_user(user_id, image_ids)
+            .await?;
+
         Ok(())
     }
 
@@ -381,18 +484,49 @@ impl<I: ImageRepository, C: CategoryRepository> ImageDomainService<I, C> {
         id: Uuid,
         user_id: Uuid,
         category_id: Option<Uuid>,
-        _tags: Option<&[String]>,
+        tags: Option<&[String]>,
     ) -> Result<(), AppError> {
-        // 由于标签是在关联表中，且 trait 尚未包含标签操作，暂时只更新分类
-        if let Some(mut img) = self.image_repository.find_image_by_id(id).await?
-            && img.user_id == user_id
-        {
-            img.category_id = category_id;
-            self.image_repository.update_image(&img).await?;
-            return Ok(());
+        if let Some(cid) = category_id {
+            match self.category_repository.find_category_by_id(cid).await? {
+                Some(category) if category.user_id == user_id => {}
+                Some(_) => return Err(AppError::Forbidden),
+                None => return Err(AppError::InvalidPagination),
+            }
         }
 
-        Err(AppError::ImageNotFound)
+        let normalized_tags = tags.map(Self::normalize_tags).transpose()?;
+        let mut tx = self.pool.begin().await?;
+
+        let updated = sqlx::query("UPDATE images SET category_id = $1 WHERE id = $2 AND user_id = $3")
+            .bind(category_id)
+            .bind(id)
+            .bind(user_id)
+            .execute(&mut *tx)
+            .await?;
+
+        if updated.rows_affected() == 0 {
+            return Err(AppError::ImageNotFound);
+        }
+
+        if let Some(tag_values) = normalized_tags.as_deref() {
+            sqlx::query("DELETE FROM image_tags WHERE image_id = $1")
+                .bind(id)
+                .execute(&mut *tx)
+                .await?;
+
+            if !tag_values.is_empty() {
+                let mut builder =
+                    QueryBuilder::<Postgres>::new("INSERT INTO image_tags (image_id, tag) ");
+                builder.push_values(tag_values.iter(), |mut values, tag| {
+                    values.push_bind(id).push_bind(tag);
+                });
+
+                builder.build().execute(&mut *tx).await?;
+            }
+        }
+
+        tx.commit().await?;
+        Ok(())
     }
 
     /// 提交文件保存任务
@@ -405,20 +539,45 @@ impl<I: ImageRepository, C: CategoryRepository> ImageDomainService<I, C> {
         thumbnail_data: Vec<u8>,
     ) -> Result<(), AppError> {
         let task = FileSaveTask {
+            task_id: Uuid::new_v4().to_string(),
             image_id: image_id.to_string(),
             storage_path: storage_path.clone(),
             thumbnail_path: thumbnail_path.clone(),
             temp_image_path,
             thumbnail_data,
+            attempts: 0,
+            max_retries: 3,
+            result_key: None,
         };
 
-        self.file_save_queue
-            .submit(task)
+        let result = self
+            .file_save_queue
+            .submit_and_wait(task, Duration::from_secs(20))
             .await
             .map_err(|e| AppError::Internal(anyhow::anyhow!("文件保存队列错误: {}", e)))?;
 
-        info!("File save task submitted to queue for image: {}", image_id);
-        Ok(())
+        match result {
+            crate::file_queue::FileSaveResult::Success => {
+                info!("File save confirmed for image: {}", image_id);
+                Ok(())
+            }
+            crate::file_queue::FileSaveResult::ImageFailed => {
+                let _ = tokio::fs::remove_file(&storage_path).await;
+                let _ = tokio::fs::remove_file(&thumbnail_path).await;
+                Err(AppError::Internal(anyhow::anyhow!(
+                    "主图片写入失败: {}",
+                    image_id
+                )))
+            }
+            crate::file_queue::FileSaveResult::ThumbnailFailed => {
+                let _ = tokio::fs::remove_file(&storage_path).await;
+                let _ = tokio::fs::remove_file(&thumbnail_path).await;
+                Err(AppError::Internal(anyhow::anyhow!(
+                    "缩略图写入失败: {}",
+                    image_id
+                )))
+            }
+        }
     }
 
     /// 验证文件名安全性
@@ -774,12 +933,6 @@ impl<I: ImageRepository, C: CategoryRepository> ImageDomainService<I, C> {
             )
             .map_err(|e| AppError::ImageProcessingFailed { source: e })?;
 
-        let storage_path_edit = storage_path.clone();
-        let edited_data_for_save = edited_data.clone();
-        tokio::spawn(async move {
-            let _ = write_file_with_retry(&storage_path_edit, &edited_data_for_save, 3).await;
-        });
-
         let img = image::load_from_memory(&edited_data)
             .map_err(|e| AppError::ImageProcessingFailed { source: e.into() })?;
         let thumbnail = self
@@ -788,9 +941,10 @@ impl<I: ImageRepository, C: CategoryRepository> ImageDomainService<I, C> {
             .map_err(|e| AppError::ImageProcessingFailed { source: e })?;
 
         let thumbnail_path = format!("{}/{}.jpg", self.config.storage.thumbnail_path, id);
-        tokio::spawn(async move {
-            let _ = write_file_with_retry(&thumbnail_path, &thumbnail, 3).await;
-        });
+        tokio::try_join!(
+            write_file_with_retry(&storage_path, &edited_data, 3),
+            write_file_with_retry(&thumbnail_path, &thumbnail, 3)
+        )?;
 
         log_audit(
             &self.pool,
@@ -805,8 +959,8 @@ impl<I: ImageRepository, C: CategoryRepository> ImageDomainService<I, C> {
 
         Ok(EditImageResponse {
             id,
-            edited_url: format!("/images/{}", id),
-            thumbnail_url: format!("/thumbnails/{}.jpg", id),
+            edited_url: format!("/images/{}", image.filename),
+            thumbnail_url: format!("/thumbnails/{}", id),
         })
     }
 
@@ -834,6 +988,10 @@ impl<I: ImageRepository, C: CategoryRepository> ImageDomainService<I, C> {
     ) -> Result<(Image, String, String), AppError> {
         // 获取原图
         let original = self.get_image_by_id(original_id, user_id).await?;
+        let original_display_name = original
+            .original_filename
+            .clone()
+            .unwrap_or_else(|| original.filename.clone());
 
         let new_id = Uuid::new_v4();
         let new_filename = format!("copy_{}", original.filename);
@@ -852,16 +1010,24 @@ impl<I: ImageRepository, C: CategoryRepository> ImageDomainService<I, C> {
             (None, None)
         };
 
+        if let (Some(src), Some(dst)) = (&src_thumb, &dst_thumb)
+            && let Err(e) = tokio::fs::copy(src, dst).await
+        {
+            // 缩略图复制失败时回滚已复制的主图，避免脏数据
+            let _ = tokio::fs::remove_file(&dst_path).await;
+            return Err(AppError::IoError(e));
+        }
+
         let duplicated = Image {
             id: new_id,
             user_id,
             category_id: original.category_id,
             filename: new_filename,
-            thumbnail: Some(format!("{}.jpg", new_id)),
-            original_filename: Some(format!(
-                "copy_of_{}",
-                original.original_filename.unwrap_or(original.filename)
-            )),
+            thumbnail: original
+                .thumbnail
+                .as_ref()
+                .map(|_| format!("{}.jpg", new_id)),
+            original_filename: Some(format!("copy_of_{}", original_display_name)),
             size: original.size,
             hash: format!("{}-{}", original.hash, new_id),
             format: original.format,
@@ -873,7 +1039,13 @@ impl<I: ImageRepository, C: CategoryRepository> ImageDomainService<I, C> {
             total_count: None,
         };
 
-        self.create_image(&duplicated).await?;
+        if let Err(e) = self.create_image(&duplicated).await {
+            let _ = tokio::fs::remove_file(&dst_path).await;
+            if let Some(dst) = &dst_thumb {
+                let _ = tokio::fs::remove_file(dst).await;
+            }
+            return Err(e);
+        }
 
         info!(
             "Image duplicated: {} -> {} by user {}",

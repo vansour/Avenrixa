@@ -91,6 +91,65 @@ impl ImageRepository for MockImageRepository {
         Ok(())
     }
 
+    async fn soft_delete_images_by_user(
+        &self,
+        user_id: Uuid,
+        image_ids: &[Uuid],
+    ) -> Result<u64, sqlx::Error> {
+        let mut images = self.images.lock().unwrap();
+        let mut affected = 0_u64;
+        for image in images.iter_mut() {
+            if image.user_id == user_id && image_ids.contains(&image.id) && image.deleted_at.is_none() {
+                image.deleted_at = Some(chrono::Utc::now());
+                affected += 1;
+            }
+        }
+        Ok(affected)
+    }
+
+    async fn restore_images_by_user(
+        &self,
+        user_id: Uuid,
+        image_ids: &[Uuid],
+    ) -> Result<u64, sqlx::Error> {
+        let mut images = self.images.lock().unwrap();
+        let mut affected = 0_u64;
+        for image in images.iter_mut() {
+            if image.user_id == user_id
+                && image_ids.contains(&image.id)
+                && image.deleted_at.is_some()
+            {
+                image.deleted_at = None;
+                affected += 1;
+            }
+        }
+        Ok(affected)
+    }
+
+    async fn find_images_by_user_and_ids(
+        &self,
+        user_id: Uuid,
+        image_ids: &[Uuid],
+    ) -> Result<Vec<Image>, sqlx::Error> {
+        let images = self.images.lock().unwrap();
+        Ok(images
+            .iter()
+            .filter(|i| i.user_id == user_id && image_ids.contains(&i.id))
+            .cloned()
+            .collect())
+    }
+
+    async fn hard_delete_images_by_user(
+        &self,
+        user_id: Uuid,
+        image_ids: &[Uuid],
+    ) -> Result<u64, sqlx::Error> {
+        let mut images = self.images.lock().unwrap();
+        let before = images.len();
+        images.retain(|i| !(i.user_id == user_id && image_ids.contains(&i.id)));
+        Ok((before - images.len()) as u64)
+    }
+
     async fn find_image_by_hash(
         &self,
         hash: &str,

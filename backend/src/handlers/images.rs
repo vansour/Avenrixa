@@ -233,7 +233,8 @@ pub async fn delete_images(
 pub async fn get_deleted_images(
     State(state): State<AppState>,
     auth_user: AuthUser,
-) -> Result<Json<Vec<Image>>, AppError> {
+    Query(params): Query<PaginationParams>,
+) -> Result<Json<Paginated<Image>>, AppError> {
     let service = state
         .image_domain_service
         .as_ref()
@@ -241,8 +242,27 @@ pub async fn get_deleted_images(
             "Image service not found"
         )))?;
 
+    let page = params.page.unwrap_or(1).max(1);
+    let page_size = params.page_size.unwrap_or(20).clamp(1, 100);
+
     let images = service.get_deleted_images(auth_user.id).await?;
-    Ok(Json(images))
+    let total = images.len() as i64;
+    let start = ((page - 1) * page_size) as usize;
+    let end = std::cmp::min(start + page_size as usize, images.len());
+    let data = if start < images.len() {
+        images[start..end].to_vec()
+    } else {
+        Vec::new()
+    };
+    let has_next = ((page * page_size) as i64) < total;
+
+    Ok(Json(Paginated {
+        data,
+        page,
+        page_size,
+        total,
+        has_next,
+    }))
 }
 
 pub async fn restore_images(

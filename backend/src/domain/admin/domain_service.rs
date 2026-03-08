@@ -11,8 +11,8 @@ use crate::audit::log_audit;
 use crate::config::Config;
 use crate::error::AppError;
 use crate::models::{
-    AuditLog, AuditLogResponse, ComponentStatus, HealthMetrics, HealthStatus, Setting, SystemStats,
-    User,
+    AdminUserSummary, AuditLog, AuditLogResponse, ComponentStatus, HealthMetrics, HealthStatus,
+    Setting, SystemStats,
 };
 
 use redis::AsyncCommands;
@@ -367,9 +367,9 @@ impl AdminDomainService {
     }
 
     /// 获取所有用户
-    pub async fn get_users(&self) -> Result<Vec<User>, AppError> {
+    pub async fn get_users(&self) -> Result<Vec<AdminUserSummary>, AppError> {
         let users = sqlx::query_as(
-            "SELECT id, username, password_hash, role, created_at FROM users ORDER BY created_at DESC"
+            "SELECT id, username, role, created_at FROM users ORDER BY created_at DESC",
         )
         .fetch_all(&self.pool)
         .await?;

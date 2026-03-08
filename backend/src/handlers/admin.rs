@@ -86,7 +86,7 @@ pub async fn approve_images(
 pub async fn get_users(
     State(state): State<AppState>,
     _admin_user: AdminUser,
-) -> Result<Json<Vec<User>>, AppError> {
+) -> Result<Json<Vec<AdminUserSummary>>, AppError> {
     let service = state
         .admin_domain_service
         .as_ref()

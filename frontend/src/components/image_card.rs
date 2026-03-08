@@ -6,12 +6,12 @@ use dioxus::prelude::*;
 pub fn ImageCard(
     image: ImageItem,
     #[props(default)] selected: bool,
-    #[props(default)] on_select: EventHandler<bool>,
+    #[props(default)] on_select: EventHandler<()>,
     #[props(default)] on_download: EventHandler<()>,
     #[props(default)] on_delete: EventHandler<()>,
 ) -> Element {
     let handle_click = move |_| {
-        on_select(!selected);
+        on_select(());
     };
 
     let handle_download = move |_| {

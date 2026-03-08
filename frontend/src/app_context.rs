@@ -1,9 +1,8 @@
 use crate::services::{ApiClient, AuthService, ImageService};
 use crate::store::auth::AuthStore;
 use crate::store::images::ImageStore;
+use crate::store::toast_store::ToastStore;
 use dioxus::prelude::*;
-use parking_lot::RwLock;
-use std::sync::Arc;
 
 /// 应用上下文
 #[derive(Clone)]
@@ -11,8 +10,9 @@ pub struct AppContext {
     pub auth_store: AuthStore,
     pub image_store: ImageStore,
     pub api_client: ApiClient,
-    pub auth_service: Arc<RwLock<Option<AuthService>>>,
-    pub image_service: Arc<RwLock<Option<ImageService>>>,
+    pub auth_service: AuthService,
+    pub image_service: ImageService,
+    pub toast_store: ToastStore,
 }
 
 impl AppContext {
@@ -20,11 +20,12 @@ impl AppContext {
     pub fn new(base_url: String) -> Self {
         let auth_store = AuthStore::new();
         let image_store = ImageStore::new();
-        let api_client = ApiClient::new(base_url, auth_store.clone());
+        let toast_store = ToastStore::new();
+        let api_client = ApiClient::new(base_url);
 
-        // 创建服务（延迟初始化，避免循环依赖）
-        let auth_service = Arc::new(RwLock::new(None));
-        let image_service = Arc::new(RwLock::new(None));
+        // 直接创建服务（使用 clone 避免移动）
+        let auth_service = AuthService::new(api_client.clone(), auth_store.clone());
+        let image_service = ImageService::new(api_client.clone(), image_store.clone());
 
         Self {
             auth_store,
@@ -32,43 +33,37 @@ impl AppContext {
             api_client,
             auth_service,
             image_service,
-        }
-    }
-
-    /// 获取或初始化认证服务
-    pub fn get_auth_service(&self) -> AuthService {
-        if self.auth_service.read().is_none() {
-            let mut guard = self.auth_service.write();
-            if guard.is_none() {
-                *guard = Some(AuthService::new(
-                    self.api_client.clone(),
-                    self.auth_store.clone(),
-                ));
-            }
-            guard.clone().unwrap()
-        } else {
-            self.auth_service.read().clone().unwrap()
-        }
-    }
-
-    /// 获取或初始化图片服务
-    pub fn get_image_service(&self) -> ImageService {
-        if self.image_service.read().is_none() {
-            let mut guard = self.image_service.write();
-            if guard.is_none() {
-                *guard = Some(ImageService::new(
-                    self.api_client.clone(),
-                    self.image_store.clone(),
-                ));
-            }
-            guard.clone().unwrap()
-        } else {
-            self.image_service.read().clone().unwrap()
+            toast_store,
         }
     }
 }
 
-/// AppContext Hook
-pub fn use_app_context() -> Signal<AppContext> {
-    use_context::<Signal<AppContext>>()
+/// AppContext Hook - 获取 AuthStore
+pub fn use_auth_store() -> AuthStore {
+    use_context()
+}
+
+/// AppContext Hook - 获取 ImageStore
+pub fn use_image_store() -> ImageStore {
+    use_context()
+}
+
+/// AppContext Hook - 获取 ApiClient
+pub fn use_api_client() -> ApiClient {
+    use_context()
+}
+
+/// AppContext Hook - 获取 AuthService
+pub fn use_auth_service() -> AuthService {
+    use_context()
+}
+
+/// AppContext Hook - 获取 ImageService
+pub fn use_image_service() -> ImageService {
+    use_context()
+}
+
+/// AppContext Hook - 获取 ToastStore
+pub fn use_toast_store() -> ToastStore {
+    use_context()
 }

@@ -10,11 +10,10 @@ use tracing::{info, warn};
 pub async fn cleanup_expired_images(
     pool: &PgPool,
     retention_days: i64,
-    storage_path: &str,
+    images_path: &str,
+    thumbnail_path: &str,
 ) -> Result<u64> {
     let days_ago = chrono::Utc::now() - chrono::Duration::days(retention_days);
-    let images_dir = format!("{}/images", storage_path);
-    let thumbnail_dir = format!("{}/thumbnails", storage_path);
 
     let images: Vec<(uuid::Uuid, String)> = sqlx::query_as::<_, (uuid::Uuid, String)>(
         "SELECT id, filename FROM images WHERE deleted_at < $1",
@@ -27,8 +26,8 @@ pub async fn cleanup_expired_images(
 
     let mut removed_count = 0;
     for (id, filename) in &images {
-        let file_storage_path = format!("{}/{}", images_dir, filename);
-        let file_thumbnail_path = format!("{}/{}.jpg", thumbnail_dir, id);
+        let file_storage_path = format!("{}/{}", images_path, filename);
+        let file_thumbnail_path = format!("{}/{}.jpg", thumbnail_path, id);
 
         let file_removed = tokio::fs::remove_file(&file_storage_path).await.is_ok();
         let thumb_removed = tokio::fs::remove_file(&file_thumbnail_path).await.is_ok();

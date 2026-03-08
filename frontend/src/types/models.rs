@@ -23,7 +23,7 @@ pub struct ImageItem {
 
 impl ImageItem {
     pub fn url(&self) -> String {
-        format!("/images/{}", self.id)
+        format!("/images/{}", self.filename)
     }
 
     pub fn thumbnail_url(&self) -> Option<String> {

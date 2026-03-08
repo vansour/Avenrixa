@@ -28,8 +28,8 @@ impl AuthService {
             crate::types::errors::AppError::Server(format!("解析用户响应失败: {}", e))
         })?;
 
-        // 注意：token 已由 ApiClient.handle_response_headers 自动处理
-        self.auth_store.login(user.clone(), "".to_string()); // token 已在 cookie 中
+        // 登录后仅同步当前用户，认证 Cookie 由浏览器维护
+        self.auth_store.set_user(user.clone());
         Ok(user)
     }
 

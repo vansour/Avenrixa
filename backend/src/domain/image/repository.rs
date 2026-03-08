@@ -3,7 +3,7 @@
 //! 定义图片相关的数据访问接口
 
 use async_trait::async_trait;
-use sqlx::PgPool;
+use sqlx::{PgPool, Postgres, QueryBuilder};
 use uuid::Uuid;
 
 use crate::models::{Category, Image};
@@ -43,6 +43,34 @@ pub trait ImageRepository: Send + Sync {
 
     /// 永久删除图片
     async fn hard_delete_image(&self, id: Uuid) -> Result<(), sqlx::Error>;
+
+    /// 批量软删除用户图片
+    async fn soft_delete_images_by_user(
+        &self,
+        user_id: Uuid,
+        image_ids: &[Uuid],
+    ) -> Result<u64, sqlx::Error>;
+
+    /// 批量恢复用户图片
+    async fn restore_images_by_user(
+        &self,
+        user_id: Uuid,
+        image_ids: &[Uuid],
+    ) -> Result<u64, sqlx::Error>;
+
+    /// 根据用户和ID列表批量查询图片
+    async fn find_images_by_user_and_ids(
+        &self,
+        user_id: Uuid,
+        image_ids: &[Uuid],
+    ) -> Result<Vec<Image>, sqlx::Error>;
+
+    /// 批量永久删除用户图片
+    async fn hard_delete_images_by_user(
+        &self,
+        user_id: Uuid,
+        image_ids: &[Uuid],
+    ) -> Result<u64, sqlx::Error>;
 
     /// 根据哈希查找图片（用于去重）
     async fn find_image_by_hash(
@@ -117,124 +145,68 @@ impl ImageRepository for PostgresImageRepository {
         category_id: Option<Uuid>,
         tag: Option<&str>,
     ) -> Result<Vec<Image>, sqlx::Error> {
-        let order_clause = format!("{} {}", sort_by, sort_order);
-
-        let images = match (search, category_id, tag) {
-            (Some(s), Some(cid), Some(t)) if !s.is_empty() => {
-                let sql = format!(
-                    "SELECT *, COUNT(*) OVER() as total_count FROM images WHERE user_id = $1 AND deleted_at IS NULL AND status = 'active' AND category_id = $2 AND $3 IN (SELECT tag FROM image_tags WHERE image_id = images.id) AND (filename ILIKE $4 OR id::text IN (SELECT tag FROM image_tags WHERE tag ILIKE $5 AND image_id = images.id)) ORDER BY {} LIMIT $6 OFFSET $7",
-                    order_clause
-                );
-                sqlx::query_as::<_, Image>(&sql)
-                    .bind(user_id)
-                    .bind(cid)
-                    .bind(t)
-                    .bind(format!("%{}%", s))
-                    .bind(format!("%{}%", s))
-                    .bind(limit)
-                    .bind(offset)
-                    .fetch_all(&self.pool)
-                    .await?
-            }
-            (Some(s), Some(cid), None) if !s.is_empty() => {
-                let sql = format!(
-                    "SELECT *, COUNT(*) OVER() as total_count FROM images WHERE user_id = $1 AND deleted_at IS NULL AND status = 'active' AND category_id = $2 AND (filename ILIKE $3 OR id::text IN (SELECT tag FROM image_tags WHERE tag ILIKE $4 AND image_id = images.id)) ORDER BY {} LIMIT $5 OFFSET $6",
-                    order_clause
-                );
-                sqlx::query_as::<_, Image>(&sql)
-                    .bind(user_id)
-                    .bind(cid)
-                    .bind(format!("%{}%", s))
-                    .bind(format!("%{}%", s))
-                    .bind(limit)
-                    .bind(offset)
-                    .fetch_all(&self.pool)
-                    .await?
-            }
-            (Some(s), None, Some(t)) if !s.is_empty() => {
-                let sql = format!(
-                    "SELECT *, COUNT(*) OVER() as total_count FROM images WHERE user_id = $1 AND deleted_at IS NULL AND status = 'active' AND $2 IN (SELECT tag FROM image_tags WHERE image_id = images.id) AND (filename ILIKE $3 OR id::text IN (SELECT tag FROM image_tags WHERE tag ILIKE $4 AND image_id = images.id)) ORDER BY {} LIMIT $5 OFFSET $6",
-                    order_clause
-                );
-                sqlx::query_as::<_, Image>(&sql)
-                    .bind(user_id)
-                    .bind(t)
-                    .bind(format!("%{}%", s))
-                    .bind(format!("%{}%", s))
-                    .bind(limit)
-                    .bind(offset)
-                    .fetch_all(&self.pool)
-                    .await?
-            }
-            (Some(s), None, None) if !s.is_empty() => {
-                let sql = format!(
-                    "SELECT *, COUNT(*) OVER() as total_count FROM images WHERE user_id = $1 AND deleted_at IS NULL AND status = 'active' AND (filename ILIKE $2 OR id::text IN (SELECT tag FROM image_tags WHERE tag ILIKE $3 AND image_id = images.id)) ORDER BY {} LIMIT $4 OFFSET $5",
-                    order_clause
-                );
-                sqlx::query_as::<_, Image>(&sql)
-                    .bind(user_id)
-                    .bind(format!("%{}%", s))
-                    .bind(format!("%{}%", s))
-                    .bind(limit)
-                    .bind(offset)
-                    .fetch_all(&self.pool)
-                    .await?
-            }
-            (None, Some(cid), Some(t)) => {
-                let sql = format!(
-                    "SELECT *, COUNT(*) OVER() as total_count FROM images WHERE user_id = $1 AND deleted_at IS NULL AND status = 'active' AND category_id = $2 AND $3 IN (SELECT tag FROM image_tags WHERE image_id = images.id) ORDER BY {} LIMIT $4 OFFSET $5",
-                    order_clause
-                );
-                sqlx::query_as::<_, Image>(&sql)
-                    .bind(user_id)
-                    .bind(cid)
-                    .bind(t)
-                    .bind(limit)
-                    .bind(offset)
-                    .fetch_all(&self.pool)
-                    .await?
-            }
-            (None, Some(cid), None) => {
-                let sql = format!(
-                    "SELECT *, COUNT(*) OVER() as total_count FROM images WHERE user_id = $1 AND deleted_at IS NULL AND status = 'active' AND category_id = $2 ORDER BY {} LIMIT $3 OFFSET $4",
-                    order_clause
-                );
-                sqlx::query_as::<_, Image>(&sql)
-                    .bind(user_id)
-                    .bind(cid)
-                    .bind(limit)
-                    .bind(offset)
-                    .fetch_all(&self.pool)
-                    .await?
-            }
-            (None, None, Some(t)) => {
-                let sql = format!(
-                    "SELECT *, COUNT(*) OVER() as total_count FROM images WHERE user_id = $1 AND deleted_at IS NULL AND status = 'active' AND $2 IN (SELECT tag FROM image_tags WHERE image_id = images.id) ORDER BY {} LIMIT $3 OFFSET $4",
-                    order_clause
-                );
-                sqlx::query_as::<_, Image>(&sql)
-                    .bind(user_id)
-                    .bind(t)
-                    .bind(limit)
-                    .bind(offset)
-                    .fetch_all(&self.pool)
-                    .await?
-            }
-            _ => {
-                let sql = format!(
-                    "SELECT *, COUNT(*) OVER() as total_count FROM images WHERE user_id = $1 AND deleted_at IS NULL AND status = 'active' ORDER BY {} LIMIT $2 OFFSET $3",
-                    order_clause
-                );
-                sqlx::query_as::<_, Image>(&sql)
-                    .bind(user_id)
-                    .bind(limit)
-                    .bind(offset)
-                    .fetch_all(&self.pool)
-                    .await?
-            }
+        let sort_column = match sort_by {
+            "created_at" | "size" | "views" | "filename" | "hash" => sort_by,
+            _ => "created_at",
+        };
+        let sort_direction = if sort_order.eq_ignore_ascii_case("ASC") {
+            "ASC"
+        } else {
+            "DESC"
         };
 
-        Ok(images)
+        let search = search.map(str::trim).filter(|value| !value.is_empty());
+        let tag = tag
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| value.to_lowercase());
+
+        let mut builder = QueryBuilder::<Postgres>::new(
+            "SELECT images.id, images.user_id, images.category_id, images.filename, images.thumbnail, \
+             images.original_filename, images.size, images.hash, images.format, images.views, \
+             images.status, images.expires_at, images.deleted_at, images.created_at, \
+             COUNT(*) OVER() AS total_count \
+             FROM images WHERE images.user_id = ",
+        );
+        builder.push_bind(user_id);
+        builder.push(" AND images.deleted_at IS NULL AND images.status = 'active'");
+
+        if let Some(cid) = category_id {
+            builder.push(" AND images.category_id = ");
+            builder.push_bind(cid);
+        }
+
+        if let Some(tag_value) = tag.as_deref() {
+            builder.push(
+                " AND EXISTS (SELECT 1 FROM image_tags it WHERE it.image_id = images.id AND it.tag = ",
+            );
+            builder.push_bind(tag_value);
+            builder.push(")");
+        }
+
+        if let Some(keyword) = search {
+            let pattern = format!("%{}%", keyword);
+            builder.push(" AND (images.filename ILIKE ");
+            builder.push_bind(pattern.clone());
+            builder.push(" OR images.original_filename ILIKE ");
+            builder.push_bind(pattern.clone());
+            builder.push(
+                " OR EXISTS (SELECT 1 FROM image_tags it WHERE it.image_id = images.id AND it.tag ILIKE ",
+            );
+            builder.push_bind(pattern);
+            builder.push("))");
+        }
+
+        builder.push(" ORDER BY images.");
+        builder.push(sort_column);
+        builder.push(" ");
+        builder.push(sort_direction);
+        builder.push(" LIMIT ");
+        builder.push_bind(limit);
+        builder.push(" OFFSET ");
+        builder.push_bind(offset);
+
+        builder.build_query_as::<Image>().fetch_all(&self.pool).await
     }
 
     async fn count_images_by_user(&self, user_id: Uuid) -> Result<i64, sqlx::Error> {
@@ -275,14 +247,31 @@ impl ImageRepository for PostgresImageRepository {
 
     async fn update_image(&self, image: &Image) -> Result<(), sqlx::Error> {
         sqlx::query(
-            "UPDATE images SET filename = $1, thumbnail = $2, category_id = $3, status = $4, expires_at = $5
-             WHERE id = $6"
+            "UPDATE images
+             SET filename = $1,
+                 thumbnail = $2,
+                 original_filename = $3,
+                 category_id = $4,
+                 size = $5,
+                 hash = $6,
+                 format = $7,
+                 views = $8,
+                 status = $9,
+                 expires_at = $10,
+                 deleted_at = $11
+             WHERE id = $12",
         )
         .bind(&image.filename)
         .bind(&image.thumbnail)
+        .bind(&image.original_filename)
         .bind(image.category_id)
+        .bind(image.size)
+        .bind(&image.hash)
+        .bind(&image.format)
+        .bind(image.views)
         .bind(&image.status)
         .bind(image.expires_at)
+        .bind(image.deleted_at)
         .bind(image.id)
         .execute(&self.pool)
         .await?;
@@ -306,6 +295,72 @@ impl ImageRepository for PostgresImageRepository {
             .await?;
 
         Ok(())
+    }
+
+    async fn soft_delete_images_by_user(
+        &self,
+        user_id: Uuid,
+        image_ids: &[Uuid],
+    ) -> Result<u64, sqlx::Error> {
+        let result = sqlx::query(
+            "UPDATE images
+             SET deleted_at = NOW()
+             WHERE user_id = $1 AND id = ANY($2) AND deleted_at IS NULL",
+        )
+        .bind(user_id)
+        .bind(image_ids)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(result.rows_affected())
+    }
+
+    async fn restore_images_by_user(
+        &self,
+        user_id: Uuid,
+        image_ids: &[Uuid],
+    ) -> Result<u64, sqlx::Error> {
+        let result = sqlx::query(
+            "UPDATE images
+             SET deleted_at = NULL
+             WHERE user_id = $1 AND id = ANY($2) AND deleted_at IS NOT NULL",
+        )
+        .bind(user_id)
+        .bind(image_ids)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(result.rows_affected())
+    }
+
+    async fn find_images_by_user_and_ids(
+        &self,
+        user_id: Uuid,
+        image_ids: &[Uuid],
+    ) -> Result<Vec<Image>, sqlx::Error> {
+        sqlx::query_as::<_, Image>(
+            "SELECT id, user_id, category_id, filename, thumbnail, original_filename, size, hash, format, views, status, expires_at, deleted_at, created_at
+             FROM images
+             WHERE user_id = $1 AND id = ANY($2)",
+        )
+        .bind(user_id)
+        .bind(image_ids)
+        .fetch_all(&self.pool)
+        .await
+    }
+
+    async fn hard_delete_images_by_user(
+        &self,
+        user_id: Uuid,
+        image_ids: &[Uuid],
+    ) -> Result<u64, sqlx::Error> {
+        let result = sqlx::query("DELETE FROM images WHERE user_id = $1 AND id = ANY($2)")
+            .bind(user_id)
+            .bind(image_ids)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(result.rows_affected())
     }
 
     async fn find_image_by_hash(

@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [lib]
+name = "frontend_lib"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
@@ -24,4 +25,3 @@ web-sys = "0.3"
 js-sys = "0.3"
 gloo-utils = "0.2"
 gloo-timers = "0.3"
-

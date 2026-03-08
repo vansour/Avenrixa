@@ -11,14 +11,22 @@ use tracing::info;
 #[allow(dead_code)]
 pub fn spawn_cleanup_tasks(state: &AppState) {
     let config = &state.config;
+    if !config.cleanup.enabled {
+        info!("Background cleanup tasks are disabled by configuration");
+        return;
+    }
+    let deleted_cleanup_interval = config.cleanup.deleted_cleanup_interval_seconds;
+    let expiry_check_interval = config.cleanup.expiry_check_interval_seconds;
 
     // 启动清理过期图片任务（每天）
     let cleanup_pool = state.pool.clone();
     let cleanup_storage_path = config.storage.path.clone();
+    let cleanup_thumbnail_path = config.storage.thumbnail_path.clone();
     let cleanup_retention_days = config.cleanup.deleted_images_retention_days;
 
     tokio::spawn(async move {
-        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(86400));
+        let mut interval =
+            tokio::time::interval(tokio::time::Duration::from_secs(deleted_cleanup_interval));
         loop {
             interval.tick().await;
             info!("Running cleanup task...");
@@ -26,6 +34,7 @@ pub fn spawn_cleanup_tasks(state: &AppState) {
                 &cleanup_pool,
                 cleanup_retention_days,
                 &cleanup_storage_path,
+                &cleanup_thumbnail_path,
             )
             .await
             {
@@ -38,7 +47,8 @@ pub fn spawn_cleanup_tasks(state: &AppState) {
     let expiry_pool = state.pool.clone();
 
     tokio::spawn(async move {
-        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(3600));
+        let mut interval =
+            tokio::time::interval(tokio::time::Duration::from_secs(expiry_check_interval));
         loop {
             interval.tick().await;
             if let Err(e) = tasks::move_expired_to_trash(&expiry_pool).await {
@@ -52,7 +62,11 @@ pub fn spawn_cleanup_tasks(state: &AppState) {
 pub async fn start_server(listener: TcpListener, app: axum::Router) -> anyhow::Result<()> {
     info!("Server listening on {}", listener.local_addr()?);
 
-    axum::serve(listener, app).await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await?;
 
     Ok(())
 }

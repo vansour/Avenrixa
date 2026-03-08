@@ -93,10 +93,10 @@ impl Cache {
                     .map_err(|e| anyhow::anyhow!("Redis DEL error: {}", e))?;
             }
 
+            cursor = next_cursor;
             if cursor == 0 {
                 break;
             }
-            cursor = next_cursor;
         }
 
         Ok(())
@@ -156,7 +156,8 @@ impl ImageCache {
 
     /// 用户分类列表失效模式
     pub fn categories_invalidate(user_id: uuid::Uuid) -> String {
-        format!("categories:list:{}:*", user_id)
+        // '*' 可匹配空后缀，兼容精确 key 与未来扩展 key
+        format!("categories:list:{}*", user_id)
     }
 
     /// 用户图片列表失效模式

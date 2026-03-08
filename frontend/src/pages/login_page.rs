@@ -1,41 +1,29 @@
-use crate::app_context::AppContext;
+use crate::app_context::{use_auth_service, use_toast_store};
 use crate::types::api::LoginRequest;
 use dioxus::prelude::*;
 
 /// 登录页面组件
 #[component]
 pub fn LoginPage() -> Element {
-    let app_context = AppContext::new("http://localhost:3000".to_string());
-    let auth_store = app_context.auth_store.clone();
-    let auth_service = app_context.get_auth_service();
-
-    // 如果已登录，不显示登录页面
-    if auth_store.is_authenticated() {
-        return rsx! {
-            div { class: "login-page",
-                div { class: "login-container",
-                    div { class: "login-card",
-                        h1 { class: "login-title", "已登录" }
-                        p { "您已经登录，可以开始使用系统了。" }
-                    }
-                }
-            }
-        };
-    }
+    let auth_service = use_auth_service();
+    let toast_store = use_toast_store();
 
     let mut username = use_signal(String::new);
     let mut password = use_signal(String::new);
     let mut is_loading = use_signal(|| false);
     let mut error_message = use_signal(String::new);
 
-    let handle_login = EventHandler::new(move |_| {
+    let handle_login = move |_| {
         let auth_service_clone = auth_service.clone();
-        async move {
+        let toast_store = toast_store.clone();
+        spawn(async move {
             let username_val = username();
             let password_val = password();
 
             if username_val.trim().is_empty() || password_val.trim().is_empty() {
-                error_message.set("请输入用户名和密码".to_string());
+                let message = "请输入用户名和密码".to_string();
+                error_message.set(message.clone());
+                toast_store.show_error(message);
                 return;
             }
 
@@ -55,14 +43,17 @@ pub fn LoginPage() -> Element {
                     username.set(String::new());
                     password.set(String::new());
                     is_loading.set(false);
+                    toast_store.show_success("登录成功".to_string());
                 }
                 Err(e) => {
                     is_loading.set(false);
-                    error_message.set(format!("登录失败: {}", e));
+                    let message = format!("登录失败: {}", e);
+                    error_message.set(message.clone());
+                    toast_store.show_error(message);
                 }
             }
-        }
-    });
+        });
+    };
 
     rsx! {
         div { class: "login-page",
@@ -110,7 +101,7 @@ pub fn LoginPage() -> Element {
                     }
 
                     div { class: "login-footer",
-                        p { "默认账户: admin / password" }
+                        p { "默认账户: username / password（建议通过环境变量覆盖）" }
                     }
                 }
             }

@@ -49,6 +49,25 @@ impl axum::response::IntoResponse for UserResponse {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct AdminUserSummary {
+    pub id: Uuid,
+    pub username: String,
+    pub role: String,
+    pub created_at: DateTime<Utc>,
+}
+
+impl From<User> for AdminUserSummary {
+    fn from(user: User) -> Self {
+        Self {
+            id: user.id,
+            username: user.username,
+            role: user.role,
+            created_at: user.created_at,
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, sqlx::FromRow, Clone)]
 #[allow(dead_code)]
 pub struct Category {
@@ -81,13 +100,13 @@ pub struct Image {
     pub deleted_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     #[serde(skip)] // 用于窗口函数返回的总数，不序列化到API响应
-    #[sqlx(default, skip)] // 数据库查询时忽略，但允许存在
+    #[sqlx(default)] // 无 total_count 列时回退到默认值
     pub total_count: Option<i64>,
 }
 
 impl Image {
     pub fn url(&self) -> String {
-        format!("/images/{}", self.id)
+        format!("/images/{}", self.filename)
     }
 
     pub fn thumbnail_url(&self) -> Option<String> {

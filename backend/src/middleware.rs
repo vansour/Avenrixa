@@ -9,6 +9,7 @@ pub struct AuthUser {
     pub id: Uuid,
     pub username: String,
     pub role: String,
+    pub token: String,
 }
 
 // AuthUser 提取器 - 使用 TypedHeader 和 State 提取器
@@ -44,6 +45,11 @@ impl axum::extract::FromRequestParts<AppState> for AuthUser {
             .verify_token(token)
             .map_err(|_| StatusCode::UNAUTHORIZED)?;
 
+        // 刷新令牌不能用于业务接口访问
+        if claims.role == "refresh" {
+            return Err(StatusCode::UNAUTHORIZED);
+        }
+
         // 检查令牌是否已被撤销
         let mut redis = state.redis.clone();
         let revoked_key = format!("token_revoked:{}", token);
@@ -71,6 +77,7 @@ impl axum::extract::FromRequestParts<AppState> for AuthUser {
             id: claims.sub,
             username: claims.username,
             role: claims.role,
+            token: token.to_string(),
         })
     }
 }
@@ -81,6 +88,7 @@ pub struct AdminUser {
     pub id: Uuid,
     pub username: String,
     pub role: String,
+    pub token: String,
 }
 
 // AdminUser 提取器 - 验证用户角色为 admin
@@ -103,6 +111,7 @@ impl axum::extract::FromRequestParts<AppState> for AdminUser {
             id: auth_user.id,
             username: auth_user.username,
             role: auth_user.role,
+            token: auth_user.token,
         })
     }
 }

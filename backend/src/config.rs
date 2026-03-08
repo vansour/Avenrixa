@@ -21,6 +21,8 @@ pub enum ConfigError {
     JwtSecretTooShort { min: usize, actual: usize },
     #[error("最大上传大小必须大于 0")]
     InvalidMaxUploadSize,
+    #[error("服务端限流配置必须大于 0")]
+    InvalidServerRateLimit,
     #[error("无效的去重策略: {0}，必须是 'user' 或 'global'")]
     InvalidDedupStrategy(String),
     #[error("无效的文件检查并发阈值: {0}")]
@@ -33,6 +35,14 @@ pub enum ConfigError {
     InvalidJpegQuality,
     #[error("图片尺寸必须大于 0")]
     InvalidImageSize,
+    #[error("Cookie SameSite 必须是 Strict/Lax/None")]
+    InvalidCookieSameSite,
+    #[error("Cookie Path 不能为空")]
+    InvalidCookiePath,
+    #[error("Cookie Max-Age 必须大于 0")]
+    InvalidCookieMaxAge,
+    #[error("清理间隔必须大于 0")]
+    InvalidCleanupInterval,
 }
 
 // 获取默认数据库连接池大小
@@ -60,6 +70,7 @@ pub struct Config {
     pub cache: CacheConfig,
     pub rate_limit: RateLimitConfig,
     pub cleanup: CleanupConfig,
+    pub cookie: CookieConfig,
     pub mail: MailConfig,
     pub image: ImageConfig,
 }
@@ -139,8 +150,19 @@ pub struct RateLimitConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CleanupConfig {
+    pub enabled: bool,
     pub deleted_images_retention_days: i64,
+    pub deleted_cleanup_interval_seconds: u64,
     pub expiry_check_interval_seconds: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CookieConfig {
+    pub secure: bool,
+    pub same_site: String,
+    pub path: String,
+    pub domain: Option<String>,
+    pub max_age_seconds: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -215,8 +237,17 @@ impl Default for Config {
                 burst_size: 30,
             },
             cleanup: CleanupConfig {
+                enabled: true,
                 deleted_images_retention_days: 30,
+                deleted_cleanup_interval_seconds: 86400,
                 expiry_check_interval_seconds: 3600,
+            },
+            cookie: CookieConfig {
+                secure: true,
+                same_site: "Strict".to_string(),
+                path: "/".to_string(),
+                domain: None,
+                max_age_seconds: 7 * 24 * 3600,
             },
             image: ImageConfig {
                 max_width: 1920,
@@ -273,6 +304,9 @@ impl Config {
         if self.server.max_upload_size == 0 {
             return Err(ConfigError::InvalidMaxUploadSize);
         }
+        if self.server.rate_limit_per_second == 0 || self.server.rate_limit_burst == 0 {
+            return Err(ConfigError::InvalidServerRateLimit);
+        }
 
         // 验证图片配置
         if self.image.max_width == 0 || self.image.max_height == 0 {
@@ -294,8 +328,21 @@ impl Config {
         if self.cleanup.deleted_images_retention_days <= 0 {
             return Err(ConfigError::InvalidRetentionDays);
         }
-        if self.cleanup.expiry_check_interval_seconds == 0 {
-            return Err(ConfigError::InvalidTtl);
+        if self.cleanup.deleted_cleanup_interval_seconds == 0
+            || self.cleanup.expiry_check_interval_seconds == 0
+        {
+            return Err(ConfigError::InvalidCleanupInterval);
+        }
+        // 验证 Cookie 配置
+        match self.cookie.same_site.as_str() {
+            "Strict" | "Lax" | "None" => {}
+            _ => return Err(ConfigError::InvalidCookieSameSite),
+        }
+        if self.cookie.path.trim().is_empty() {
+            return Err(ConfigError::InvalidCookiePath);
+        }
+        if self.cookie.max_age_seconds == 0 {
+            return Err(ConfigError::InvalidCookieMaxAge);
         }
 
         // 验证缓存配置
@@ -321,6 +368,12 @@ impl Config {
         if let Ok(port) = std::env::var("SERVER_PORT") {
             config.server.port = port.parse().unwrap_or(8080);
         }
+        if let Ok(rate_limit_per_second) = std::env::var("SERVER_RATE_LIMIT_PER_SECOND") {
+            config.server.rate_limit_per_second = rate_limit_per_second.parse().unwrap_or(10);
+        }
+        if let Ok(rate_limit_burst) = std::env::var("SERVER_RATE_LIMIT_BURST") {
+            config.server.rate_limit_burst = rate_limit_burst.parse().unwrap_or(30);
+        }
         if let Ok(db_url) = std::env::var("DATABASE_URL") {
             config.database.url = db_url;
         }
@@ -340,6 +393,43 @@ impl Config {
         if let Ok(file_check_threshold) = std::env::var("STORAGE_FILE_CHECK_THRESHOLD") {
             config.storage.file_check_concurrent_threshold =
                 file_check_threshold.parse().unwrap_or(50);
+        }
+        if let Ok(cleanup_enabled) = std::env::var("CLEANUP_ENABLED") {
+            config.cleanup.enabled = cleanup_enabled.parse().unwrap_or(true);
+        }
+        if let Ok(retention_days) = std::env::var("CLEANUP_RETENTION_DAYS") {
+            config.cleanup.deleted_images_retention_days = retention_days.parse().unwrap_or(30);
+        }
+        if let Ok(deleted_interval) = std::env::var("CLEANUP_DELETED_INTERVAL_SECONDS") {
+            config.cleanup.deleted_cleanup_interval_seconds =
+                deleted_interval.parse().unwrap_or(86400);
+        }
+        if let Ok(expiry_interval) = std::env::var("CLEANUP_EXPIRY_CHECK_INTERVAL_SECONDS") {
+            config.cleanup.expiry_check_interval_seconds = expiry_interval.parse().unwrap_or(3600);
+        }
+        if let Ok(cookie_secure) = std::env::var("AUTH_COOKIE_SECURE") {
+            config.cookie.secure = cookie_secure.parse().unwrap_or(true);
+        }
+        if let Ok(cookie_same_site) = std::env::var("AUTH_COOKIE_SAME_SITE") {
+            config.cookie.same_site = match cookie_same_site.to_ascii_lowercase().as_str() {
+                "strict" => "Strict".to_string(),
+                "lax" => "Lax".to_string(),
+                "none" => "None".to_string(),
+                _ => cookie_same_site,
+            };
+        }
+        if let Ok(cookie_path) = std::env::var("AUTH_COOKIE_PATH") {
+            config.cookie.path = cookie_path;
+        }
+        if let Ok(cookie_domain) = std::env::var("AUTH_COOKIE_DOMAIN") {
+            config.cookie.domain = if cookie_domain.trim().is_empty() {
+                None
+            } else {
+                Some(cookie_domain)
+            };
+        }
+        if let Ok(cookie_max_age_seconds) = std::env::var("AUTH_COOKIE_MAX_AGE_SECONDS") {
+            config.cookie.max_age_seconds = cookie_max_age_seconds.parse().unwrap_or(7 * 24 * 3600);
         }
 
         // 邮件配置

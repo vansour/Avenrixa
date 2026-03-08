@@ -31,7 +31,7 @@ use domain::image::{ImageDomainService, PostgresCategoryRepository, PostgresImag
 use image_processor::ImageProcessor;
 use redis::Client;
 use router::create_app_with_middleware;
-use server::start_server;
+use server::{spawn_cleanup_tasks, start_server};
 use sqlx::postgres::PgPoolOptions;
 use std::sync::Arc;
 use tower_http::trace::TraceLayer;
@@ -72,16 +72,22 @@ async fn main() -> anyhow::Result<()> {
 
     // 创建管理员账户（仅首次）
     match db::create_admin_account(&pool).await {
-        Ok(_) => {
-            info!("Admin account initialized successfully");
+        Ok(init) => {
+            if init.created {
+                info!("Admin account initialized successfully: {}", init.username);
+            } else {
+                info!("Admin account loaded: {}", init.username);
+            }
+            if init.using_default_password {
+                error!(
+                    "Admin account is using default password. Please set ADMIN_PASSWORD and rotate credentials."
+                );
+            }
         }
         Err(e) => {
             error!("Failed to initialize admin account: {}", e);
         }
     }
-
-    // 打印管理员凭证
-    db::log_admin_credentials();
 
     info!("Connecting to Redis...");
     let redis_client = Client::open(config.redis.url.clone())?;
@@ -157,6 +163,9 @@ async fn main() -> anyhow::Result<()> {
         file_save_queue,
         started_at: std::time::Instant::now(),
     };
+
+    // 启动后台清理任务（受配置开关控制）
+    spawn_cleanup_tasks(&state);
 
     // 创建应用路由和中间件
     let app = create_app_with_middleware(state.clone(), &config, config.server.max_upload_size)

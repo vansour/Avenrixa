@@ -16,8 +16,10 @@ services:
       - DATABASE_URL=postgresql://user:pass@postgres:5432/image
       - REDIS_URL=redis://dragonfly:6379
       - JWT_SECRET=your-secret-key-change-in-production
+      - AUTH_COOKIE_SECURE=false
     volumes:
       - ./image_data:/data/images
+      - ./thumbnail_data:/data/thumbnails
     restart: unless-stopped
     healthcheck:
       test: curl -f http://localhost:8080/health || exit 1

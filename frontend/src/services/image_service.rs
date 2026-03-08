@@ -38,6 +38,11 @@ impl ImageService {
             .get_json::<Paginated<ImageItem>>(&url)
             .await?;
         self.image_store.set_images(result.data.clone());
+        self.image_store.set_pagination(
+            result.page.max(1) as u32,
+            result.total.max(0) as u64,
+            result.has_next,
+        );
         self.image_store.set_loading(false);
         Ok(result)
     }
@@ -59,6 +64,7 @@ impl ImageService {
             .get_json::<CursorPaginated<ImageItem>>(&url)
             .await?;
         self.image_store.set_images(result.data.clone());
+        self.image_store.set_has_more(result.next_cursor.is_some());
         self.image_store.set_loading(false);
         Ok(result)
     }
@@ -72,14 +78,14 @@ impl ImageService {
     /// 更新图片（分类/标签）
     pub async fn update_image(&self, id: Uuid, req: UpdateCategoryRequest) -> Result<()> {
         let url = format!("/api/v1/images/{}", id);
-        self.api_client.put_json_response(&url, &req).await
+        self.api_client.put_json_no_response(&url, &req).await
     }
 
     /// 重命名图片
     pub async fn rename_image(&self, id: Uuid, filename: String) -> Result<()> {
         let url = format!("/api/v1/images/{}/rename", id);
         let req = RenameRequest { filename };
-        self.api_client.put_json_response(&url, &req).await
+        self.api_client.put_json_no_response(&url, &req).await
     }
 
     /// 设置过期时间
@@ -90,7 +96,7 @@ impl ImageService {
     ) -> Result<()> {
         let url = format!("/api/v1/images/{}/expiry", id);
         let req = SetExpiryRequest { expires_at };
-        self.api_client.put_json_response(&url, &req).await
+        self.api_client.put_json_no_response(&url, &req).await
     }
 
     /// 复制图片
@@ -103,12 +109,11 @@ impl ImageService {
     /// 批量删除图片
     pub async fn delete_images(&self, image_ids: Vec<Uuid>, permanent: bool) -> Result<()> {
         let url = "/api/v1/images".to_string();
-        let _body = serde_json::to_string(&DeleteRequest {
+        let body = DeleteRequest {
             image_ids,
             permanent,
-        })
-        .map_err(|e| crate::types::errors::AppError::Server(format!("JSON序列化失败: {}", e)))?;
-        self.api_client.delete(&url).await
+        };
+        self.api_client.delete_json(&url, &body).await
     }
 
     /// 获取已删除图片
@@ -130,7 +135,7 @@ impl ImageService {
     pub async fn restore_images(&self, image_ids: Vec<Uuid>) -> Result<()> {
         let url = "/api/v1/images/restore".to_string();
         let req = RestoreRequest { image_ids };
-        self.api_client.post_json_response(&url, &req).await
+        self.api_client.post_json_no_response(&url, &req).await
     }
 
     /// 构建 URL 查询参数

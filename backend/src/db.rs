@@ -11,7 +11,7 @@ use redis::aio::ConnectionManager;
 use sqlx::{Executor, PgPool, Row};
 use std::sync::Arc;
 use std::time::Instant;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -43,6 +43,15 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash VARCHAR(255) NOT NULL,
     role VARCHAR(20) DEFAULT 'admin',
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+-- 分类表
+CREATE TABLE IF NOT EXISTS categories (
+    id UUID PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name VARCHAR(100) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    UNIQUE(user_id, name)
 );
 
 -- 图片表
@@ -98,8 +107,11 @@ CREATE INDEX IF NOT EXISTS idx_images_deleted_at ON images(deleted_at);
 CREATE INDEX IF NOT EXISTS idx_images_hash ON images(hash);
 CREATE INDEX IF NOT EXISTS idx_images_status ON images(status);
 CREATE INDEX IF NOT EXISTS idx_images_expires_at ON images(expires_at);
+CREATE INDEX IF NOT EXISTS idx_categories_user_id ON categories(user_id);
+CREATE INDEX IF NOT EXISTS idx_categories_created_at ON categories(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_image_tags_image_id ON image_tags(image_id);
 CREATE INDEX IF NOT EXISTS idx_image_tags_tag ON image_tags(tag);
+CREATE INDEX IF NOT EXISTS idx_image_tags_image_tag ON image_tags(image_id, tag);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id ON audit_logs(user_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action);
@@ -113,6 +125,7 @@ CREATE INDEX IF NOT EXISTS idx_images_hash_user_deleted ON images(hash, user_id,
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 CREATE INDEX IF NOT EXISTS idx_images_filename_trgm ON images USING gin (filename gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS idx_images_original_filename_trgm ON images USING gin (original_filename gin_trgm_ops) WHERE original_filename IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_image_tags_tag_trgm ON image_tags USING gin (tag gin_trgm_ops);
 
 -- 分页索引优化
 CREATE INDEX IF NOT EXISTS idx_images_user_status_partial ON images(user_id, status) WHERE deleted_at IS NULL;
@@ -137,26 +150,34 @@ pub const DEFAULT_ADMIN_USERNAME: &str = "username";
 /// 默认管理员密码
 pub const DEFAULT_ADMIN_PASSWORD: &str = "password";
 
+/// 管理员账户初始化结果
+pub struct AdminAccountInit {
+    pub username: String,
+    pub created: bool,
+    pub using_default_password: bool,
+}
+
 /// 创建管理员账户（仅首次）
 ///
 /// 如果管理员已存在，则不更新密码
-pub async fn create_admin_account(
-    pool: &PgPool,
-) -> Result<(String, String), anyhow::Error> {
-    let admin_username = DEFAULT_ADMIN_USERNAME;
-    let admin_password = DEFAULT_ADMIN_PASSWORD;
-    let password_hash = AuthService::hash_password(admin_password)?;
+pub async fn create_admin_account(pool: &PgPool) -> Result<AdminAccountInit, anyhow::Error> {
+    let admin_username =
+        std::env::var("ADMIN_USERNAME").unwrap_or_else(|_| DEFAULT_ADMIN_USERNAME.to_string());
+    let admin_password =
+        std::env::var("ADMIN_PASSWORD").unwrap_or_else(|_| DEFAULT_ADMIN_PASSWORD.to_string());
+    let using_default_password = admin_password == DEFAULT_ADMIN_PASSWORD;
+    let password_hash = AuthService::hash_password(&admin_password)?;
 
     // 使用 INSERT ... ON CONFLICT DO NOTHING 来创建管理员（仅首次）
     // 如果用户已存在，则不会更新密码
     let result = sqlx::query(
         "INSERT INTO users (id, username, password_hash, role, created_at)
          VALUES ($1, $2, $3, 'admin', NOW())
-         ON CONFLICT (username) DO NOTHING
+         ON CONFLICT (id) DO NOTHING
          RETURNING username",
     )
     .bind(ADMIN_USER_ID)
-    .bind(admin_username)
+    .bind(&admin_username)
     .bind(&password_hash)
     .fetch_optional(pool)
     .await;
@@ -165,11 +186,23 @@ pub async fn create_admin_account(
         Ok(Some(row)) => {
             let username: String = row.get("username");
             info!("Admin account created: {}", username);
-            Ok((username, admin_password.to_string()))
+            if using_default_password {
+                warn!(
+                    "Admin account initialized with default password. Set ADMIN_PASSWORD to a strong secret."
+                );
+            } else {
+                info!("Admin password loaded from ADMIN_PASSWORD environment variable");
+            }
+
+            Ok(AdminAccountInit {
+                username,
+                created: true,
+                using_default_password,
+            })
         }
         Ok(None) => {
-            // 用户已存在，使用现有凭证
-            info!("Admin account already exists, using existing credentials");
+            // 用户已存在，使用现有账户
+            info!("Admin account already exists");
             let existing = sqlx::query("SELECT username FROM users WHERE id = $1")
                 .bind(ADMIN_USER_ID)
                 .fetch_optional(pool)
@@ -179,7 +212,11 @@ pub async fn create_admin_account(
                 Some(row) => {
                     let username: String = row.get("username");
                     info!("Using existing admin account: {}", username);
-                    Ok((username, admin_password.to_string()))
+                    Ok(AdminAccountInit {
+                        username,
+                        created: false,
+                        using_default_password,
+                    })
                 }
                 None => {
                     // 不应该发生，但返回错误
@@ -193,20 +230,6 @@ pub async fn create_admin_account(
             Err(anyhow::anyhow!("Failed to create admin account: {}", e))
         }
     }
-}
-
-/// 打印管理员账户信息到日志
-pub fn log_admin_credentials() {
-    info!("========================================");
-    info!("        Admin Account");
-    info!("========================================");
-    info!("        Username: {}", DEFAULT_ADMIN_USERNAME);
-    info!("        Password: {}", DEFAULT_ADMIN_PASSWORD);
-    info!("========================================");
-    info!("");
-    info!("You can login with these credentials.");
-    info!("IMPORTANT: Please change the default password after first login!");
-    info!("");
 }
 
 impl AppState {

@@ -14,7 +14,7 @@ async fn serve_thumbnail(
     Path(id): Path<String>,
     State(state): State<AppState>,
 ) -> Result<Response, StatusCode> {
-    let thumbnail_path = format!("{}/thumbnails/{}.jpg", state.config.storage.path, id);
+    let thumbnail_path = format!("{}/{}.jpg", state.config.storage.thumbnail_path, id);
     match fs::read(&thumbnail_path).await {
         Ok(data) => Ok(Response::builder()
             .status(StatusCode::OK)

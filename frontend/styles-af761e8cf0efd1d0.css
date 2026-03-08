@@ -228,34 +228,6 @@ html, body {
     cursor: not-allowed;
 }
 
-/* Image List */
-.page-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    margin-bottom: 12px;
-}
-
-.page-actions {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.pagination-bar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    margin-bottom: 12px;
-}
-
-.page-summary {
-    color: var(--color-text-secondary);
-    font-size: 14px;
-}
-
 /* Image Grid */
 .image-grid {
     display: grid;
@@ -279,8 +251,7 @@ html, body {
 }
 
 .image-card.selected {
-    outline: 2px solid var(--color-primary);
-    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+    ring: 2px solid var(--color-primary);
 }
 
 .image-thumbnail {
@@ -334,17 +305,10 @@ html, body {
 }
 
 .btn-danger {
-    background: var(--color-danger);
-    color: white;
-}
-
-.btn-icon.btn-danger {
-    background: var(--color-bg);
     color: var(--color-danger);
 }
 
-.btn-danger:hover,
-.btn-icon.btn-danger:hover {
+.btn-danger:hover {
     background: var(--color-danger);
     color: white;
 }

@@ -3,6 +3,7 @@ pub mod image_card;
 pub mod image_grid;
 pub mod loading;
 pub mod modal;
+pub mod navbar;
 pub mod toast;
 
 // 重新导出
@@ -10,4 +11,5 @@ pub use image_card::*;
 pub use image_grid::*;
 pub use loading::*;
 pub use modal::*;
+pub use navbar::*;
 pub use toast::*;

@@ -40,11 +40,11 @@ impl<R: AuthRepository> AuthDomainService<R> {
             return Err(AppError::InvalidPassword);
         }
 
-        // 3. 生成令牌
-        let _access_token =
-            self.auth_service
-                .generate_access_token(user.id, &user.username, &user.role)?;
-        let refresh_token = self.auth_service.generate_refresh_token(user.id)?;
+        // 3. 生成访问令牌（业务鉴权使用）
+        // 注意：refresh token 仅用于刷新流程，不能直接作为业务访问令牌
+        let access_token = self
+            .auth_service
+            .generate_token(user.id, &user.username, &user.role)?;
 
         info!("User logged in: {}", user.username);
 
@@ -55,7 +55,7 @@ impl<R: AuthRepository> AuthDomainService<R> {
                 role: user.role,
                 created_at: user.created_at,
             },
-            refresh_token,
+            access_token,
         ))
     }
 

@@ -93,6 +93,14 @@ impl AuthService {
         .map_err(Into::into)
     }
 
+    /// 获取令牌剩余有效时间（秒）
+    pub fn token_ttl_seconds(&self, token: &str) -> anyhow::Result<u64> {
+        let claims = self.verify_token(token)?;
+        let now = Utc::now().timestamp();
+        let ttl = (claims.exp - now).max(0) as u64;
+        Ok(ttl)
+    }
+
     /// 生成随机重置令牌
     pub fn generate_reset_token() -> String {
         Uuid::new_v4().to_string()[..32]
