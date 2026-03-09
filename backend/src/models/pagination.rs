@@ -55,9 +55,6 @@ where
 pub struct PaginationParams {
     pub page: Option<i32>,
     pub page_size: Option<i32>,
-    pub sort_by: Option<String>,
-    pub sort_order: Option<String>,
-    pub search: Option<String>,
     pub category_id: Option<Uuid>,
     pub tag: Option<String>,
     pub cursor_created_at: Option<DateTime<Utc>>,

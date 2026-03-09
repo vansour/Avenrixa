@@ -2,12 +2,6 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Debug, Deserialize)]
-pub struct ApproveRequest {
-    pub image_ids: Vec<Uuid>,
-    pub approved: bool,
-}
-
 #[derive(Debug, Serialize, sqlx::FromRow)]
 pub struct AuditLog {
     pub id: Uuid,
@@ -62,10 +56,14 @@ pub struct UpdateAdminSettingsConfigRequest {
     pub s3_force_path_style: Option<bool>,
 }
 
-#[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Setting {
     pub key: String,
     pub value: String,
+    pub editable: bool,
+    pub sensitive: bool,
+    pub masked: bool,
+    pub requires_confirmation: bool,
 }
 
 #[derive(Debug, Serialize)]

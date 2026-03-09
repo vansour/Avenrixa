@@ -1,12 +1,11 @@
 //! 清理任务模块
-//! 负责定期清理过期图片和临时文件
+//! 负责定期清理过期图片
 
 use anyhow::Result;
 use sqlx::PgPool;
-use tracing::{info, warn};
+use tracing::info;
 
 /// 清理过期图片
-#[allow(dead_code)]
 pub async fn cleanup_expired_images(
     pool: &PgPool,
     retention_days: i64,
@@ -46,7 +45,6 @@ pub async fn cleanup_expired_images(
 }
 
 /// 将过期图片移至回收站
-#[allow(dead_code)]
 pub async fn move_expired_to_trash(pool: &PgPool) -> Result<u64> {
     let now = chrono::Utc::now();
 
@@ -62,26 +60,4 @@ pub async fn move_expired_to_trash(pool: &PgPool) -> Result<u64> {
     }
 
     Ok(result.rows_affected())
-}
-
-/// 清理临时文件
-#[allow(dead_code)]
-pub async fn cleanup_temp_files(storage_path: &str) -> Result<()> {
-    let mut entries = tokio::fs::read_dir(storage_path).await?;
-
-    while let Some(entry) = entries.next_entry().await? {
-        let filename = entry.file_name();
-        let filename_str = filename.to_string_lossy();
-
-        // 匹配临时文件模式
-        if filename_str.contains(".tmp") {
-            let file_path = entry.path();
-            if let Err(e) = tokio::fs::remove_file(&file_path).await {
-                warn!("Failed to remove temp file {}: {}", filename_str, e);
-            }
-        }
-    }
-
-    info!("Temp files cleanup completed");
-    Ok(())
 }

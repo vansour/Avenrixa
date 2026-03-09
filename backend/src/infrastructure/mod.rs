@@ -1,5 +1,4 @@
 //! 基础设施层
 
 pub mod cache;
-pub mod database;
 pub mod storage;

@@ -1,6 +1,9 @@
 use crate::services::api_client::ApiClient;
 use crate::store::auth::AuthStore;
-use crate::types::api::{LoginRequest, UpdateProfileRequest, UserResponse};
+use crate::types::api::{
+    LoginRequest, PasswordResetConfirmRequest, PasswordResetRequest, UpdateProfileRequest,
+    UserResponse,
+};
 use crate::types::errors::Result;
 
 /// 认证服务
@@ -53,5 +56,26 @@ impl AuthService {
             .post_json("/api/v1/auth/change-password", &req)
             .await?;
         Ok(())
+    }
+
+    pub async fn request_password_reset(&self, identity: String) -> Result<()> {
+        self.api_client
+            .post_json_no_response(
+                "/api/v1/auth/password-reset/request",
+                &PasswordResetRequest { identity },
+            )
+            .await
+    }
+
+    pub async fn confirm_password_reset(&self, token: String, new_password: String) -> Result<()> {
+        self.api_client
+            .post_json_no_response(
+                "/api/v1/auth/password-reset/confirm",
+                &PasswordResetConfirmRequest {
+                    token,
+                    new_password,
+                },
+            )
+            .await
     }
 }

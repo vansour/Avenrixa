@@ -1,5 +1,4 @@
 use dioxus::prelude::*;
-use gloo_timers::future::TimeoutFuture;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -64,6 +63,13 @@ impl ToastStore {
         self.add_toast(message, ToastType::Info);
     }
 
+    /// 根据 ID 删除指定 Toast
+    pub fn remove_toast(&self, id: usize) {
+        let mut toasts = self.toasts.borrow_mut();
+        let mut write = toasts.write();
+        write.retain(|toast| toast.id != id);
+    }
+
     /// 添加 Toast 到队列
     fn add_toast(&self, message: String, toast_type: ToastType) {
         let id = {
@@ -82,16 +88,6 @@ impl ToastStore {
                 toast_type,
             });
         }
-
-        let id_for_removal = id;
-        let toasts_rc = self.toasts.clone();
-        spawn(async move {
-            // Web 端没有 Tokio timer runtime，使用浏览器原生计时器避免 panic。
-            TimeoutFuture::new(3_000).await;
-            let mut toasts = toasts_rc.borrow_mut();
-            let mut write = toasts.write();
-            write.retain(|t| t.id != id_for_removal);
-        });
     }
 }
 

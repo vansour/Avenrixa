@@ -6,3 +6,5 @@ frontend/dist
 .DS_Store
 data
 pg_data
+cookie.txt
+test-results/

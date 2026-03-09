@@ -1,7 +1,13 @@
 use crate::db::AppState;
+use crate::domain::auth::Claims;
+use crate::domain::auth::user_token_version_key;
 use axum::http::StatusCode;
 use redis::AsyncCommands;
 use uuid::Uuid;
+
+fn token_version_is_revoked(claims: &Claims, current_version: Option<u64>) -> bool {
+    current_version.is_some_and(|version| claims.token_version < version)
+}
 
 /// 认证用户信息提取器（只有一个管理员）
 #[derive(Debug, Clone)]
@@ -62,14 +68,13 @@ impl axum::extract::FromRequestParts<AppState> for AuthUser {
             return Err(StatusCode::UNAUTHORIZED);
         }
 
-        // 检查用户是否被标记为需要重新认证
-        let user_revoked_key = format!("user_revoked:{}", claims.sub);
-        let is_user_revoked: bool = redis
-            .exists(&user_revoked_key)
+        // 版本化会话控制: 改密后提升版本，所有旧 token 自动失效
+        let current_token_version: Option<u64> = redis
+            .get(user_token_version_key(claims.sub))
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-        if is_user_revoked {
+        if token_version_is_revoked(&claims, current_token_version) {
             return Err(StatusCode::UNAUTHORIZED);
         }
 
@@ -79,6 +84,37 @@ impl axum::extract::FromRequestParts<AppState> for AuthUser {
             role: claims.role,
             token: token.to_string(),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_claims(token_version: u64) -> Claims {
+        Claims {
+            sub: Uuid::new_v4(),
+            username: "tester".to_string(),
+            role: "user".to_string(),
+            token_version,
+            exp: 0,
+            iat: 0,
+        }
+    }
+
+    #[test]
+    fn token_version_matches_when_no_server_version() {
+        assert!(!token_version_is_revoked(&sample_claims(0), None));
+    }
+
+    #[test]
+    fn token_version_matches_current_server_version() {
+        assert!(!token_version_is_revoked(&sample_claims(2), Some(2)));
+    }
+
+    #[test]
+    fn token_version_rejects_outdated_token() {
+        assert!(token_version_is_revoked(&sample_claims(1), Some(2)));
     }
 }
 

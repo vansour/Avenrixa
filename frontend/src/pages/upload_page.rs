@@ -36,12 +36,28 @@ fn extension_from_mime(mime: &str) -> &'static str {
 
 #[cfg(target_arch = "wasm32")]
 async fn read_image_from_clipboard() -> Result<(String, Option<String>, Vec<u8>), String> {
-    use js_sys::{Array, Date, Uint8Array};
-    use wasm_bindgen::JsCast;
+    use js_sys::{Array, Date, Function, Reflect, Uint8Array};
+    use wasm_bindgen::{JsCast, JsValue};
     use wasm_bindgen_futures::JsFuture;
 
     let window = web_sys::window().ok_or_else(|| "无法访问浏览器窗口".to_string())?;
-    let clipboard = window.navigator().clipboard();
+    let navigator = window.navigator();
+    let clipboard_js = Reflect::get(navigator.as_ref(), &JsValue::from_str("clipboard"))
+        .map_err(|_| "无法访问浏览器剪贴板接口".to_string())?;
+
+    if clipboard_js.is_null() || clipboard_js.is_undefined() {
+        return Err("当前浏览器不支持剪贴板图片读取，请改用文件上传".to_string());
+    }
+
+    let read_method = Reflect::get(&clipboard_js, &JsValue::from_str("read"))
+        .map_err(|_| "当前浏览器不支持剪贴板图片读取，请改用文件上传".to_string())?;
+    if read_method.dyn_ref::<Function>().is_none() {
+        return Err("当前浏览器不支持剪贴板图片读取，请改用文件上传".to_string());
+    }
+
+    let clipboard: web_sys::Clipboard = clipboard_js
+        .dyn_into()
+        .map_err(|_| "当前浏览器不支持剪贴板图片读取，请改用文件上传".to_string())?;
     let items_js = JsFuture::from(clipboard.read())
         .await
         .map_err(|_| "读取剪贴板失败，请允许浏览器访问剪贴板".to_string())?;
@@ -315,9 +331,9 @@ pub fn UploadPage() -> Element {
                         span { class: "upload-tip-icon", "💡" }
                         span {
                             "你也可以直接"
-                            a {
+                            button {
                                 class: format!("upload-tip-link {}", if is_uploading() { "is-disabled" } else { "" }),
-                                href: "#",
+                                r#type: "button",
                                 onclick: handle_clipboard_upload,
                                 "粘贴剪贴板中的图片"
                             }

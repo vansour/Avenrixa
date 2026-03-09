@@ -14,6 +14,7 @@ pub use claims::Claims;
 pub use domain_service::AuthDomainService;
 pub use repository::{AuthRepository, PostgresAuthRepository};
 pub use service::AuthService;
+use uuid::Uuid;
 
 // 创建具体类型别名用于 AppState
 pub type DefaultAuthDomainService = AuthDomainService<PostgresAuthRepository>;
@@ -21,3 +22,7 @@ pub type DefaultAuthDomainService = AuthDomainService<PostgresAuthRepository>;
 // 重新导出关联的模型类型
 pub use crate::models::User;
 pub use crate::models::{LoginRequest, UpdateProfileRequest, UserResponse};
+
+pub fn user_token_version_key(user_id: Uuid) -> String {
+    format!("user_token_version:{}", user_id)
+}

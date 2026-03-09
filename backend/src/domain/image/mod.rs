@@ -6,6 +6,5 @@ pub mod repository;
 #[cfg(test)]
 pub mod mock_repository;
 
-// 仅导出外部需要使用的类型
-pub use domain_service::ImageDomainService;
+pub use domain_service::{ImageDomainService, ImageDomainServiceDependencies};
 pub use repository::{PostgresCategoryRepository, PostgresImageRepository};

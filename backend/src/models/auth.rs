@@ -6,6 +6,8 @@ use uuid::Uuid;
 pub struct User {
     pub id: Uuid,
     pub username: String,
+    #[sqlx(default)]
+    pub email: Option<String>,
     pub password_hash: String,
     pub role: String,
     pub created_at: DateTime<Utc>,
@@ -22,6 +24,17 @@ pub struct UpdateProfileRequest {
     pub username: Option<String>,
     pub current_password: String,
     pub new_password: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PasswordResetRequest {
+    pub identity: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PasswordResetConfirmRequest {
+    pub token: String,
+    pub new_password: String,
 }
 
 #[derive(Debug, Serialize)]

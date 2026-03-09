@@ -24,7 +24,7 @@ impl ImageService {
 
     /// 获取图片列表（传统分页）
     pub async fn get_images(&self, params: PaginationParams) -> Result<Paginated<ImageItem>> {
-        let query_params = self.build_query_params(&params);
+        let query_params = Self::build_query_params(&params);
         let url = if query_params.is_empty() {
             "/api/v1/images".to_string()
         } else {
@@ -95,7 +95,7 @@ impl ImageService {
         &self,
         params: PaginationParams,
     ) -> Result<Paginated<ImageItem>> {
-        let query_params = self.build_query_params(&params);
+        let query_params = Self::build_query_params(&params);
         let url = if query_params.is_empty() {
             "/api/v1/images/deleted".to_string()
         } else {
@@ -113,7 +113,7 @@ impl ImageService {
     }
 
     /// 构建 URL 查询参数
-    fn build_query_params(&self, params: &PaginationParams) -> String {
+    fn build_query_params(params: &PaginationParams) -> String {
         let mut query_parts = Vec::new();
 
         if let Some(page) = params.page {
@@ -122,7 +122,56 @@ impl ImageService {
         if let Some(page_size) = params.page_size {
             query_parts.push(format!("page_size={}", page_size));
         }
+        push_query_param(
+            &mut query_parts,
+            "category_id",
+            params.category_id.as_deref(),
+        );
+        push_query_param(&mut query_parts, "tag", params.tag.as_deref());
 
         query_parts.join("&")
+    }
+}
+
+fn push_query_param(parts: &mut Vec<String>, key: &str, value: Option<&str>) {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return;
+    };
+    parts.push(format!("{}={}", key, urlencoding::encode(value)));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_query_params_encodes_filter_options() {
+        let params = PaginationParams {
+            page: Some(2),
+            page_size: Some(40),
+            category_id: Some("8ca4ac38-1b21-4064-86f2-34761d9cf5c0".to_string()),
+            tag: Some("cover art".to_string()),
+        };
+
+        let query = ImageService::build_query_params(&params);
+
+        assert!(query.contains("page=2"));
+        assert!(query.contains("page_size=40"));
+        assert!(query.contains("category_id=8ca4ac38-1b21-4064-86f2-34761d9cf5c0"));
+        assert!(query.contains("tag=cover%20art"));
+    }
+
+    #[test]
+    fn build_query_params_omits_blank_values() {
+        let params = PaginationParams {
+            page: Some(1),
+            page_size: Some(20),
+            category_id: Some("  ".to_string()),
+            tag: Some("   ".to_string()),
+        };
+
+        let query = ImageService::build_query_params(&params);
+
+        assert_eq!(query, "page=1&page_size=20");
     }
 }

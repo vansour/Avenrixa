@@ -32,6 +32,11 @@ impl ImageItem {
         self.created_at.format("%Y-%m-%d %H:%M").to_string()
     }
 
+    pub fn deleted_at_label(&self) -> Option<String> {
+        self.deleted_at
+            .map(|deleted_at| deleted_at.format("%Y-%m-%d %H:%M").to_string())
+    }
+
     pub fn size_formatted(&self) -> String {
         const KB: i64 = 1024;
         const MB: i64 = KB * 1024;
@@ -58,32 +63,6 @@ impl ImageItem {
         } else {
             false
         }
-    }
-}
-
-/// 图片过滤器
-#[derive(Debug, Clone)]
-pub struct ImageFilters {
-    pub search: Option<String>,
-    pub category_id: Option<String>,
-    pub sort_by: String,
-    pub sort_order: String,
-}
-
-impl Default for ImageFilters {
-    fn default() -> Self {
-        Self {
-            search: None,
-            category_id: None,
-            sort_by: "created_at".to_string(),
-            sort_order: "desc".to_string(),
-        }
-    }
-}
-
-impl ImageFilters {
-    pub fn new() -> Self {
-        Self::default()
     }
 }
 

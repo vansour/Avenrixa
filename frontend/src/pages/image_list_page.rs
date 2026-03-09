@@ -34,26 +34,32 @@ pub fn ImageListPage() -> Element {
 
     let _load_images = use_resource({
         let image_service = image_service.clone();
+        let image_store = image_store.clone();
         let toast_store = toast_store.clone();
         move || {
             let _ = reload_tick();
             let page = current_page().max(1);
             let size = page_size().clamp(1, 100);
             let image_service = image_service.clone();
+            let image_store = image_store.clone();
             let toast_store = toast_store.clone();
             async move {
                 is_loading.set(true);
+                image_store.set_loading(true);
                 error_message.set(String::new());
 
                 let params = PaginationParams {
                     page: Some(page),
                     page_size: Some(size),
+                    category_id: None,
+                    tag: None,
                 };
 
                 match image_service.get_images(params).await {
                     Ok(result) => {
                         if result.data.is_empty() && page > 1 && result.total > 0 {
                             current_page.set(page - 1);
+                            image_store.set_loading(false);
                             is_loading.set(false);
                             return;
                         }
@@ -64,13 +70,14 @@ pub fn ImageListPage() -> Element {
                         }
                         selected_ids.set(HashSet::new());
                     }
-                    Err(e) => {
-                        let message = format!("加载图片失败: {}", e);
+                    Err(error) => {
+                        let message = format!("加载图片失败: {}", error);
                         error_message.set(message.clone());
                         toast_store.show_error(message);
                     }
                 }
 
+                image_store.set_loading(false);
                 is_loading.set(false);
             }
         }
@@ -134,8 +141,8 @@ pub fn ImageListPage() -> Element {
                     selected_ids.set(ids);
                     reload_tick.set(reload_tick().wrapping_add(1));
                 }
-                Err(e) => {
-                    toast_store.show_error(format!("删除失败: {}", e));
+                Err(error) => {
+                    toast_store.show_error(format!("删除失败: {}", error));
                 }
             }
 
@@ -203,8 +210,8 @@ pub fn ImageListPage() -> Element {
                     selected_ids.set(HashSet::new());
                     reload_tick.set(reload_tick().wrapping_add(1));
                 }
-                Err(e) => {
-                    toast_store.show_error(format!("批量删除失败: {}", e));
+                Err(error) => {
+                    toast_store.show_error(format!("批量删除失败: {}", error));
                 }
             }
 
@@ -219,6 +226,7 @@ pub fn ImageListPage() -> Element {
         && current_images
             .iter()
             .all(|image| selected_now.contains(&image.image_key));
+    let page_summary = "默认按上传时间倒序";
 
     rsx! {
         div { class: "image-list-page",
@@ -226,7 +234,7 @@ pub fn ImageListPage() -> Element {
                 div { class: "image-hero-main",
                     h1 { "上传历史" }
                     p { class: "image-hero-subtitle",
-                        "这里展示之前上传的图片，按上传时间倒序排列"
+                        "按上传时间查看已上传的图片"
                     }
                 }
 
@@ -243,11 +251,7 @@ pub fn ImageListPage() -> Element {
                         class: "btn btn-primary",
                         disabled: is_loading() || is_deleting(),
                         onclick: handle_refresh,
-                        if is_loading() {
-                            "刷新中..."
-                        } else {
-                            "刷新"
-                        }
+                        if is_loading() { "刷新中..." } else { "刷新" }
                     }
                 }
 
@@ -289,9 +293,7 @@ pub fn ImageListPage() -> Element {
                         span { "张" }
                     }
                 }
-                span { class: "page-summary",
-                    "按上传时间倒序"
-                }
+                span { class: "page-summary", "{page_summary}" }
                 div { class: "page-actions",
                     button {
                         class: "btn",
@@ -309,9 +311,7 @@ pub fn ImageListPage() -> Element {
             }
 
             if !error_message().is_empty() {
-                div { class: "error-banner",
-                    "{error_message()}"
-                }
+                div { class: "error-banner", "{error_message()}" }
             }
 
             div { class: "image-list-wrapper",

@@ -2,20 +2,90 @@ use crate::app_context::{use_auth_service, use_toast_store};
 use crate::types::api::LoginRequest;
 use dioxus::prelude::*;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LoginMode {
+    Login,
+    RequestReset,
+    ConfirmReset,
+}
+
+#[cfg(target_arch = "wasm32")]
+fn read_reset_token_from_location() -> Option<String> {
+    let search = web_sys::window()
+        .and_then(|window| window.location().search().ok())
+        .unwrap_or_default();
+    let search = search.trim_start_matches('?');
+    if search.is_empty() {
+        return None;
+    }
+
+    for pair in search.split('&') {
+        let Some((key, value)) = pair.split_once('=') else {
+            continue;
+        };
+        if key == "token" {
+            return urlencoding::decode(value)
+                .ok()
+                .map(|value| value.into_owned());
+        }
+    }
+
+    None
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn read_reset_token_from_location() -> Option<String> {
+    None
+}
+
+#[cfg(target_arch = "wasm32")]
+fn clear_reset_token_from_location() {
+    use wasm_bindgen::JsValue;
+
+    if let Some(window) = web_sys::window()
+        && let Ok(history) = window.history()
+    {
+        let pathname = window.location().pathname().ok().unwrap_or_default();
+        let _ = history.replace_state_with_url(&JsValue::NULL, "", Some(&pathname));
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn clear_reset_token_from_location() {}
+
 /// 登录页面组件
 #[component]
 pub fn LoginPage() -> Element {
     let auth_service = use_auth_service();
     let toast_store = use_toast_store();
 
+    let initial_reset_token = read_reset_token_from_location();
+    let mut mode = use_signal(|| {
+        if initial_reset_token.is_some() {
+            LoginMode::ConfirmReset
+        } else {
+            LoginMode::Login
+        }
+    });
+
     let mut username = use_signal(String::new);
     let mut password = use_signal(String::new);
+    let mut reset_identity = use_signal(String::new);
+    let mut reset_token = use_signal(|| initial_reset_token.clone().unwrap_or_default());
+    let mut new_password = use_signal(String::new);
+    let mut confirm_password = use_signal(String::new);
     let mut is_loading = use_signal(|| false);
     let mut error_message = use_signal(String::new);
 
+    let show_login = mode() == LoginMode::Login;
+    let show_request_reset = mode() == LoginMode::RequestReset;
+    let show_confirm_reset = mode() == LoginMode::ConfirmReset;
+
+    let auth_service_for_login = auth_service.clone();
+    let toast_store_for_login = toast_store.clone();
     let handle_login = move |_| {
-        let auth_service_clone = auth_service.clone();
-        let toast_store = toast_store.clone();
+        let auth_service_clone = auth_service_for_login.clone();
+        let toast_store = toast_store_for_login.clone();
         spawn(async move {
             let username_val = username();
             let password_val = password();
@@ -30,7 +100,6 @@ pub fn LoginPage() -> Element {
             is_loading.set(true);
             error_message.set(String::new());
 
-            // 调用登录 API
             match auth_service_clone
                 .login(LoginRequest {
                     username: username_val.trim().to_string(),
@@ -39,70 +108,255 @@ pub fn LoginPage() -> Element {
                 .await
             {
                 Ok(_) => {
-                    // 登录成功，清除表单
                     username.set(String::new());
                     password.set(String::new());
-                    is_loading.set(false);
                     toast_store.show_success("登录成功".to_string());
                 }
-                Err(e) => {
-                    is_loading.set(false);
-                    let message = format!("登录失败: {}", e);
+                Err(error) => {
+                    let message = format!("登录失败: {}", error);
                     error_message.set(message.clone());
                     toast_store.show_error(message);
                 }
             }
+
+            is_loading.set(false);
         });
+    };
+
+    let auth_service_for_request_reset = auth_service.clone();
+    let toast_store_for_request_reset = toast_store.clone();
+    let handle_request_reset = move |_| {
+        let auth_service = auth_service_for_request_reset.clone();
+        let toast_store = toast_store_for_request_reset.clone();
+        spawn(async move {
+            let identity = reset_identity();
+            if identity.trim().is_empty() {
+                let message = "请输入用户名或邮箱".to_string();
+                error_message.set(message.clone());
+                toast_store.show_error(message);
+                return;
+            }
+
+            is_loading.set(true);
+            error_message.set(String::new());
+
+            match auth_service
+                .request_password_reset(identity.trim().to_string())
+                .await
+            {
+                Ok(_) => {
+                    toast_store.show_success("如果账号已配置找回邮箱，重置邮件已发送".to_string());
+                    reset_identity.set(String::new());
+                    mode.set(LoginMode::Login);
+                }
+                Err(error) => {
+                    let message = format!("发送重置邮件失败: {}", error);
+                    error_message.set(message.clone());
+                    toast_store.show_error(message);
+                }
+            }
+
+            is_loading.set(false);
+        });
+    };
+
+    let auth_service_for_confirm_reset = auth_service.clone();
+    let toast_store_for_confirm_reset = toast_store.clone();
+    let handle_confirm_reset = move |_| {
+        let auth_service = auth_service_for_confirm_reset.clone();
+        let toast_store = toast_store_for_confirm_reset.clone();
+        spawn(async move {
+            if reset_token().trim().is_empty() {
+                let message = "重置令牌不能为空".to_string();
+                error_message.set(message.clone());
+                toast_store.show_error(message);
+                return;
+            }
+            if new_password().trim().is_empty() {
+                let message = "请输入新密码".to_string();
+                error_message.set(message.clone());
+                toast_store.show_error(message);
+                return;
+            }
+            if new_password() != confirm_password() {
+                let message = "两次输入的新密码不一致".to_string();
+                error_message.set(message.clone());
+                toast_store.show_error(message);
+                return;
+            }
+
+            is_loading.set(true);
+            error_message.set(String::new());
+
+            match auth_service
+                .confirm_password_reset(reset_token().trim().to_string(), new_password())
+                .await
+            {
+                Ok(_) => {
+                    toast_store.show_success("密码已重置，请使用新密码登录".to_string());
+                    clear_reset_token_from_location();
+                    reset_token.set(String::new());
+                    new_password.set(String::new());
+                    confirm_password.set(String::new());
+                    mode.set(LoginMode::Login);
+                }
+                Err(error) => {
+                    let message = format!("重置密码失败: {}", error);
+                    error_message.set(message.clone());
+                    toast_store.show_error(message);
+                }
+            }
+
+            is_loading.set(false);
+        });
+    };
+
+    let switch_to_login = move |_| {
+        error_message.set(String::new());
+        mode.set(LoginMode::Login);
+    };
+    let switch_to_request_reset = move |_| {
+        error_message.set(String::new());
+        mode.set(LoginMode::RequestReset);
     };
 
     rsx! {
         div { class: "login-page",
             div { class: "login-container",
                 div { class: "login-card",
-                    h1 { class: "login-title", "登录控制台" }
-                    p { class: "login-subtitle", "管理图片资产与访问权限" }
-
-                    if !error_message().is_empty() {
-                        div { class: "error-banner",
-                            "{error_message()}"
+                    h1 { class: "login-title",
+                        if show_request_reset {
+                            "重置密码"
+                        } else if show_confirm_reset {
+                            "设置新密码"
+                        } else {
+                            "登录控制台"
+                        }
+                    }
+                    p { class: "login-subtitle",
+                        if show_request_reset {
+                            "输入用户名或邮箱，我们会向已配置的地址发送重置链接"
+                        } else if show_confirm_reset {
+                            "输入新密码以完成重置"
+                        } else {
+                            "管理图片资产与访问权限"
                         }
                     }
 
-                    div { class: "login-form",
-                        label { for: "username", "用户名" }
-                        input {
-                            r#type: "text",
-                            id: "username",
-                            placeholder: "请输入用户名",
-                            value: "{username}",
-                            oninput: move |e| username.set(e.value()),
-                            disabled: is_loading()
-                        }
+                    if !error_message().is_empty() {
+                        div { class: "error-banner", "{error_message()}" }
+                    }
 
-                        label { for: "password", "密码" }
-                        input {
-                            r#type: "password",
-                            id: "password",
-                            placeholder: "请输入密码",
-                            value: "{password}",
-                            oninput: move |e| password.set(e.value()),
-                            disabled: is_loading()
-                        }
+                    if show_login {
+                        div { class: "login-form",
+                            label { for: "username", "用户名" }
+                            input {
+                                r#type: "text",
+                                id: "username",
+                                placeholder: "请输入用户名",
+                                value: "{username}",
+                                oninput: move |e| username.set(e.value()),
+                                disabled: is_loading()
+                            }
 
-                        button {
-                            class: "btn btn-primary btn-full",
-                            disabled: is_loading(),
-                            onclick: handle_login,
-                            if is_loading() {
-                                "登录中..."
-                            } else {
-                                "登录"
+                            label { for: "password", "密码" }
+                            input {
+                                r#type: "password",
+                                id: "password",
+                                placeholder: "请输入密码",
+                                value: "{password}",
+                                oninput: move |e| password.set(e.value()),
+                                disabled: is_loading()
+                            }
+
+                            button {
+                                class: "btn btn-primary btn-full",
+                                disabled: is_loading(),
+                                onclick: handle_login,
+                                if is_loading() { "登录中..." } else { "登录" }
+                            }
+                        }
+                    }
+
+                    if show_request_reset {
+                        div { class: "login-form",
+                            label { for: "reset-identity", "用户名或邮箱" }
+                            input {
+                                r#type: "text",
+                                id: "reset-identity",
+                                placeholder: "请输入用户名或邮箱",
+                                value: "{reset_identity}",
+                                oninput: move |e| reset_identity.set(e.value()),
+                                disabled: is_loading()
+                            }
+
+                            button {
+                                class: "btn btn-primary btn-full",
+                                disabled: is_loading(),
+                                onclick: handle_request_reset,
+                                if is_loading() { "发送中..." } else { "发送重置邮件" }
+                            }
+                        }
+                    }
+
+                    if show_confirm_reset {
+                        div { class: "login-form",
+                            label { for: "reset-token", "重置令牌" }
+                            input {
+                                r#type: "text",
+                                id: "reset-token",
+                                placeholder: "请输入邮件中的重置令牌",
+                                value: "{reset_token}",
+                                oninput: move |e| reset_token.set(e.value()),
+                                disabled: is_loading()
+                            }
+
+                            label { for: "new-password", "新密码" }
+                            input {
+                                r#type: "password",
+                                id: "new-password",
+                                placeholder: "请输入新密码",
+                                value: "{new_password}",
+                                oninput: move |e| new_password.set(e.value()),
+                                disabled: is_loading()
+                            }
+
+                            label { for: "confirm-password", "确认新密码" }
+                            input {
+                                r#type: "password",
+                                id: "confirm-password",
+                                placeholder: "请再次输入新密码",
+                                value: "{confirm_password}",
+                                oninput: move |e| confirm_password.set(e.value()),
+                                disabled: is_loading()
+                            }
+
+                            button {
+                                class: "btn btn-primary btn-full",
+                                disabled: is_loading(),
+                                onclick: handle_confirm_reset,
+                                if is_loading() { "提交中..." } else { "重置密码" }
                             }
                         }
                     }
 
                     div { class: "login-footer",
-                        p { class: "login-tip", "默认账户: username / password（建议通过环境变量覆盖）" }
+                        p { class: "login-tip", "请使用管理员预先配置的账户登录。" }
+                        if show_login {
+                            button {
+                                class: "btn btn-ghost btn-full",
+                                disabled: is_loading(),
+                                onclick: switch_to_request_reset,
+                                "忘记密码"
+                            }
+                        } else {
+                            button {
+                                class: "btn btn-ghost btn-full",
+                                disabled: is_loading(),
+                                onclick: switch_to_login,
+                                "返回登录"
+                            }
+                        }
                     }
                 }
             }

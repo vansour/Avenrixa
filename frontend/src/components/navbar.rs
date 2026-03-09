@@ -1,13 +1,34 @@
-use crate::app_context::{use_auth_service, use_auth_store, use_toast_store};
+use crate::app_context::use_auth_store;
 use dioxus::prelude::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TopPage {
     Upload,
     History,
+    Trash,
     Api,
     Settings,
 }
+
+impl TopPage {
+    fn label(self) -> &'static str {
+        match self {
+            TopPage::Upload => "上传中心",
+            TopPage::History => "历史图库",
+            TopPage::Trash => "回收站",
+            TopPage::Api => "API 接入",
+            TopPage::Settings => "系统设置",
+        }
+    }
+}
+
+const AUTH_NAV_PAGES: [TopPage; 5] = [
+    TopPage::Upload,
+    TopPage::History,
+    TopPage::Trash,
+    TopPage::Api,
+    TopPage::Settings,
+];
 
 /// 导航栏组件
 #[component]
@@ -16,129 +37,89 @@ pub fn NavBar(
     current_page: TopPage,
     #[props(default)] on_navigate: EventHandler<TopPage>,
 ) -> Element {
-    let auth_service = use_auth_service();
     let auth_store = use_auth_store();
-    let toast_store = use_toast_store();
-    let mut is_logging_out = use_signal(|| false);
+    let mut is_mobile_menu_open = use_signal(|| false);
 
-    let user = auth_store.user();
+    let is_authenticated = auth_store.is_authenticated();
 
-    let handle_logout = move |_| {
-        if is_logging_out() {
-            return;
-        }
-
-        let auth_service = auth_service.clone();
-        let auth_store = auth_store.clone();
-        let toast_store = toast_store.clone();
-        spawn(async move {
-            is_logging_out.set(true);
-
-            match auth_service.logout().await {
-                Ok(_) => {
-                    toast_store.show_success("已登出".to_string());
-                }
-                Err(e) => {
-                    if e.should_redirect_login() {
-                        auth_store.logout();
-                    }
-                    toast_store.show_error(format!("登出失败: {}", e));
-                    eprintln!("登出失败: {}", e);
-                }
-            }
-
-            is_logging_out.set(false);
-        });
+    let nav_panel_class = if is_mobile_menu_open() {
+        "navbar-panel is-open"
+    } else {
+        "navbar-panel"
     };
-
-    let on_go_upload = {
-        let on_navigate = on_navigate.clone();
-        move |_| on_navigate.call(TopPage::Upload)
+    let toggle_class = if is_mobile_menu_open() {
+        "navbar-toggle is-open"
+    } else {
+        "navbar-toggle"
     };
-    let on_go_history = {
-        let on_navigate = on_navigate.clone();
-        move |_| on_navigate.call(TopPage::History)
-    };
-    let on_go_api = {
-        let on_navigate = on_navigate.clone();
-        move |_| on_navigate.call(TopPage::Api)
-    };
-    let on_go_settings = {
-        let on_navigate = on_navigate.clone();
-        move |_| on_navigate.call(TopPage::Settings)
-    };
-    let is_admin = user
-        .as_ref()
-        .map(|u| u.role.eq_ignore_ascii_case("admin"))
-        .unwrap_or(false);
 
     rsx! {
         nav { class: "navbar",
             div { class: "navbar-container",
-                div { class: "navbar-start",
-                    div { class: "navbar-brand",
-                        a { href: "/",
-                            span { class: "navbar-brand-mark", "VI" }
-                            div { class: "navbar-brand-copy",
-                                span { class: "navbar-brand-title", "{site_name}" }
-                                span { class: "navbar-brand-subtitle", "Visual Archive Console" }
-                            }
-                        }
-                    }
-
-                    if user.is_some() {
-                        div { class: "navbar-tabs",
-                            button {
-                                class: format!("nav-tab {}", if current_page == TopPage::Upload { "active" } else { "" }),
-                                onclick: on_go_upload,
-                                "上传"
-                            }
-                            button {
-                                class: format!("nav-tab {}", if current_page == TopPage::History { "active" } else { "" }),
-                                onclick: on_go_history,
-                                "历史"
-                            }
-                            button {
-                                class: format!("nav-tab {}", if current_page == TopPage::Api { "active" } else { "" }),
-                                onclick: on_go_api,
-                                "API"
-                            }
-                            if is_admin {
-                                button {
-                                    class: format!("nav-tab {}", if current_page == TopPage::Settings { "active" } else { "" }),
-                                    onclick: on_go_settings,
-                                    "设置"
-                                }
-                            }
-                        }
+                div { class: "navbar-brand",
+                    a { href: "/",
+                        span { class: "navbar-brand-mark", "VI" }
+                        span { class: "navbar-brand-title", "{site_name}" }
                     }
                 }
 
-                div { class: "navbar-menu",
-                    if let Some(user) = user {
-                        div { class: "user-info",
-                            span { class: "user-name", "{user.username}" }
-                            span { class: "user-role", "{user.role}" }
-
-                            button {
-                                class: "btn btn-ghost",
-                                disabled: is_logging_out(),
-                                onclick: handle_logout,
-                                if is_logging_out() {
-                                    "登出中..."
-                                } else {
-                                    "登出"
+                if is_authenticated {
+                    div { class: "{nav_panel_class}",
+                        div { class: "navbar-tabs",
+                            for page in AUTH_NAV_PAGES {
+                                NavTabItem {
+                                    page,
+                                    current_page,
+                                    on_navigate: on_navigate.clone(),
+                                    close_menu: is_mobile_menu_open,
                                 }
                             }
                         }
-                    } else {
-                        a { href: "/",
-                            class: "btn btn-primary",
-                            "登录"
+                    }
+
+                    button {
+                        r#type: "button",
+                        class: "{toggle_class}",
+                        onclick: move |_| is_mobile_menu_open.toggle(),
+                        span { class: "navbar-toggle-bars",
+                            span {}
+                            span {}
+                            span {}
                         }
+                    }
+                } else {
+                    a { href: "/",
+                        class: "btn btn-primary navbar-login-btn",
+                        "登录"
                     }
                 }
             }
+        }
+    }
+}
+
+#[component]
+fn NavTabItem(
+    page: TopPage,
+    current_page: TopPage,
+    on_navigate: EventHandler<TopPage>,
+    close_menu: Signal<bool>,
+) -> Element {
+    let class_name = if current_page == page {
+        "nav-tab active"
+    } else {
+        "nav-tab"
+    };
+
+    rsx! {
+        button {
+            r#type: "button",
+            class: "{class_name}",
+            onclick: move |_| {
+                close_menu.set(false);
+                on_navigate.call(page);
+            },
+            strong { class: "nav-tab-title", "{page.label()}" }
         }
     }
 }

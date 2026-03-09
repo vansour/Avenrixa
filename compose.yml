@@ -16,7 +16,19 @@ services:
       - DATABASE_URL=postgresql://user:pass@postgres:5432/image
       - REDIS_URL=redis://dragonfly:6379
       - JWT_SECRET=your-secret-key-change-in-production
+      - ADMIN_USERNAME=admin
+      - ADMIN_EMAIL=admin@example.com
+      - ADMIN_PASSWORD=change-this-admin-password
       - AUTH_COOKIE_SECURE=false
+      - AUTH_COOKIE_SAME_SITE=Strict
+      - MAIL_ENABLED=false
+      - SMTP_HOST=smtp.example.com
+      - SMTP_PORT=587
+      - SMTP_USER=
+      - SMTP_PASSWORD=
+      - MAIL_FROM=noreply@example.com
+      - MAIL_FROM_NAME=Vansour Image
+      - RESET_LINK_BASE_URL=http://localhost:8080/reset-password
     volumes:
       - ./data:/data
     restart: unless-stopped

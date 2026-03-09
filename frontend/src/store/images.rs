@@ -1,4 +1,4 @@
-use crate::types::models::{ImageFilters, ImageItem};
+use crate::types::models::ImageItem;
 use dioxus::prelude::*;
 use std::cell::RefCell;
 use std::collections::HashSet;
@@ -9,7 +9,6 @@ struct ImageState {
     images: Vec<ImageItem>,
     current_page: u32,
     total_items: u64,
-    filters: ImageFilters,
     selected_ids: HashSet<String>,
     is_loading: bool,
     has_more: bool,
@@ -27,7 +26,6 @@ impl ImageStore {
             images: Vec::new(),
             current_page: 1,
             total_items: 0,
-            filters: ImageFilters::default(),
             selected_ids: HashSet::new(),
             is_loading: false,
             has_more: true,
@@ -56,11 +54,6 @@ impl ImageStore {
     /// 获取总项目数
     pub fn total_items(&self) -> u64 {
         self.state.borrow().read().total_items
-    }
-
-    /// 获取过滤器
-    pub fn filters(&self) -> ImageFilters {
-        self.state.borrow().read().filters.clone()
     }
 
     /// 添加图片
@@ -96,11 +89,6 @@ impl ImageStore {
     /// 获取是否有更多
     pub fn has_more(&self) -> bool {
         self.state.borrow().read().has_more
-    }
-
-    /// 设置过滤器
-    pub fn set_filters(&self, filters: ImageFilters) {
-        self.state.borrow_mut().write().filters = filters;
     }
 
     /// 清空图片列表

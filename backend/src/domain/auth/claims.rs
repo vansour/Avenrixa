@@ -8,6 +8,8 @@ pub struct Claims {
     pub sub: Uuid,
     pub username: String,
     pub role: String,
+    #[serde(default)]
+    pub token_version: u64,
     pub exp: i64,
     pub iat: i64,
 }

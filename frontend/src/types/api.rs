@@ -23,6 +23,10 @@ pub struct PaginationParams {
     pub page: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub page_size: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub category_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tag: Option<String>,
 }
 
 impl Default for PaginationParams {
@@ -30,6 +34,8 @@ impl Default for PaginationParams {
         Self {
             page: Some(1),
             page_size: Some(20),
+            category_id: None,
+            tag: None,
         }
     }
 }
@@ -85,6 +91,17 @@ pub struct UpdateProfileRequest {
     pub new_password: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PasswordResetRequest {
+    pub identity: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PasswordResetConfirmRequest {
+    pub token: String,
+    pub new_password: String,
+}
+
 /// 管理员设置配置（结构化）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AdminSettingsConfig {
@@ -114,4 +131,93 @@ pub struct UpdateAdminSettingsConfigRequest {
     pub s3_access_key: Option<String>,
     pub s3_secret_key: Option<String>,
     pub s3_force_path_style: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ComponentStatus {
+    pub status: String,
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HealthMetrics {
+    pub images_count: i64,
+    pub users_count: i64,
+    pub storage_used_mb: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HealthStatus {
+    pub status: String,
+    pub timestamp: DateTime<Utc>,
+    pub database: ComponentStatus,
+    pub redis: ComponentStatus,
+    pub storage: ComponentStatus,
+    pub version: Option<String>,
+    pub uptime_seconds: Option<u64>,
+    pub metrics: Option<HealthMetrics>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SystemStats {
+    pub total_users: i64,
+    pub total_images: i64,
+    pub total_storage: i64,
+    pub total_views: i64,
+    pub images_last_24h: i64,
+    pub images_last_7d: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BackupResponse {
+    pub filename: String,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AdminUserSummary {
+    pub id: String,
+    pub username: String,
+    pub role: String,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserUpdateRequest {
+    pub role: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AuditLog {
+    pub id: String,
+    pub user_id: Option<String>,
+    pub action: String,
+    pub target_type: String,
+    pub target_id: Option<String>,
+    pub details: Option<serde_json::Value>,
+    pub ip_address: Option<String>,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AuditLogResponse {
+    pub data: Vec<AuditLog>,
+    pub page: i32,
+    pub page_size: i32,
+    pub total: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Setting {
+    pub key: String,
+    pub value: String,
+    pub editable: bool,
+    pub sensitive: bool,
+    pub masked: bool,
+    pub requires_confirmation: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateSettingRequest {
+    pub value: String,
 }
