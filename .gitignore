@@ -4,7 +4,5 @@ frontend/dist
 *.log
 .env
 .DS_Store
-image_data
-postgres_data
-dragonfly_data
-thumbnail_data
+data
+pg_data
