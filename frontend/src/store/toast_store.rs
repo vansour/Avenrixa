@@ -76,7 +76,11 @@ impl ToastStore {
         {
             let mut toasts = self.toasts.borrow_mut();
             let mut write = toasts.write();
-            write.push(ToastMessage { id, message, toast_type });
+            write.push(ToastMessage {
+                id,
+                message,
+                toast_type,
+            });
         }
 
         let id_for_removal = id;

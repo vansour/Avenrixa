@@ -1,18 +1,12 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 /// 图片项
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ImageItem {
-    pub id: Uuid,
-    pub user_id: Uuid,
-    pub category_id: Option<Uuid>,
+    pub image_key: String,
     pub filename: String,
-    pub thumbnail: Option<String>,
-    pub original_filename: Option<String>,
     pub size: i64,
-    pub hash: String,
     pub format: String,
     pub views: i32,
     pub status: String, // "active", "deleted"
@@ -26,17 +20,16 @@ impl ImageItem {
         format!("/images/{}", self.filename)
     }
 
-    pub fn thumbnail_url(&self) -> Option<String> {
-        self.thumbnail
-            .as_ref()
-            .map(|_| format!("/thumbnails/{}", self.id))
+    pub fn thumbnail_url(&self) -> String {
+        format!("/thumbnails/{}.webp", self.image_key)
     }
 
-    pub fn original_filename(&self) -> String {
-        self.original_filename
-            .as_ref()
-            .cloned()
-            .unwrap_or_else(|| self.filename.clone())
+    pub fn display_name(&self) -> String {
+        self.filename.clone()
+    }
+
+    pub fn created_at_label(&self) -> String {
+        self.created_at.format("%Y-%m-%d %H:%M").to_string()
     }
 
     pub fn size_formatted(&self) -> String {

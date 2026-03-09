@@ -11,12 +11,22 @@ use tokio::io::AsyncWriteExt;
 use tracing::{error, warn};
 use uuid::Uuid;
 
+fn map_paginated_images(result: Paginated<Image>) -> Paginated<ImageResponse> {
+    Paginated {
+        data: result.data.into_iter().map(ImageResponse::from).collect(),
+        page: result.page,
+        page_size: result.page_size,
+        total: result.total,
+        has_next: result.has_next,
+    }
+}
+
 #[tracing::instrument(skip(state, auth_user, multipart), fields(user_id = %auth_user.id))]
 pub async fn upload_image(
     State(state): State<AppState>,
     auth_user: AuthUser,
     mut multipart: Multipart,
-) -> Result<Json<Image>, AppError> {
+) -> Result<Json<ImageResponse>, AppError> {
     let service = state
         .image_domain_service
         .as_ref()
@@ -75,8 +85,9 @@ pub async fn upload_image(
                     content_type,
                 )
                 .await?;
+            let _ = state.invalidate_user_image_cache(auth_user.id).await;
 
-            return Ok(Json(image));
+            return Ok(Json(ImageResponse::from(image)));
         }
     }
 
@@ -84,17 +95,11 @@ pub async fn upload_image(
     Err(AppError::InvalidImageFormat)
 }
 
-/// 允许的排序字段白名单（防止 SQL 注入）
-const VALID_SORT_FIELDS: &[&str] = &["created_at", "size", "views", "filename", "hash"];
-
-/// 允许的排序方向白名单
-const VALID_SORT_ORDERS: &[&str] = &["ASC", "DESC"];
-
 pub async fn get_images(
     State(state): State<AppState>,
     auth_user: AuthUser,
     Query(params): Query<PaginationParams>,
-) -> Result<Json<Paginated<Image>>, AppError> {
+) -> Result<Json<Paginated<ImageResponse>>, AppError> {
     let service = state
         .image_domain_service
         .as_ref()
@@ -105,53 +110,45 @@ pub async fn get_images(
     let page = params.page.unwrap_or(1).max(1);
     let page_size = params.page_size.unwrap_or(20).clamp(1, 100);
 
-    let sort_by = VALID_SORT_FIELDS
-        .iter()
-        .find(|&&f| f == params.sort_by.as_deref().unwrap_or("created_at"))
-        .copied()
-        .unwrap_or("created_at");
-
-    let sort_order = VALID_SORT_ORDERS
-        .iter()
-        .find(|&&o| o == params.sort_order.as_deref().unwrap_or("DESC"))
-        .copied()
-        .unwrap_or("DESC");
-
+    // 固定按上传时间倒序，不开放搜索和自定义排序。
     let result = service
         .get_images(
             auth_user.id,
             page,
             page_size,
-            sort_by,
-            sort_order,
-            params.search.as_deref(),
-            params.category_id,
-            params.tag.as_deref(),
+            "created_at",
+            "DESC",
+            None,
+            None,
+            None,
         )
         .await?;
 
-    Ok(Json(result))
+    Ok(Json(map_paginated_images(result)))
 }
 
 pub async fn get_image(
     State(state): State<AppState>,
     auth_user: AuthUser,
-    Path(id): Path<Uuid>,
-) -> Result<Json<Image>, AppError> {
+    Path(image_key): Path<String>,
+) -> Result<Json<ImageResponse>, AppError> {
     let service = state
         .image_domain_service
         .as_ref()
         .ok_or(AppError::Internal(anyhow::anyhow!(
             "Image service not found"
         )))?;
-    let image = service.increment_views(id, auth_user.id).await?;
-    Ok(Json(image))
+
+    let image = service
+        .increment_views_by_key(&image_key, auth_user.id)
+        .await?;
+    Ok(Json(ImageResponse::from(image)))
 }
 
 pub async fn update_image(
     State(state): State<AppState>,
     auth_user: AuthUser,
-    Path(id): Path<Uuid>,
+    Path(image_key): Path<String>,
     Json(req): Json<UpdateCategoryRequest>,
 ) -> Result<(), AppError> {
     let service = state
@@ -162,30 +159,14 @@ pub async fn update_image(
         )))?;
 
     service
-        .update_image_category(id, auth_user.id, req.category_id, req.tags.as_deref())
+        .update_image_category_by_key(
+            &image_key,
+            auth_user.id,
+            req.category_id,
+            req.tags.as_deref(),
+        )
         .await?;
 
-    let _ = state.invalidate_user_image_cache(auth_user.id).await;
-
-    Ok(())
-}
-
-pub async fn rename_image(
-    State(state): State<AppState>,
-    auth_user: AuthUser,
-    Path(id): Path<Uuid>,
-    Json(req): Json<RenameRequest>,
-) -> Result<(), AppError> {
-    let service = state
-        .image_domain_service
-        .as_ref()
-        .ok_or(AppError::Internal(anyhow::anyhow!(
-            "Image service not found"
-        )))?;
-
-    service
-        .rename_image(id, auth_user.id, &req.filename)
-        .await?;
     let _ = state.invalidate_user_image_cache(auth_user.id).await;
 
     Ok(())
@@ -194,7 +175,7 @@ pub async fn rename_image(
 pub async fn set_expiry(
     State(state): State<AppState>,
     auth_user: AuthUser,
-    Path(id): Path<Uuid>,
+    Path(image_key): Path<String>,
     Json(req): Json<SetExpiryRequest>,
 ) -> Result<(), AppError> {
     let service = state
@@ -204,7 +185,9 @@ pub async fn set_expiry(
             "Image service not found"
         )))?;
 
-    service.set_expiry(id, auth_user.id, req.expires_at).await?;
+    service
+        .set_expiry_by_key(&image_key, auth_user.id, req.expires_at)
+        .await?;
     let _ = state.invalidate_user_image_cache(auth_user.id).await;
 
     Ok(())
@@ -223,7 +206,7 @@ pub async fn delete_images(
         )))?;
 
     service
-        .delete_images(&req.image_ids, auth_user.id, req.permanent)
+        .delete_images_by_keys(&req.image_keys, auth_user.id, req.permanent)
         .await?;
     let _ = state.invalidate_user_image_cache(auth_user.id).await;
 
@@ -234,7 +217,7 @@ pub async fn get_deleted_images(
     State(state): State<AppState>,
     auth_user: AuthUser,
     Query(params): Query<PaginationParams>,
-) -> Result<Json<Paginated<Image>>, AppError> {
+) -> Result<Json<Paginated<ImageResponse>>, AppError> {
     let service = state
         .image_domain_service
         .as_ref()
@@ -244,25 +227,11 @@ pub async fn get_deleted_images(
 
     let page = params.page.unwrap_or(1).max(1);
     let page_size = params.page_size.unwrap_or(20).clamp(1, 100);
+    let result = service
+        .get_deleted_images_paginated(auth_user.id, page, page_size)
+        .await?;
 
-    let images = service.get_deleted_images(auth_user.id).await?;
-    let total = images.len() as i64;
-    let start = ((page - 1) * page_size) as usize;
-    let end = std::cmp::min(start + page_size as usize, images.len());
-    let data = if start < images.len() {
-        images[start..end].to_vec()
-    } else {
-        Vec::new()
-    };
-    let has_next = ((page * page_size) as i64) < total;
-
-    Ok(Json(Paginated {
-        data,
-        page,
-        page_size,
-        total,
-        has_next,
-    }))
+    Ok(Json(map_paginated_images(result)))
 }
 
 pub async fn restore_images(
@@ -277,37 +246,18 @@ pub async fn restore_images(
             "Image service not found"
         )))?;
 
-    service.restore_images(&req.image_ids, auth_user.id).await?;
+    service
+        .restore_images_by_keys(&req.image_keys, auth_user.id)
+        .await?;
     let _ = state.invalidate_user_image_cache(auth_user.id).await;
 
     Ok(())
 }
 
-pub async fn duplicate_image(
-    State(state): State<AppState>,
-    auth_user: AuthUser,
-    Path(_id): Path<Uuid>,
-    Json(req): Json<DuplicateRequest>,
-) -> Result<Json<Image>, AppError> {
-    let service = state
-        .image_domain_service
-        .as_ref()
-        .ok_or(AppError::Internal(anyhow::anyhow!(
-            "Image service not found"
-        )))?;
-
-    let duplicated = service
-        .duplicate_image_v2(req.image_id, auth_user.id)
-        .await?;
-    let _ = state.invalidate_user_image_cache(auth_user.id).await;
-
-    Ok(Json(duplicated))
-}
-
 pub async fn edit_image(
     State(state): State<AppState>,
     auth_user: AuthUser,
-    Path(id): Path<Uuid>,
+    Path(image_key): Path<String>,
     Json(req): Json<EditImageRequest>,
 ) -> Result<Json<EditImageResponse>, AppError> {
     let service = state
@@ -317,7 +267,9 @@ pub async fn edit_image(
             "Image service not found"
         )))?;
 
-    let response = service.edit_image(id, auth_user.id, req).await?;
+    let response = service
+        .edit_image_by_key(&image_key, auth_user.id, req)
+        .await?;
     let _ = state.invalidate_user_image_cache(auth_user.id).await;
 
     Ok(Json(response))

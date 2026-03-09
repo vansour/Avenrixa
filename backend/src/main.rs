@@ -13,7 +13,9 @@ mod middleware;
 mod models;
 mod router;
 mod routes;
+mod runtime_settings;
 mod server;
+mod storage_backend;
 mod tasks;
 mod utils;
 
@@ -31,9 +33,11 @@ use domain::image::{ImageDomainService, PostgresCategoryRepository, PostgresImag
 use image_processor::ImageProcessor;
 use redis::Client;
 use router::create_app_with_middleware;
+use runtime_settings::RuntimeSettingsService;
 use server::{spawn_cleanup_tasks, start_server};
 use sqlx::postgres::PgPoolOptions;
 use std::sync::Arc;
+use storage_backend::StorageManager;
 use tower_http::trace::TraceLayer;
 use tracing::{Level, error, info};
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
@@ -92,20 +96,19 @@ async fn main() -> anyhow::Result<()> {
     info!("Connecting to Redis...");
     let redis_client = Client::open(config.redis.url.clone())?;
     let redis_conn = redis_client.get_connection_manager().await?;
+    let queue_redis_conn = redis_client.get_connection_manager().await?;
+    let queue_worker_redis_conn = redis_client.get_connection_manager().await?;
 
     let auth = AuthService::new(&config)
         .map_err(|e| anyhow::anyhow!("Failed to initialize auth service: {}", e))?;
 
     info!("Creating storage directories...");
     tokio::fs::create_dir_all(&config.storage.path).await?;
-    tokio::fs::create_dir_all(&config.storage.thumbnail_path).await?;
 
     // 设置目录权限为 755，确保 web 服务器可以读取
     use std::os::unix::fs::PermissionsExt;
     let images_perms = PermissionsExt::from_mode(0o755);
-    let thumbs_perms = PermissionsExt::from_mode(0o755);
     let _ = tokio::fs::set_permissions(&config.storage.path, images_perms).await;
-    let _ = tokio::fs::set_permissions(&config.storage.thumbnail_path, thumbs_perms).await;
 
     let image_processor = ImageProcessor::new(
         config.image.max_width,
@@ -113,10 +116,14 @@ async fn main() -> anyhow::Result<()> {
         config.image.thumbnail_size,
         config.image.jpeg_quality,
     );
+    let runtime_settings = Arc::new(RuntimeSettingsService::new(pool.clone(), &config));
+    let storage_manager = Arc::new(StorageManager::new(runtime_settings.clone()));
+    storage_manager.ensure_local_storage_dir().await?;
 
     // 初始化文件保存任务队列
     let file_save_queue = Arc::new(file_queue::FileSaveQueue::new(
-        redis_conn.clone(),
+        queue_redis_conn,
+        queue_worker_redis_conn,
         format!("{}image_save_queue", config.redis.key_prefix),
     ));
     info!(
@@ -141,13 +148,18 @@ async fn main() -> anyhow::Result<()> {
         category_repository,
         image_processor.clone(),
         file_save_queue.clone(),
+        storage_manager.clone(),
     );
     let image_domain_service = Arc::new(image_domain_service);
     info!("Image domain service initialized");
 
     // 初始化管理领域服务
-    let admin_domain_service =
-        AdminDomainService::new(pool.clone(), Some(redis_conn.clone()), config.clone());
+    let admin_domain_service = AdminDomainService::new(
+        pool.clone(),
+        Some(redis_conn.clone()),
+        config.clone(),
+        storage_manager.clone(),
+    );
     let admin_domain_service = Arc::new(admin_domain_service);
     info!("Admin domain service initialized");
 
@@ -159,6 +171,8 @@ async fn main() -> anyhow::Result<()> {
         auth_domain_service: Some(auth_domain_service),
         image_domain_service: Some(image_domain_service),
         admin_domain_service: Some(admin_domain_service),
+        runtime_settings,
+        storage_manager,
         image_processor,
         file_save_queue,
         started_at: std::time::Instant::now(),

@@ -13,7 +13,6 @@ dioxus-logger = "0.7"
 reqwest = { version = "0.13", default-features = false, features = ["json", "cookies", "multipart", "rustls"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
-uuid = { workspace = true, features = ["js"] }
 chrono = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
@@ -21,7 +20,14 @@ tokio = { version = "1", features = ["rt", "macros", "sync", "time"] }
 parking_lot = "0.12"
 urlencoding = "2.1"
 wasm-bindgen = "=0.2.114"
-web-sys = "0.3"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = [
+    "Blob",
+    "Clipboard",
+    "ClipboardItem",
+    "Navigator",
+    "Window",
+] }
 js-sys = "0.3"
 gloo-utils = "0.2"
 gloo-timers = "0.3"

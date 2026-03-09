@@ -4,8 +4,10 @@
 ///
 /// # 示例
 /// ```
-/// Set-Cookie: auth_token=xyz123; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=604800
-/// Cookie: auth_token=xyz123; HttpOnly; SameSite=Strict; Path=/; Max-Age=604800
+/// use frontend_lib::utils::parse_auth_token;
+///
+/// let cookie = "auth_token=xyz123; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=604800";
+/// assert_eq!(parse_auth_token(cookie), Some("xyz123".to_string()));
 /// ```
 ///
 /// # 解析逻辑
@@ -38,8 +40,11 @@ pub fn parse_auth_token(cookie_header: &str) -> Option<String> {
 ///
 /// # 示例
 /// ```
-/// build_auth_cookie("token123", 7)
-/// // 返回: "auth_token=token123; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=604800"
+/// use frontend_lib::utils::build_auth_cookie;
+///
+/// let cookie = build_auth_cookie("token123", 7);
+/// assert!(cookie.contains("auth_token=token123"));
+/// assert!(cookie.contains("Max-Age=604800"));
 /// ```
 pub fn build_auth_cookie(token: &str, max_age_days: u32) -> String {
     let max_age = max_age_days * 24 * 3600; // 转换为秒

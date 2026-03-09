@@ -18,8 +18,7 @@ services:
       - JWT_SECRET=your-secret-key-change-in-production
       - AUTH_COOKIE_SECURE=false
     volumes:
-      - ./image_data:/data/images
-      - ./thumbnail_data:/data/thumbnails
+      - ./data:/data
     restart: unless-stopped
     healthcheck:
       test: curl -f http://localhost:8080/health || exit 1
@@ -35,7 +34,7 @@ services:
       - POSTGRES_USER=user
       - POSTGRES_PASSWORD=pass
     volumes:
-      - ./postgres_data:/var/lib/postgresql
+      - ./pg_data:/var/lib/postgresql
     healthcheck:
       test: pg_isready -U user -d image
       interval: 5s

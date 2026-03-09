@@ -1,9 +1,21 @@
 use crate::app_context::{use_auth_service, use_auth_store, use_toast_store};
 use dioxus::prelude::*;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TopPage {
+    Upload,
+    History,
+    Api,
+    Settings,
+}
+
 /// 导航栏组件
 #[component]
-pub fn NavBar() -> Element {
+pub fn NavBar(
+    site_name: String,
+    current_page: TopPage,
+    #[props(default)] on_navigate: EventHandler<TopPage>,
+) -> Element {
     let auth_service = use_auth_service();
     let auth_store = use_auth_store();
     let toast_store = use_toast_store();
@@ -39,13 +51,66 @@ pub fn NavBar() -> Element {
         });
     };
 
+    let on_go_upload = {
+        let on_navigate = on_navigate.clone();
+        move |_| on_navigate.call(TopPage::Upload)
+    };
+    let on_go_history = {
+        let on_navigate = on_navigate.clone();
+        move |_| on_navigate.call(TopPage::History)
+    };
+    let on_go_api = {
+        let on_navigate = on_navigate.clone();
+        move |_| on_navigate.call(TopPage::Api)
+    };
+    let on_go_settings = {
+        let on_navigate = on_navigate.clone();
+        move |_| on_navigate.call(TopPage::Settings)
+    };
+    let is_admin = user
+        .as_ref()
+        .map(|u| u.role.eq_ignore_ascii_case("admin"))
+        .unwrap_or(false);
+
     rsx! {
         nav { class: "navbar",
             div { class: "navbar-container",
-                div { class: "navbar-brand",
-                    a { href: "/",
-                        img { src: "/favicon.ico", alt: "Vansour Image" }
-                        span { "Vansour Image" }
+                div { class: "navbar-start",
+                    div { class: "navbar-brand",
+                        a { href: "/",
+                            span { class: "navbar-brand-mark", "VI" }
+                            div { class: "navbar-brand-copy",
+                                span { class: "navbar-brand-title", "{site_name}" }
+                                span { class: "navbar-brand-subtitle", "Visual Archive Console" }
+                            }
+                        }
+                    }
+
+                    if user.is_some() {
+                        div { class: "navbar-tabs",
+                            button {
+                                class: format!("nav-tab {}", if current_page == TopPage::Upload { "active" } else { "" }),
+                                onclick: on_go_upload,
+                                "上传"
+                            }
+                            button {
+                                class: format!("nav-tab {}", if current_page == TopPage::History { "active" } else { "" }),
+                                onclick: on_go_history,
+                                "历史"
+                            }
+                            button {
+                                class: format!("nav-tab {}", if current_page == TopPage::Api { "active" } else { "" }),
+                                onclick: on_go_api,
+                                "API"
+                            }
+                            if is_admin {
+                                button {
+                                    class: format!("nav-tab {}", if current_page == TopPage::Settings { "active" } else { "" }),
+                                    onclick: on_go_settings,
+                                    "设置"
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -53,10 +118,10 @@ pub fn NavBar() -> Element {
                     if let Some(user) = user {
                         div { class: "user-info",
                             span { class: "user-name", "{user.username}" }
-                            span { class: "user-role", "({user.role})" }
+                            span { class: "user-role", "{user.role}" }
 
                             button {
-                                class: "btn btn-logout",
+                                class: "btn btn-ghost",
                                 disabled: is_logging_out(),
                                 onclick: handle_logout,
                                 if is_logging_out() {

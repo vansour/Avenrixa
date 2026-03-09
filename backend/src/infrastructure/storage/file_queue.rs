@@ -5,6 +5,7 @@ use redis::AsyncCommands;
 use redis::RedisError;
 use redis::aio::ConnectionManager;
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 use tokio::task::JoinHandle;
 use tokio::time::{Duration, Instant};
 use tracing::{error, info, warn};
@@ -13,6 +14,7 @@ use uuid::Uuid;
 const DEFAULT_MAX_RETRIES: u8 = 3;
 const RESULT_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const RESULT_TTL_SECONDS: u64 = 300;
+const CANCEL_TTL_SECONDS: u64 = 600;
 
 fn default_max_retries() -> u8 {
     DEFAULT_MAX_RETRIES
@@ -52,6 +54,7 @@ pub enum FileSaveResult {
     Success,
     ImageFailed,
     ThumbnailFailed,
+    Cancelled,
 }
 
 impl FileSaveResult {
@@ -60,6 +63,7 @@ impl FileSaveResult {
             Self::Success => "success",
             Self::ImageFailed => "image_failed",
             Self::ThumbnailFailed => "thumbnail_failed",
+            Self::Cancelled => "cancelled",
         }
     }
 
@@ -68,19 +72,32 @@ impl FileSaveResult {
             "success" => Some(Self::Success),
             "image_failed" => Some(Self::ImageFailed),
             "thumbnail_failed" => Some(Self::ThumbnailFailed),
+            "cancelled" => Some(Self::Cancelled),
             _ => None,
         }
     }
 }
 
 impl FileSaveQueue {
+    fn result_key(queue_key: &str, task_id: &str) -> String {
+        format!("{}:result:{}", queue_key, task_id)
+    }
+
+    fn cancel_key(queue_key: &str, task_id: &str) -> String {
+        format!("{}:cancel:{}", queue_key, task_id)
+    }
+
     /// 创建新的文件保存队列
-    pub fn new(redis: ConnectionManager, queue_key: String) -> Self {
-        let redis_clone = redis.clone();
+    pub fn new(
+        redis: ConnectionManager,
+        worker_redis: ConnectionManager,
+        queue_key: String,
+    ) -> Self {
         let queue_key_clone = queue_key.clone();
 
         let _handle = tokio::spawn(async move {
-            Self::process_queue(redis_clone, queue_key_clone).await;
+            // 队列消费者使用专用连接，避免阻塞式 BRPOPLPUSH 影响业务命令（如健康检查 PING）。
+            Self::process_queue(worker_redis, queue_key_clone).await;
         });
 
         Self::Real {
@@ -93,6 +110,51 @@ impl FileSaveQueue {
     /// 创建 Mock 文件保存队列 (用于测试)
     pub fn new_mock() -> Self {
         Self::Mock
+    }
+
+    /// 返回任务结果键（如果为真实 Redis 队列）
+    pub fn result_key_for_task(&self, task_id: &str) -> Option<String> {
+        match self {
+            Self::Real { queue_key, .. } => Some(Self::result_key(queue_key, task_id)),
+            Self::Mock => None,
+        }
+    }
+
+    /// 标记任务取消（用于上传等待超时后的补偿）
+    pub async fn cancel_task(&self, task_id: &str) -> Result<(), String> {
+        match self {
+            Self::Real {
+                redis, queue_key, ..
+            } => {
+                let mut conn = redis.clone();
+                let cancel_key = Self::cancel_key(queue_key, task_id);
+                let _: () = conn
+                    .set_ex(cancel_key, "1", CANCEL_TTL_SECONDS)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                Ok(())
+            }
+            Self::Mock => Ok(()),
+        }
+    }
+
+    /// 查询任务结果（不删除结果键）
+    pub async fn get_task_result(&self, task_id: &str) -> Result<Option<FileSaveResult>, String> {
+        match self {
+            Self::Real {
+                redis, queue_key, ..
+            } => {
+                let mut conn = redis.clone();
+                let result_key = Self::result_key(queue_key, task_id);
+                let status: Option<String> =
+                    conn.get(result_key).await.map_err(|e| e.to_string())?;
+                match status {
+                    Some(status) => Ok(FileSaveResult::from_status(&status)),
+                    None => Ok(None),
+                }
+            }
+            Self::Mock => Ok(Some(FileSaveResult::Success)),
+        }
     }
 
     /// 提交文件保存任务并存入 Redis
@@ -140,7 +202,7 @@ impl FileSaveQueue {
                 let result_key = task
                     .result_key
                     .clone()
-                    .unwrap_or_else(|| format!("{}:result:{}", queue_key, task_id));
+                    .unwrap_or_else(|| Self::result_key(queue_key, &task_id));
                 task.result_key = Some(result_key.clone());
 
                 let payload = serde_json::to_string(&task).map_err(|e| e.to_string())?;
@@ -216,6 +278,7 @@ impl FileSaveQueue {
         let mut task_count: usize = 0;
         let mut success_count: usize = 0;
         let mut failure_count: usize = 0;
+        let mut cancelled_count: usize = 0;
 
         loop {
             // 通过 BRPOPLPUSH 原子地将任务转移到 processing 队列，避免进程崩溃导致任务丢失
@@ -230,31 +293,101 @@ impl FileSaveQueue {
                 Ok(Some(payload)) => {
                     task_count += 1;
                     if let Ok(task) = serde_json::from_str::<FileSaveTask>(&payload) {
+                        let cancel_key = Self::cancel_key(&queue_key, &task.task_id);
+                        if Self::is_task_cancelled(&mut redis, &cancel_key)
+                            .await
+                            .unwrap_or(false)
+                        {
+                            cancelled_count += 1;
+                            if let Err(e) = Self::cleanup_task_artifacts(&task).await {
+                                warn!("清理已取消任务文件失败 [{}]: {}", task.image_id, e);
+                            }
+                            if let Err(e) = Self::ack_task_cancelled(
+                                &mut redis,
+                                &processing_key,
+                                &payload,
+                                &task,
+                                &cancel_key,
+                            )
+                            .await
+                            {
+                                error!("确认取消任务失败: {}", e);
+                            }
+                            continue;
+                        }
+
                         let result = Self::process_task(task.clone()).await;
                         match result {
                             FileSaveResult::Success => {
-                                success_count += 1;
-                                if let Err(e) =
-                                    Self::ack_task_success(&mut redis, &processing_key, &payload)
-                                        .await
+                                if Self::is_task_cancelled(&mut redis, &cancel_key)
+                                    .await
+                                    .unwrap_or(false)
                                 {
-                                    error!("任务确认成功失败: {}", e);
+                                    cancelled_count += 1;
+                                    if let Err(e) = Self::cleanup_task_artifacts(&task).await {
+                                        warn!("清理已取消任务文件失败 [{}]: {}", task.image_id, e);
+                                    }
+                                    if let Err(e) = Self::ack_task_cancelled(
+                                        &mut redis,
+                                        &processing_key,
+                                        &payload,
+                                        &task,
+                                        &cancel_key,
+                                    )
+                                    .await
+                                    {
+                                        error!("确认取消任务失败: {}", e);
+                                    }
+                                } else {
+                                    success_count += 1;
+                                    if let Err(e) = Self::ack_task_success(
+                                        &mut redis,
+                                        &processing_key,
+                                        &payload,
+                                        &task,
+                                        &cancel_key,
+                                    )
+                                    .await
+                                    {
+                                        error!("任务确认成功失败: {}", e);
+                                    }
                                 }
                             }
                             other => {
-                                failure_count += 1;
-                                if let Err(e) = Self::handle_task_failure(
-                                    &mut redis,
-                                    &queue_key,
-                                    &processing_key,
-                                    &dead_letter_key,
-                                    task,
-                                    payload,
-                                    other,
-                                )
-                                .await
+                                if Self::is_task_cancelled(&mut redis, &cancel_key)
+                                    .await
+                                    .unwrap_or(false)
                                 {
-                                    error!("处理失败任务时出错: {}", e);
+                                    cancelled_count += 1;
+                                    if let Err(e) = Self::cleanup_task_artifacts(&task).await {
+                                        warn!("清理已取消任务文件失败 [{}]: {}", task.image_id, e);
+                                    }
+                                    if let Err(e) = Self::ack_task_cancelled(
+                                        &mut redis,
+                                        &processing_key,
+                                        &payload,
+                                        &task,
+                                        &cancel_key,
+                                    )
+                                    .await
+                                    {
+                                        error!("确认取消任务失败: {}", e);
+                                    }
+                                } else {
+                                    failure_count += 1;
+                                    if let Err(e) = Self::handle_task_failure(
+                                        &mut redis,
+                                        &queue_key,
+                                        &processing_key,
+                                        &dead_letter_key,
+                                        task,
+                                        payload,
+                                        other,
+                                    )
+                                    .await
+                                    {
+                                        error!("处理失败任务时出错: {}", e);
+                                    }
                                 }
                             }
                         }
@@ -292,8 +425,8 @@ impl FileSaveQueue {
             // 定期输出统计
             if task_count > 0 && task_count.is_multiple_of(100) {
                 info!(
-                    "文件保存任务统计: 总数={}, 成功={}, 失败={}",
-                    task_count, success_count, failure_count
+                    "文件保存任务统计: 总数={}, 成功={}, 失败={}, 取消={}",
+                    task_count, success_count, failure_count, cancelled_count
                 );
             }
         }
@@ -318,14 +451,21 @@ impl FileSaveQueue {
         Ok(())
     }
 
+    async fn is_task_cancelled(
+        redis: &mut ConnectionManager,
+        cancel_key: &str,
+    ) -> Result<bool, RedisError> {
+        redis.exists(cancel_key).await
+    }
+
     async fn ack_task_success(
         redis: &mut ConnectionManager,
         processing_key: &str,
         payload: &str,
+        task: &FileSaveTask,
+        cancel_key: &str,
     ) -> Result<(), RedisError> {
-        if let Ok(task) = serde_json::from_str::<FileSaveTask>(payload)
-            && let Some(result_key) = task.result_key
-        {
+        if let Some(result_key) = &task.result_key {
             let _: () = redis
                 .set_ex(
                     result_key,
@@ -334,6 +474,28 @@ impl FileSaveQueue {
                 )
                 .await?;
         }
+        let _: Result<i32, _> = redis.del(cancel_key).await;
+        let _: i32 = redis.lrem(processing_key, 1, payload).await?;
+        Ok(())
+    }
+
+    async fn ack_task_cancelled(
+        redis: &mut ConnectionManager,
+        processing_key: &str,
+        payload: &str,
+        task: &FileSaveTask,
+        cancel_key: &str,
+    ) -> Result<(), RedisError> {
+        if let Some(result_key) = &task.result_key {
+            let _: () = redis
+                .set_ex(
+                    result_key,
+                    FileSaveResult::Cancelled.as_str(),
+                    RESULT_TTL_SECONDS,
+                )
+                .await?;
+        }
+        let _: Result<i32, _> = redis.del(cancel_key).await;
         let _: i32 = redis.lrem(processing_key, 1, payload).await?;
         Ok(())
     }
@@ -385,56 +547,115 @@ impl FileSaveQueue {
         Ok(())
     }
 
+    fn staging_path(path: &str, task_id: &str, label: &str) -> String {
+        format!("{}.{}.{}", path, task_id, label)
+    }
+
+    async fn cleanup_task_artifacts(task: &FileSaveTask) -> std::io::Result<()> {
+        let _ = tokio::fs::remove_file(&task.storage_path).await;
+        let _ = tokio::fs::remove_file(&task.thumbnail_path).await;
+        let _ = tokio::fs::remove_file(&task.temp_image_path).await;
+
+        let image_stage = Self::staging_path(&task.storage_path, &task.task_id, "imgtmp");
+        let thumb_stage = Self::staging_path(&task.thumbnail_path, &task.task_id, "thumbtmp");
+        let _ = tokio::fs::remove_file(image_stage).await;
+        let _ = tokio::fs::remove_file(thumb_stage).await;
+        Ok(())
+    }
+
     /// 处理单个文件保存任务
     #[tracing::instrument(skip(task), fields(image_id = %task.image_id))]
     async fn process_task(task: FileSaveTask) -> FileSaveResult {
         let image_id = &task.image_id;
 
-        // 移动主图片文件（从临时目录到存储目录）
-        match tokio::fs::rename(&task.temp_image_path, &task.storage_path).await {
-            Ok(_) => {
-                // 主图片移动成功，保存缩略图
-                match Self::save_file_with_retry(&task.thumbnail_path, &task.thumbnail_data, 3)
-                    .await
-                {
-                    Ok(_) => FileSaveResult::Success,
-                    Err(e) => {
-                        error!("保存缩略图失败 [{}]: {}", image_id, e);
-                        let _ = tokio::fs::remove_file(&task.storage_path).await;
-                        FileSaveResult::ThumbnailFailed
-                    }
+        let storage_exists = tokio::fs::try_exists(&task.storage_path)
+            .await
+            .unwrap_or(false);
+        let thumbnail_exists = tokio::fs::try_exists(&task.thumbnail_path)
+            .await
+            .unwrap_or(false);
+        if storage_exists && thumbnail_exists {
+            let _ = tokio::fs::remove_file(&task.temp_image_path).await;
+            return FileSaveResult::Success;
+        }
+
+        if !tokio::fs::try_exists(&task.temp_image_path)
+            .await
+            .unwrap_or(false)
+        {
+            error!(
+                "临时主图不存在且目标文件不完整，无法继续处理 [{}]: {}",
+                image_id, task.temp_image_path
+            );
+            return FileSaveResult::ImageFailed;
+        }
+
+        if let Some(parent) = Path::new(&task.storage_path).parent()
+            && let Err(e) = tokio::fs::create_dir_all(parent).await
+        {
+            error!("创建主图目录失败 [{}]: {}", image_id, e);
+            return FileSaveResult::ImageFailed;
+        }
+        if let Some(parent) = Path::new(&task.thumbnail_path).parent()
+            && let Err(e) = tokio::fs::create_dir_all(parent).await
+        {
+            error!("创建缩略图目录失败 [{}]: {}", image_id, e);
+            return FileSaveResult::ThumbnailFailed;
+        }
+
+        let image_staging = Self::staging_path(&task.storage_path, &task.task_id, "imgtmp");
+        let thumb_staging = Self::staging_path(&task.thumbnail_path, &task.task_id, "thumbtmp");
+
+        let _ = tokio::fs::remove_file(&image_staging).await;
+        let _ = tokio::fs::remove_file(&thumb_staging).await;
+
+        if let Err(e) = tokio::fs::copy(&task.temp_image_path, &image_staging).await {
+            error!("复制主图到暂存文件失败 [{}]: {}", image_id, e);
+            let _ = tokio::fs::remove_file(&image_staging).await;
+            return FileSaveResult::ImageFailed;
+        }
+
+        if let Err(e) = Self::save_file_with_retry(&thumb_staging, &task.thumbnail_data, 3).await {
+            error!("保存缩略图暂存文件失败 [{}]: {}", image_id, e);
+            let _ = tokio::fs::remove_file(&image_staging).await;
+            let _ = tokio::fs::remove_file(&thumb_staging).await;
+            return FileSaveResult::ThumbnailFailed;
+        }
+
+        if let Err(e) = tokio::fs::rename(&image_staging, &task.storage_path).await {
+            error!("原子替换主图失败 [{}]: {}", image_id, e);
+            match tokio::fs::copy(&image_staging, &task.storage_path).await {
+                Ok(_) => {
+                    let _ = tokio::fs::remove_file(&image_staging).await;
                 }
-            }
-            Err(e) => {
-                error!("移动临时文件到存储目录失败 [{}]: {}", image_id, e);
-                // 尝试复制（如果 rename 跨文件系统失败）
-                match tokio::fs::copy(&task.temp_image_path, &task.storage_path).await {
-                    Ok(_) => {
-                        let _ = tokio::fs::remove_file(&task.temp_image_path).await;
-                        // 复制成功，保存缩略图
-                        match Self::save_file_with_retry(
-                            &task.thumbnail_path,
-                            &task.thumbnail_data,
-                            3,
-                        )
-                        .await
-                        {
-                            Ok(_) => FileSaveResult::Success,
-                            Err(e) => {
-                                error!("保存缩略图失败 [{}]: {}", image_id, e);
-                                let _ = tokio::fs::remove_file(&task.storage_path).await;
-                                FileSaveResult::ThumbnailFailed
-                            }
-                        }
-                    }
-                    Err(copy_err) => {
-                        error!("复制临时文件到存储目录失败 [{}]: {}", image_id, copy_err);
-                        let _ = tokio::fs::remove_file(&task.temp_image_path).await;
-                        FileSaveResult::ImageFailed
-                    }
+                Err(copy_err) => {
+                    error!("主图写入失败（copy fallback） [{}]: {}", image_id, copy_err);
+                    let _ = tokio::fs::remove_file(&image_staging).await;
+                    let _ = tokio::fs::remove_file(&thumb_staging).await;
+                    return FileSaveResult::ImageFailed;
                 }
             }
         }
+
+        if let Err(e) = tokio::fs::rename(&thumb_staging, &task.thumbnail_path).await {
+            error!("原子替换缩略图失败 [{}]: {}", image_id, e);
+            match tokio::fs::copy(&thumb_staging, &task.thumbnail_path).await {
+                Ok(_) => {
+                    let _ = tokio::fs::remove_file(&thumb_staging).await;
+                }
+                Err(copy_err) => {
+                    error!(
+                        "缩略图写入失败（copy fallback） [{}]: {}",
+                        image_id, copy_err
+                    );
+                    let _ = tokio::fs::remove_file(&thumb_staging).await;
+                    return FileSaveResult::ThumbnailFailed;
+                }
+            }
+        }
+
+        let _ = tokio::fs::remove_file(&task.temp_image_path).await;
+        FileSaveResult::Success
     }
 
     /// 带重试的文件保存

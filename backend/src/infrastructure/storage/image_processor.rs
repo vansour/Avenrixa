@@ -4,11 +4,10 @@
 
 use anyhow::Result;
 use image::{
-    DynamicImage, RgbaImage,
+    DynamicImage, ImageFormat, RgbaImage,
     codecs::{jpeg, png},
     imageops,
 };
-use sha2::{Digest, Sha256};
 
 // 使用领域层的参数类型
 pub use crate::models::{FilterParams, WatermarkParams};
@@ -32,22 +31,20 @@ impl ImageProcessor {
     }
 
     #[tracing::instrument(skip(self, path))]
-    pub fn process_from_file(&self, path: &std::path::Path) -> Result<(Vec<u8>, Vec<u8>)> {
-        let img = image::open(path)?;
-        let compressed = self.compress(&img)?;
-        let thumbnail = self.generate_thumbnail(&img)?;
-        Ok((compressed, thumbnail))
+    pub fn process_from_file(&self, path: &std::path::Path, ext: &str) -> Result<Vec<u8>> {
+        // 不依赖临时文件后缀名（如 .tmp），按内容探测图片格式。
+        let data = std::fs::read(path)?;
+        let img = image::load_from_memory(&data)?;
+        self.compress_with_extension(&img, ext)
     }
 
     #[tracing::instrument(skip(self, data))]
-    pub fn process(&self, data: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
+    pub fn process(&self, data: &[u8], ext: &str) -> Result<Vec<u8>> {
         if data.starts_with(&[0x00, 0x00, 0x01, 0x00]) {
-            return Ok((data.to_vec(), data.to_vec()));
+            return Ok(data.to_vec());
         }
         let img = image::load_from_memory(data)?;
-        let compressed = self.compress(&img)?;
-        let thumbnail = self.generate_thumbnail(&img)?;
-        Ok((compressed, thumbnail))
+        self.compress_with_extension(&img, ext)
     }
 
     #[tracing::instrument(skip(self, data))]
@@ -97,6 +94,37 @@ impl ImageProcessor {
         let encoder = jpeg::JpegEncoder::new_with_quality(&mut buf, self.jpeg_quality);
         resized.write_with_encoder(encoder)?;
         Ok(buf)
+    }
+
+    fn compress_with_extension(&self, img: &DynamicImage, ext: &str) -> Result<Vec<u8>> {
+        let resized = Self::resize_if_needed(img, self.max_width, self.max_height);
+        let ext = ext.trim().trim_start_matches('.').to_ascii_lowercase();
+
+        match ext.as_str() {
+            "jpg" | "jpeg" => {
+                let mut buf = Vec::new();
+                let encoder = jpeg::JpegEncoder::new_with_quality(&mut buf, self.jpeg_quality);
+                resized.write_with_encoder(encoder)?;
+                Ok(buf)
+            }
+            "png" => {
+                let mut buf = Vec::new();
+                let encoder = png::PngEncoder::new(&mut buf);
+                resized.write_with_encoder(encoder)?;
+                Ok(buf)
+            }
+            "webp" => {
+                let mut cursor = std::io::Cursor::new(Vec::new());
+                resized.write_to(&mut cursor, ImageFormat::WebP)?;
+                Ok(cursor.into_inner())
+            }
+            "gif" => {
+                let mut cursor = std::io::Cursor::new(Vec::new());
+                resized.write_to(&mut cursor, ImageFormat::Gif)?;
+                Ok(cursor.into_inner())
+            }
+            _ => self.compress(&resized),
+        }
     }
 
     pub fn generate_thumbnail(&self, img: &DynamicImage) -> Result<Vec<u8>> {
@@ -309,9 +337,7 @@ impl ImageProcessor {
     }
 
     pub fn calculate_hash(data: &[u8]) -> String {
-        let mut hasher = Sha256::new();
-        hasher.update(data);
-        hex::encode(hasher.finalize())
+        blake3::hash(data).to_hex().to_string()
     }
 
     pub fn get_extension(filename: &str) -> String {

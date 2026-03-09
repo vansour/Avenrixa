@@ -7,6 +7,8 @@ use crate::domain::image::ImageDomainService;
 use crate::domain::image::repository::{PostgresCategoryRepository, PostgresImageRepository};
 use crate::file_queue::FileSaveQueue;
 use crate::image_processor::ImageProcessor;
+use crate::runtime_settings::RuntimeSettingsService;
+use crate::storage_backend::StorageManager;
 use redis::aio::ConnectionManager;
 use sqlx::{Executor, PgPool, Row};
 use std::sync::Arc;
@@ -24,6 +26,8 @@ pub struct AppState {
     pub image_domain_service:
         Option<Arc<ImageDomainService<PostgresImageRepository, PostgresCategoryRepository>>>,
     pub admin_domain_service: Option<Arc<AdminDomainService>>,
+    pub runtime_settings: Arc<RuntimeSettingsService>,
+    pub storage_manager: Arc<StorageManager>,
     pub image_processor: ImageProcessor,
     pub file_save_queue: Arc<FileSaveQueue>,
     pub started_at: Instant,
@@ -132,14 +136,25 @@ CREATE INDEX IF NOT EXISTS idx_images_user_status_partial ON images(user_id, sta
 CREATE INDEX IF NOT EXISTS idx_images_user_category_status_partial ON images(user_id, category_id, status) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_images_user_status_created_partial ON images(user_id, status, created_at DESC) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_images_user_status_expires_partial ON images(user_id, status, expires_at) WHERE deleted_at IS NULL AND status = 'active';
+CREATE INDEX IF NOT EXISTS idx_images_user_deleted_at_partial ON images(user_id, deleted_at DESC) WHERE deleted_at IS NOT NULL;
 
 -- 复合索引引用列
 CREATE INDEX IF NOT EXISTS idx_images_user_category_deleted ON images(user_id, category_id, deleted_at);
 "#;
 
+/// 唯一文件名约束（用于避免重复复制导致的物理文件覆盖）
+const UNIQUE_FILENAME_INDEX_SQL: &str =
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_images_filename ON images(filename);";
+
 /// 初始化数据库架构
 pub async fn init_schema(pool: &PgPool) -> Result<(), sqlx::Error> {
     pool.execute(SCHEMA_SQL).await?;
+    if let Err(e) = sqlx::query(UNIQUE_FILENAME_INDEX_SQL).execute(pool).await {
+        warn!(
+            "Failed to create unique filename index (existing duplicate rows may exist): {}",
+            e
+        );
+    }
     info!("Database schema initialized successfully");
     Ok(())
 }

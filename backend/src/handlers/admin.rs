@@ -179,6 +179,29 @@ pub async fn get_settings_admin(
     Ok(Json(settings))
 }
 
+/// 管理员设置（结构化）
+pub async fn get_admin_settings_config(
+    State(state): State<AppState>,
+    _admin_user: AdminUser,
+) -> Result<Json<AdminSettingsConfig>, AppError> {
+    let config = state.runtime_settings.get_admin_settings_config().await?;
+    Ok(Json(config))
+}
+
+/// 更新管理员设置（结构化）
+pub async fn update_admin_settings_config(
+    State(state): State<AppState>,
+    _admin_user: AdminUser,
+    Json(req): Json<UpdateAdminSettingsConfigRequest>,
+) -> Result<Json<AdminSettingsConfig>, AppError> {
+    let updated = state
+        .runtime_settings
+        .update_admin_settings_config(req)
+        .await?;
+    state.runtime_settings.invalidate_cache().await;
+    Ok(Json(updated))
+}
+
 pub async fn update_setting(
     State(state): State<AppState>,
     _admin_user: AdminUser,

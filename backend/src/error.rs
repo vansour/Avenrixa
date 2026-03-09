@@ -4,6 +4,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use thiserror::Error;
+use tracing::error;
 
 /// 统一的应用错误类型
 #[derive(Debug, Error)]
@@ -157,6 +158,8 @@ impl AppError {
 /// 为 AppError 实现 IntoResponse
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
+        error!("request failed: {:?}", self);
+
         let status = match &self {
             AppError::Unauthorized => StatusCode::UNAUTHORIZED,
             AppError::InvalidToken => StatusCode::UNAUTHORIZED,

@@ -65,6 +65,13 @@ pub trait ImageRepository: Send + Sync {
         image_ids: &[Uuid],
     ) -> Result<Vec<Image>, sqlx::Error>;
 
+    /// 根据用户和 hash 列表批量查询图片
+    async fn find_images_by_user_and_hashes(
+        &self,
+        user_id: Uuid,
+        image_keys: &[String],
+    ) -> Result<Vec<Image>, sqlx::Error>;
+
     /// 批量永久删除用户图片
     async fn hard_delete_images_by_user(
         &self,
@@ -84,6 +91,14 @@ pub trait ImageRepository: Send + Sync {
 
     /// 查找已删除的图片
     async fn find_deleted_images_by_user(&self, user_id: Uuid) -> Result<Vec<Image>, sqlx::Error>;
+
+    /// 分页查找已删除图片
+    async fn find_deleted_images_by_user_paginated(
+        &self,
+        user_id: Uuid,
+        limit: i32,
+        offset: i32,
+    ) -> Result<Vec<Image>, sqlx::Error>;
 
     /// Cursor-based 分页查找图片
     async fn find_images_by_user_cursor(
@@ -206,7 +221,10 @@ impl ImageRepository for PostgresImageRepository {
         builder.push(" OFFSET ");
         builder.push_bind(offset);
 
-        builder.build_query_as::<Image>().fetch_all(&self.pool).await
+        builder
+            .build_query_as::<Image>()
+            .fetch_all(&self.pool)
+            .await
     }
 
     async fn count_images_by_user(&self, user_id: Uuid) -> Result<i64, sqlx::Error> {
@@ -223,7 +241,7 @@ impl ImageRepository for PostgresImageRepository {
     async fn create_image(&self, image: &Image) -> Result<(), sqlx::Error> {
         sqlx::query(
             "INSERT INTO images (id, user_id, category_id, filename, thumbnail, original_filename, size, hash, format, views, status, expires_at, deleted_at, created_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)"
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)"
         )
         .bind(image.id)
         .bind(image.user_id)
@@ -349,6 +367,22 @@ impl ImageRepository for PostgresImageRepository {
         .await
     }
 
+    async fn find_images_by_user_and_hashes(
+        &self,
+        user_id: Uuid,
+        image_keys: &[String],
+    ) -> Result<Vec<Image>, sqlx::Error> {
+        sqlx::query_as::<_, Image>(
+            "SELECT id, user_id, category_id, filename, thumbnail, original_filename, size, hash, format, views, status, expires_at, deleted_at, created_at
+             FROM images
+             WHERE user_id = $1 AND hash = ANY($2)",
+        )
+        .bind(user_id)
+        .bind(image_keys)
+        .fetch_all(&self.pool)
+        .await
+    }
+
     async fn hard_delete_images_by_user(
         &self,
         user_id: Uuid,
@@ -393,6 +427,27 @@ impl ImageRepository for PostgresImageRepository {
             "SELECT * FROM images WHERE user_id = $1 AND deleted_at IS NOT NULL ORDER BY deleted_at DESC"
         )
         .bind(user_id)
+        .fetch_all(&self.pool)
+        .await
+    }
+
+    async fn find_deleted_images_by_user_paginated(
+        &self,
+        user_id: Uuid,
+        limit: i32,
+        offset: i32,
+    ) -> Result<Vec<Image>, sqlx::Error> {
+        sqlx::query_as::<_, Image>(
+            "SELECT id, user_id, category_id, filename, thumbnail, original_filename, size, hash, format, views, status, expires_at, deleted_at, created_at,
+                    COUNT(*) OVER() AS total_count
+             FROM images
+             WHERE user_id = $1 AND deleted_at IS NOT NULL
+             ORDER BY deleted_at DESC
+             LIMIT $2 OFFSET $3",
+        )
+        .bind(user_id)
+        .bind(limit)
+        .bind(offset)
         .fetch_all(&self.pool)
         .await
     }

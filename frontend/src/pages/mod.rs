@@ -1,4 +1,10 @@
+pub mod api_page;
 pub mod image_list_page;
 pub mod login_page;
+pub mod settings_page;
+pub mod upload_page;
+pub use api_page::ApiPage;
 pub use image_list_page::ImageListPage;
 pub use login_page::LoginPage;
+pub use settings_page::SettingsPage;
+pub use upload_page::UploadPage;

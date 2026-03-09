@@ -3,6 +3,7 @@ use tokio::fs;
 use tracing::{error, info, warn};
 
 /// 异步写入文件，带重试机制（指数退避）
+#[allow(dead_code)]
 pub async fn write_file_with_retry(
     path: &str,
     data: &[u8],

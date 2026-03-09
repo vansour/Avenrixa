@@ -59,10 +59,11 @@ pub fn LoginPage() -> Element {
         div { class: "login-page",
             div { class: "login-container",
                 div { class: "login-card",
-                    h1 { class: "login-title", "登录" }
+                    h1 { class: "login-title", "登录控制台" }
+                    p { class: "login-subtitle", "管理图片资产与访问权限" }
 
                     if !error_message().is_empty() {
-                        div { class: "error-message",
+                        div { class: "error-banner",
                             "{error_message()}"
                         }
                     }
@@ -101,7 +102,7 @@ pub fn LoginPage() -> Element {
                     }
 
                     div { class: "login-footer",
-                        p { "默认账户: username / password（建议通过环境变量覆盖）" }
+                        p { class: "login-tip", "默认账户: username / password（建议通过环境变量覆盖）" }
                     }
                 }
             }

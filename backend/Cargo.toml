@@ -18,7 +18,7 @@ uuid = { workspace = true }
 chrono = { workspace = true }
 mime_guess = "2"
 tower-http = { version = "0.6", features = ["fs", "trace", "limit", "set-header", "request-id"] }
-sha2 = "0.10"
+blake3 = "1.8"
 hex = "0.4"
 anyhow = { workspace = true }
 tracing = "0.1"
@@ -34,6 +34,9 @@ rand = "0.10"
 unicode-width = "0.2"
 image = "0.25"
 imageproc = "0.26"
+aws-config = { version = "1", features = ["behavior-version-latest"] }
+aws-sdk-s3 = "1"
+aws-credential-types = "1"
 thiserror = { workspace = true }
 validator = { version = "0.20", features = ["derive"] }
 once_cell = "1.21"

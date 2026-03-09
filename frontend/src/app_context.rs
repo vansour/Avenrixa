@@ -1,4 +1,4 @@
-use crate::services::{ApiClient, AuthService, ImageService};
+use crate::services::{ApiClient, AuthService, ImageService, SettingsService};
 use crate::store::auth::AuthStore;
 use crate::store::images::ImageStore;
 use crate::store::toast_store::ToastStore;
@@ -12,6 +12,7 @@ pub struct AppContext {
     pub api_client: ApiClient,
     pub auth_service: AuthService,
     pub image_service: ImageService,
+    pub settings_service: SettingsService,
     pub toast_store: ToastStore,
 }
 
@@ -26,6 +27,7 @@ impl AppContext {
         // 直接创建服务（使用 clone 避免移动）
         let auth_service = AuthService::new(api_client.clone(), auth_store.clone());
         let image_service = ImageService::new(api_client.clone(), image_store.clone());
+        let settings_service = SettingsService::new(api_client.clone());
 
         Self {
             auth_store,
@@ -33,6 +35,7 @@ impl AppContext {
             api_client,
             auth_service,
             image_service,
+            settings_service,
             toast_store,
         }
     }
@@ -60,6 +63,11 @@ pub fn use_auth_service() -> AuthService {
 
 /// AppContext Hook - 获取 ImageService
 pub fn use_image_service() -> ImageService {
+    use_context()
+}
+
+/// AppContext Hook - 获取 SettingsService
+pub fn use_settings_service() -> SettingsService {
     use_context()
 }
 

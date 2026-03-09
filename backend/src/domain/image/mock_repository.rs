@@ -99,7 +99,10 @@ impl ImageRepository for MockImageRepository {
         let mut images = self.images.lock().unwrap();
         let mut affected = 0_u64;
         for image in images.iter_mut() {
-            if image.user_id == user_id && image_ids.contains(&image.id) && image.deleted_at.is_none() {
+            if image.user_id == user_id
+                && image_ids.contains(&image.id)
+                && image.deleted_at.is_none()
+            {
                 image.deleted_at = Some(chrono::Utc::now());
                 affected += 1;
             }
@@ -135,6 +138,19 @@ impl ImageRepository for MockImageRepository {
         Ok(images
             .iter()
             .filter(|i| i.user_id == user_id && image_ids.contains(&i.id))
+            .cloned()
+            .collect())
+    }
+
+    async fn find_images_by_user_and_hashes(
+        &self,
+        user_id: Uuid,
+        image_keys: &[String],
+    ) -> Result<Vec<Image>, sqlx::Error> {
+        let images = self.images.lock().unwrap();
+        Ok(images
+            .iter()
+            .filter(|i| i.user_id == user_id && image_keys.contains(&i.hash))
             .cloned()
             .collect())
     }
@@ -177,6 +193,33 @@ impl ImageRepository for MockImageRepository {
             .filter(|i| i.user_id == user_id && i.deleted_at.is_some())
             .cloned()
             .collect())
+    }
+
+    async fn find_deleted_images_by_user_paginated(
+        &self,
+        user_id: Uuid,
+        limit: i32,
+        offset: i32,
+    ) -> Result<Vec<Image>, sqlx::Error> {
+        let images = self.images.lock().unwrap();
+        let mut filtered: Vec<Image> = images
+            .iter()
+            .filter(|i| i.user_id == user_id && i.deleted_at.is_some())
+            .cloned()
+            .collect();
+
+        filtered.sort_by(|a, b| b.deleted_at.cmp(&a.deleted_at));
+        let total = filtered.len() as i64;
+        let start = offset.max(0) as usize;
+        let end = std::cmp::min(start + limit.max(0) as usize, filtered.len());
+        if start >= filtered.len() {
+            return Ok(Vec::new());
+        }
+        let mut page = filtered[start..end].to_vec();
+        for image in &mut page {
+            image.total_count = Some(total);
+        }
+        Ok(page)
     }
 
     async fn find_images_by_user_cursor(

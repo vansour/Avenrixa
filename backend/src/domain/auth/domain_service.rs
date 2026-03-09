@@ -157,6 +157,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_login_wrong_password() {
+        unsafe {
+            std::env::set_var("JWT_SECRET", "test-secret-key-at-least-32-characters-long");
+        }
         let repo = MockAuthRepository::new();
         let config = Config::default();
         let auth_service = AuthService::new(&config).unwrap();

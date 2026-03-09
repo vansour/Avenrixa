@@ -1,6 +1,7 @@
 use crate::types::errors::{AppError, Result};
-use reqwest::{Client, Response};
 use reqwest::header;
+use reqwest::multipart::{Form, Part};
+use reqwest::{Client, Response};
 
 /// JSON 序列化帮助函数
 fn serialize_json<T: serde::Serialize>(value: &T) -> Result<String> {
@@ -42,9 +43,7 @@ pub struct ApiClient {
 
 impl ApiClient {
     pub fn new(base_url: String) -> Self {
-        let client = Client::builder()
-            .build()
-            .unwrap_or_else(|_| Client::new());
+        let client = Client::builder().build().unwrap_or_else(|_| Client::new());
 
         Self { client, base_url }
     }
@@ -230,6 +229,38 @@ impl ApiClient {
         let json_body = serialize_json(body)?;
         let response_text = self.post(path, json_body).await?;
         deserialize_json(&response_text)
+    }
+
+    /// 发送 multipart/form-data 上传请求并反序列化响应
+    pub async fn post_multipart_file<R: for<'de> serde::Deserialize<'de>>(
+        &self,
+        path: &str,
+        field_name: &str,
+        filename: String,
+        content_type: Option<String>,
+        data: Vec<u8>,
+    ) -> Result<R> {
+        let url = self.url(path);
+
+        let mut part = Part::bytes(data).file_name(filename);
+        if let Some(content_type) = content_type {
+            if !content_type.trim().is_empty() {
+                part = part.mime_str(&content_type).map_err(|e| {
+                    AppError::Request(format!("无效文件 MIME 类型 '{}': {}", content_type, e))
+                })?;
+            }
+        }
+
+        let form = Form::new().part(field_name.to_string(), part);
+        let response = self
+            .with_credentials(self.client.post(url))
+            .multipart(form)
+            .send()
+            .await?;
+        let response = self.handle_response(response).await?;
+        let text = response.text().await.map_err(AppError::from_reqwest)?;
+
+        deserialize_json(&text)
     }
 
     /// 发送 PUT 请求（带 JSON body）

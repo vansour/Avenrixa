@@ -10,7 +10,7 @@ pub fn ImageCard(
     #[props(default)] on_download: EventHandler<()>,
     #[props(default)] on_delete: EventHandler<()>,
 ) -> Element {
-    let handle_click = move |_| {
+    let handle_select = move |_| {
         on_select(());
     };
 
@@ -23,42 +23,47 @@ pub fn ImageCard(
     };
 
     // 预计算值以避免在 rsx! 中调用函数
-    let thumbnail_url = match image.thumbnail_url() {
-        Some(url) => url,
-        None => image.url(),
-    };
-    let original_filename = image.original_filename.as_ref().unwrap_or(&image.filename);
+    let thumbnail_url = image.thumbnail_url();
+    let display_name = image.display_name();
     let size_formatted = image.size_formatted();
+    let created_at_label = image.created_at_label();
 
     rsx! {
-        div { class: format!("image-card {}", if selected { "selected" } else { "" }),
+        article { class: format!("image-card {}", if selected { "selected" } else { "" }),
             div { class: "image-thumbnail",
                 img {
                     src: "{thumbnail_url}",
                     alt: "{image.filename}",
                     loading: "lazy"
                 }
+                label { class: "image-select",
+                    input {
+                        r#type: "checkbox",
+                        checked: selected,
+                        onclick: handle_select,
+                        "aria-label": "选择图片 {display_name}"
+                    }
+                    span { class: "image-select-indicator" }
+                }
+                div { class: "image-chip",
+                    "{image.format.to_uppercase()}"
+                }
             }
             div { class: "image-info",
-                div { class: "image-name", "{original_filename}" }
+                div { class: "image-name", "{display_name}" }
                 div { class: "image-meta",
                     span { class: "image-size", "{size_formatted}" }
-                    span { class: "image-date", "{image.created_at}" }
+                    span { class: "image-date", "{created_at_label}" }
                 }
             }
             div { class: "image-actions",
                 button {
-                    class: "btn btn-icon",
-                    onclick: handle_click,
-                    "选择"
-                }
-                button {
-                    class: "btn btn-icon",
+                    class: "btn btn-card",
                     onclick: handle_download,
                     "下载"
                 }
                 button {
-                    class: "btn btn-icon btn-danger",
+                    class: "btn btn-card btn-card-danger",
                     onclick: handle_delete,
                     "删除"
                 }

@@ -14,6 +14,7 @@ use crate::models::{
     AdminUserSummary, AuditLog, AuditLogResponse, ComponentStatus, HealthMetrics, HealthStatus,
     Setting, SystemStats,
 };
+use crate::storage_backend::StorageManager;
 
 use redis::AsyncCommands;
 use redis::aio::ConnectionManager;
@@ -24,14 +25,21 @@ pub struct AdminDomainService {
     pool: PgPool,
     redis: Option<ConnectionManager>,
     config: Config,
+    storage_manager: std::sync::Arc<StorageManager>,
 }
 
 impl AdminDomainService {
-    pub fn new(pool: PgPool, redis: Option<ConnectionManager>, config: Config) -> Self {
+    pub fn new(
+        pool: PgPool,
+        redis: Option<ConnectionManager>,
+        config: Config,
+        storage_manager: std::sync::Arc<StorageManager>,
+    ) -> Self {
         Self {
             pool,
             redis,
             config,
+            storage_manager,
         }
     }
 
@@ -73,8 +81,7 @@ impl AdminDomainService {
         };
 
         // 检查存储
-        let storage_path = &self.config.storage.path;
-        let storage_status = match tokio::fs::metadata(storage_path).await {
+        let storage_status = match self.storage_manager.check_health().await {
             Ok(_) => ComponentStatus::healthy(),
             Err(e) => {
                 overall_status = "unhealthy".to_string();
@@ -260,13 +267,7 @@ impl AdminDomainService {
 
         let mut removed = vec![];
         for (id, filename) in &result {
-            let storage_path = format!("{}/{}", self.config.storage.path, filename);
-            let thumbnail_path = format!("{}/{}.jpg", self.config.storage.thumbnail_path, id);
-
-            let file_removed = tokio::fs::remove_file(&storage_path).await.is_ok();
-            let thumb_removed = tokio::fs::remove_file(&thumbnail_path).await.is_ok();
-
-            if file_removed || thumb_removed {
+            if self.storage_manager.delete(filename).await.is_ok() {
                 let _ = sqlx::query("DELETE FROM images WHERE id = $1")
                     .bind(id)
                     .execute(&self.pool)

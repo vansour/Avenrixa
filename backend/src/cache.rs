@@ -65,6 +65,20 @@ impl Cache {
         Ok(())
     }
 
+    /// 删除单个缓存键
+    pub async fn del<C>(conn: &mut C, key: impl AsRef<str>) -> Result<(), anyhow::Error>
+    where
+        C: redis::aio::ConnectionLike + Send + Sync,
+    {
+        let cache = Self::new("");
+        let key = cache.key(key);
+        let result: Result<(), _> = conn.del(&key).await;
+        if let Err(e) = result {
+            warn!("Redis del error (key: {}): {}", key, e);
+        }
+        Ok(())
+    }
+
     /// 删除匹配前缀的所有缓存（使用 SCAN 替代 KEYS 避免阻塞）
     #[allow(dead_code)]
     pub async fn del_pattern<C>(conn: &mut C, pattern: impl AsRef<str>) -> Result<(), anyhow::Error>
@@ -121,6 +135,22 @@ impl HashCache {
             "global" => format!("hash:info:global:{}", hash),
             _ => format!("hash:info:user:{}:{}", hash, user_id),
         }
+    }
+
+    pub fn user_existing_info_invalidate(user_id: uuid::Uuid) -> String {
+        format!("hash:info:user:*:{}", user_id)
+    }
+
+    pub fn user_hash_invalidate() -> String {
+        "hash:user:*".to_string()
+    }
+
+    pub fn global_existing_info_invalidate() -> String {
+        "hash:info:global:*".to_string()
+    }
+
+    pub fn global_hash_invalidate() -> String {
+        "hash:global:*".to_string()
     }
 }
 
@@ -244,5 +274,16 @@ mod tests {
         assert_ne!(key1, key2); // 排序方向不同，键应不同
         assert_ne!(key1, key3); // 排序字段不同，键应不同
         assert_ne!(key2, key3);
+    }
+
+    #[test]
+    fn test_hash_cache_user_existing_info_invalidate_pattern() {
+        let user_id = Uuid::new_v4();
+        let key = HashCache::existing_info("abc123", "user", user_id);
+        let pattern = HashCache::user_existing_info_invalidate(user_id);
+
+        assert_eq!(pattern, format!("hash:info:user:*:{}", user_id));
+        assert!(key.starts_with("hash:info:user:"));
+        assert!(key.ends_with(&format!(":{}", user_id)));
     }
 }
