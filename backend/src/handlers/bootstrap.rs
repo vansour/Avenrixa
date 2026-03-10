@@ -1,0 +1,92 @@
+use axum::{Json, extract::State};
+
+use crate::bootstrap::BootstrapAppState;
+use crate::db::AppState;
+use crate::error::AppError;
+use crate::models::{
+    BootstrapStatusResponse, ComponentStatus, HealthStatus, UpdateBootstrapDatabaseConfigRequest,
+    UpdateBootstrapDatabaseConfigResponse,
+};
+
+pub async fn get_bootstrap_status(
+    State(state): State<BootstrapAppState>,
+) -> Result<Json<BootstrapStatusResponse>, AppError> {
+    let file = state
+        .store
+        .load()
+        .await
+        .map_err(|error| AppError::Internal(error.into()))?;
+    Ok(Json(state.store.bootstrap_status(
+        &state.config,
+        file.as_ref(),
+        state.runtime_error.clone(),
+    )))
+}
+
+pub async fn update_bootstrap_database_config(
+    State(state): State<BootstrapAppState>,
+    Json(req): Json<UpdateBootstrapDatabaseConfigRequest>,
+) -> Result<Json<UpdateBootstrapDatabaseConfigResponse>, AppError> {
+    let response = state
+        .store
+        .save_database_config(&req, state.config.database.max_connections)
+        .await
+        .map_err(|error| AppError::ValidationError(error.to_string()))?;
+    Ok(Json(response))
+}
+
+pub async fn bootstrap_health_check(
+    State(state): State<BootstrapAppState>,
+) -> Result<Json<HealthStatus>, AppError> {
+    let file = state
+        .store
+        .load()
+        .await
+        .map_err(|error| AppError::Internal(error.into()))?;
+    let configured_database_kind = file
+        .as_ref()
+        .map(|file| file.database_kind.as_str())
+        .unwrap_or_else(|| state.config.database.kind.as_str());
+    let database_message = match (&file, &state.runtime_error) {
+        (_, Some(error)) => Some(format!("数据库连接失败: {}", error)),
+        (Some(_), None) if configured_database_kind == "sqlite" => {
+            Some("SQLite 配置已保存，重启服务后会自动执行迁移并进入安装向导".to_string())
+        }
+        (Some(_), None) => Some("数据库配置已保存，重启服务后继续安装".to_string()),
+        (None, None) => Some("尚未配置数据库".to_string()),
+    };
+
+    Ok(Json(HealthStatus {
+        status: "bootstrapping".to_string(),
+        timestamp: chrono::Utc::now(),
+        database: ComponentStatus {
+            status: "unhealthy".to_string(),
+            message: database_message,
+        },
+        redis: ComponentStatus {
+            status: "unhealthy".to_string(),
+            message: Some("Bootstrap 模式未初始化 Redis".to_string()),
+        },
+        storage: ComponentStatus::healthy(),
+        version: None,
+        uptime_seconds: Some(state.started_at.elapsed().as_secs()),
+        metrics: None,
+    }))
+}
+
+pub async fn get_runtime_bootstrap_status(
+    State(state): State<AppState>,
+) -> Result<Json<BootstrapStatusResponse>, AppError> {
+    let store = crate::bootstrap::BootstrapConfigStore::from_env();
+    Ok(Json(store.runtime_status(&state.config)))
+}
+
+pub async fn reject_runtime_database_config_update(
+    State(_state): State<AppState>,
+    Json(_req): Json<UpdateBootstrapDatabaseConfigRequest>,
+) -> Result<Json<UpdateBootstrapDatabaseConfigResponse>, AppError> {
+    Err(AppError::ValidationError(
+        "数据库运行时已经初始化；如果需要修改数据库配置，请更新 bootstrap 配置并重启服务"
+            .to_string(),
+    ))
+}

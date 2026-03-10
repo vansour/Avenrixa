@@ -61,7 +61,7 @@ pub async fn upload_image(
             let image = service
                 .upload_image_from_file(
                     auth_user.id,
-                    &auth_user.username,
+                    &auth_user.email,
                     filename,
                     temp_file_path,
                     content_type,

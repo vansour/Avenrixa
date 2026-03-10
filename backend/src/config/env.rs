@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
 
-use super::types::{Config, default_max_connections};
+use super::types::{Config, DatabaseKind, default_max_connections};
 
 impl Config {
     pub fn from_env() -> Self {
@@ -18,7 +18,15 @@ impl Config {
         if let Ok(rate_limit_burst) = std::env::var("SERVER_RATE_LIMIT_BURST") {
             config.server.rate_limit_burst = rate_limit_burst.parse().unwrap_or(30);
         }
+        if let Ok(database_kind) = std::env::var("DATABASE_KIND")
+            && let Ok(kind) = DatabaseKind::parse(&database_kind)
+        {
+            config.database.kind = kind;
+        }
         if let Ok(db_url) = std::env::var("DATABASE_URL") {
+            if let Some(kind) = DatabaseKind::infer_from_url(&db_url) {
+                config.database.kind = kind;
+            }
             config.database.url = db_url;
         }
         if let Ok(max_connections) = std::env::var("DATABASE_MAX_CONNECTIONS") {

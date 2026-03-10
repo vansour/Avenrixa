@@ -1,179 +1,296 @@
 use crate::auth::AuthService;
-use sqlx::{PgPool, Row};
-use tracing::{error, info};
+use crate::models::User;
+use chrono::Utc;
+use lettre::Address;
+use sqlx::{Postgres, Sqlite, Transaction};
 use uuid::Uuid;
 
+use super::DatabasePool;
+
 pub const ADMIN_USER_ID: Uuid = uuid::uuid!("00000000-0000-0000-0000-000000000001");
-pub const DEFAULT_ADMIN_USERNAME: &str = "admin";
+pub const INSTALL_STATE_SETTING_KEY: &str = "system_installed";
+pub const SITE_FAVICON_DATA_URL_SETTING_KEY: &str = "site_favicon_data_url";
+pub const INSTALLATION_LOCK_KEY: i64 = 2_024_031_001;
 const MIN_ADMIN_PASSWORD_LENGTH: usize = 12;
 
-pub struct AdminAccountInit {
-    pub username: String,
-    pub created: bool,
+pub struct AdminBootstrapConfig {
+    pub email: String,
+    pub password: String,
 }
 
-struct AdminBootstrapConfig {
-    username: String,
-    email: Option<String>,
+pub fn validate_admin_bootstrap_config(
+    email: String,
     password: String,
-}
-
-fn validate_admin_bootstrap_config(
-    username: Option<String>,
-    email: Option<String>,
-    password: Option<String>,
 ) -> Result<AdminBootstrapConfig, anyhow::Error> {
-    let username = username
-        .unwrap_or_else(|| DEFAULT_ADMIN_USERNAME.to_string())
-        .trim()
-        .to_string();
-    if username.is_empty() {
-        return Err(anyhow::anyhow!(
-            "ADMIN_USERNAME cannot be empty when bootstrapping the admin account"
-        ));
+    let email = email.trim().to_string();
+    if email.is_empty() {
+        return Err(anyhow::anyhow!("管理员邮箱不能为空"));
     }
+    email
+        .parse::<Address>()
+        .map_err(|_| anyhow::anyhow!("管理员邮箱格式无效"))?;
 
-    let email = email
-        .map(|email| email.trim().to_string())
-        .filter(|email| !email.is_empty());
-
-    let password = password
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "ADMIN_PASSWORD must be set before the first startup to bootstrap the admin account"
-            )
-        })?
-        .trim()
-        .to_string();
+    let password = password.trim().to_string();
     if password.is_empty() {
-        return Err(anyhow::anyhow!(
-            "ADMIN_PASSWORD cannot be empty when bootstrapping the admin account"
-        ));
+        return Err(anyhow::anyhow!("管理员密码不能为空"));
     }
     if password.len() < MIN_ADMIN_PASSWORD_LENGTH {
         return Err(anyhow::anyhow!(
-            "ADMIN_PASSWORD must be at least {} characters long",
+            "管理员密码至少需要 {} 个字符",
             MIN_ADMIN_PASSWORD_LENGTH
         ));
     }
     if password.eq_ignore_ascii_case("password") {
-        return Err(anyhow::anyhow!(
-            "Refusing to bootstrap admin account with a default or weak password"
-        ));
+        return Err(anyhow::anyhow!("管理员密码过弱，请使用更强的密码"));
     }
 
-    Ok(AdminBootstrapConfig {
-        username,
-        email,
-        password,
+    Ok(AdminBootstrapConfig { email, password })
+}
+
+pub async fn acquire_installation_lock(
+    tx: &mut Transaction<'_, Postgres>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("SELECT pg_advisory_xact_lock($1)")
+        .bind(INSTALLATION_LOCK_KEY)
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}
+
+pub async fn is_app_installed(pool: &DatabasePool) -> Result<bool, sqlx::Error> {
+    let value = get_setting_value(pool, INSTALL_STATE_SETTING_KEY).await?;
+    Ok(matches!(
+        value.as_deref().map(str::trim),
+        Some("true" | "TRUE" | "True" | "1")
+    ))
+}
+
+pub async fn is_app_installed_tx(tx: &mut Transaction<'_, Postgres>) -> Result<bool, sqlx::Error> {
+    let value = sqlx::query_scalar::<_, String>("SELECT value FROM settings WHERE key = $1")
+        .bind(INSTALL_STATE_SETTING_KEY)
+        .fetch_optional(&mut **tx)
+        .await?;
+    Ok(matches!(
+        value.as_deref().map(str::trim),
+        Some("true" | "TRUE" | "True" | "1")
+    ))
+}
+
+pub async fn has_admin_account(pool: &DatabasePool) -> Result<bool, sqlx::Error> {
+    let exists = match pool {
+        DatabasePool::Postgres(pool) => {
+            sqlx::query_scalar::<_, i32>(
+                "SELECT 1 FROM users WHERE id = $1 AND role = 'admin' LIMIT 1",
+            )
+            .bind(ADMIN_USER_ID)
+            .fetch_optional(pool)
+            .await?
+        }
+        DatabasePool::Sqlite(pool) => {
+            sqlx::query_scalar::<_, i32>(
+                "SELECT 1 FROM users WHERE id = ?1 AND role = 'admin' LIMIT 1",
+            )
+            .bind(ADMIN_USER_ID)
+            .fetch_optional(pool)
+            .await?
+        }
+    };
+    Ok(exists.is_some())
+}
+
+pub async fn has_admin_account_tx(tx: &mut Transaction<'_, Postgres>) -> Result<bool, sqlx::Error> {
+    let exists = sqlx::query_scalar::<_, i32>(
+        "SELECT 1 FROM users WHERE id = $1 AND role = 'admin' LIMIT 1",
+    )
+    .bind(ADMIN_USER_ID)
+    .fetch_optional(&mut **tx)
+    .await?;
+    Ok(exists.is_some())
+}
+
+pub async fn has_admin_account_sqlite_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+) -> Result<bool, sqlx::Error> {
+    let exists = sqlx::query_scalar::<_, i32>(
+        "SELECT 1 FROM users WHERE id = ?1 AND role = 'admin' LIMIT 1",
+    )
+    .bind(ADMIN_USER_ID)
+    .fetch_optional(&mut **tx)
+    .await?;
+    Ok(exists.is_some())
+}
+
+pub async fn create_admin_account_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    email: &str,
+    password: &str,
+) -> Result<User, anyhow::Error> {
+    let password_hash = AuthService::hash_password(password)?;
+    let created_at = Utc::now();
+
+    let user = sqlx::query_as::<_, User>(
+        "INSERT INTO users (id, email, email_verified_at, password_hash, role, created_at)
+         VALUES ($1, $2, NOW(), $3, 'admin', $4)
+         RETURNING id, email, email_verified_at, password_hash, role, created_at",
+    )
+    .bind(ADMIN_USER_ID)
+    .bind(email)
+    .bind(&password_hash)
+    .bind(created_at)
+    .fetch_one(&mut **tx)
+    .await?;
+
+    Ok(user)
+}
+
+pub async fn create_admin_account_sqlite_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    email: &str,
+    password: &str,
+) -> Result<User, anyhow::Error> {
+    let password_hash = AuthService::hash_password(password)?;
+    let created_at = Utc::now();
+    let verified_at = Utc::now();
+
+    sqlx::query(
+        "INSERT INTO users (id, email, email_verified_at, password_hash, role, created_at)
+         VALUES (?1, ?2, ?3, ?4, 'admin', ?5)",
+    )
+    .bind(ADMIN_USER_ID)
+    .bind(email)
+    .bind(verified_at)
+    .bind(&password_hash)
+    .bind(created_at)
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(User {
+        id: ADMIN_USER_ID,
+        email: email.to_string(),
+        email_verified_at: Some(verified_at),
+        password_hash,
+        role: "admin".to_string(),
+        created_at,
     })
 }
 
-fn resolve_admin_bootstrap_config() -> Result<AdminBootstrapConfig, anyhow::Error> {
-    validate_admin_bootstrap_config(
-        std::env::var("ADMIN_USERNAME").ok(),
-        std::env::var("ADMIN_EMAIL").ok(),
-        std::env::var("ADMIN_PASSWORD").ok(),
-    )
+pub async fn mark_app_installed_tx(tx: &mut Transaction<'_, Postgres>) -> Result<(), sqlx::Error> {
+    upsert_setting_tx(tx, INSTALL_STATE_SETTING_KEY, "true").await
 }
 
-pub async fn create_admin_account(pool: &PgPool) -> Result<AdminAccountInit, anyhow::Error> {
-    let existing = sqlx::query("SELECT username FROM users WHERE id = $1")
-        .bind(ADMIN_USER_ID)
-        .fetch_optional(pool)
-        .await?;
+pub async fn mark_app_installed_sqlite_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+) -> Result<(), sqlx::Error> {
+    upsert_setting_sqlite_tx(tx, INSTALL_STATE_SETTING_KEY, "true").await
+}
 
-    if let Some(row) = existing {
-        let username: String = row.get("username");
-        if let Ok(email) = std::env::var("ADMIN_EMAIL") {
-            let trimmed = email.trim();
-            if !trimmed.is_empty() {
-                sqlx::query(
-                    "UPDATE users SET email = $1 WHERE id = $2 AND (email IS NULL OR email = '')",
-                )
-                .bind(trimmed)
-                .bind(ADMIN_USER_ID)
-                .execute(pool)
-                .await?;
-            }
-        }
-        info!("Using existing admin account: {}", username);
-        return Ok(AdminAccountInit {
-            username,
-            created: false,
-        });
-    }
-
-    let bootstrap = resolve_admin_bootstrap_config()?;
-    let password_hash = AuthService::hash_password(&bootstrap.password)?;
-
-    let result = sqlx::query(
-        "INSERT INTO users (id, username, email, password_hash, role, created_at)
-         VALUES ($1, $2, $3, $4, 'admin', NOW())
-         ON CONFLICT (id) DO NOTHING
-         RETURNING username",
-    )
-    .bind(ADMIN_USER_ID)
-    .bind(&bootstrap.username)
-    .bind(&bootstrap.email)
-    .bind(&password_hash)
-    .fetch_optional(pool)
-    .await;
-
-    match result {
-        Ok(Some(row)) => {
-            let username: String = row.get("username");
-            info!("Admin account created: {}", username);
-
-            Ok(AdminAccountInit {
-                username,
-                created: true,
-            })
-        }
-        Ok(None) => {
-            let existing = sqlx::query("SELECT username FROM users WHERE id = $1")
-                .bind(ADMIN_USER_ID)
+pub async fn get_setting_value(
+    pool: &DatabasePool,
+    key: &str,
+) -> Result<Option<String>, sqlx::Error> {
+    match pool {
+        DatabasePool::Postgres(pool) => {
+            sqlx::query_scalar::<_, String>("SELECT value FROM settings WHERE key = $1")
+                .bind(key)
                 .fetch_optional(pool)
-                .await?;
-
-            match existing {
-                Some(row) => {
-                    let username: String = row.get("username");
-                    info!("Using existing admin account: {}", username);
-                    Ok(AdminAccountInit {
-                        username,
-                        created: false,
-                    })
-                }
-                None => {
-                    error!("Admin account not found in database");
-                    Err(anyhow::anyhow!("Admin account not found"))
-                }
-            }
+                .await
         }
-        Err(error) => {
-            error!("Failed to create admin account: {}", error);
-            Err(anyhow::anyhow!("Failed to create admin account: {}", error))
+        DatabasePool::Sqlite(pool) => {
+            sqlx::query_scalar::<_, String>("SELECT value FROM settings WHERE key = ?1")
+                .bind(key)
+                .fetch_optional(pool)
+                .await
         }
     }
 }
 
+pub async fn upsert_setting_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    key: &str,
+    value: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO settings (key, value, updated_at)
+         VALUES ($1, $2, NOW())
+         ON CONFLICT (key)
+         DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()",
+    )
+    .bind(key)
+    .bind(value)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+pub async fn upsert_setting_sqlite_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    key: &str,
+    value: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO settings (key, value, updated_at)
+         VALUES (?1, ?2, STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))
+         ON CONFLICT (key)
+         DO UPDATE SET value = excluded.value,
+                       updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')",
+    )
+    .bind(key)
+    .bind(value)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+pub async fn delete_setting_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    key: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM settings WHERE key = $1")
+        .bind(key)
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}
+
+pub async fn delete_setting_sqlite_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    key: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM settings WHERE key = ?1")
+        .bind(key)
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}
+
+pub async fn is_app_installed_sqlite_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+) -> Result<bool, sqlx::Error> {
+    let value = sqlx::query_scalar::<_, String>("SELECT value FROM settings WHERE key = ?1")
+        .bind(INSTALL_STATE_SETTING_KEY)
+        .fetch_optional(&mut **tx)
+        .await?;
+    Ok(matches!(
+        value.as_deref().map(str::trim),
+        Some("true" | "TRUE" | "True" | "1")
+    ))
+}
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn validate_admin_bootstrap_requires_password() {
-        let result = validate_admin_bootstrap_config(Some("admin".to_string()), None, None);
+        let result =
+            validate_admin_bootstrap_config("admin@example.com".to_string(), String::new());
         assert!(result.is_err());
     }
 
     #[test]
     fn validate_admin_bootstrap_rejects_weak_password() {
         let result = validate_admin_bootstrap_config(
-            Some("admin".to_string()),
-            None,
-            Some("password".to_string()),
+            "admin@example.com".to_string(),
+            "password".to_string(),
         );
         assert!(result.is_err());
     }
@@ -181,14 +298,12 @@ mod tests {
     #[test]
     fn validate_admin_bootstrap_accepts_explicit_strong_password() {
         let result = validate_admin_bootstrap_config(
-            Some("admin".to_string()),
-            Some("admin@example.com".to_string()),
-            Some("change-this-admin-password".to_string()),
+            "admin@example.com".to_string(),
+            "change-this-admin-password".to_string(),
         )
         .expect("bootstrap config should be valid");
 
-        assert_eq!(result.username, "admin");
-        assert_eq!(result.email.as_deref(), Some("admin@example.com"));
+        assert_eq!(result.email, "admin@example.com");
         assert_eq!(result.password, "change-this-admin-password");
     }
 }

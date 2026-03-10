@@ -6,7 +6,7 @@ use uuid::Uuid;
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Claims {
     pub sub: Uuid,
-    pub username: String,
+    pub email: String,
     pub role: String,
     #[serde(default)]
     pub token_version: u64,

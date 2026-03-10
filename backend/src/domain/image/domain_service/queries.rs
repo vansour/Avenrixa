@@ -1,6 +1,6 @@
 use super::*;
 
-impl<I: ImageRepository, C: CategoryRepository> ImageDomainService<I, C> {
+impl<I: ImageRepository> ImageDomainService<I> {
     /// 获取图片列表
     #[tracing::instrument(skip(self))]
     pub async fn get_images(
@@ -8,13 +8,12 @@ impl<I: ImageRepository, C: CategoryRepository> ImageDomainService<I, C> {
         user_id: Uuid,
         page: i32,
         page_size: i32,
-        category_id: Option<Uuid>,
         tag: Option<&str>,
     ) -> Result<Paginated<Image>, AppError> {
         let offset = (page - 1) * page_size;
 
         // 尝试从缓存获取 (仅对无标签过滤的简单列表查询进行缓存)
-        let cache_key = ImageCache::list(user_id, page, page_size, category_id);
+        let cache_key = ImageCache::list(user_id, page, page_size);
         if tag.is_none()
             && let Some(manager) = self.redis.as_ref()
         {
@@ -28,7 +27,7 @@ impl<I: ImageRepository, C: CategoryRepository> ImageDomainService<I, C> {
 
         let images = self
             .image_repository
-            .find_images_by_user_paginated(user_id, page_size, offset, category_id, tag)
+            .find_images_by_user_paginated(user_id, page_size, offset, tag)
             .await?;
 
         // 提取总数并清理
@@ -101,13 +100,8 @@ impl<I: ImageRepository, C: CategoryRepository> ImageDomainService<I, C> {
         Ok(result)
     }
 
-    /// 创建图片记录
-    pub async fn create_image(&self, image: &Image) -> Result<(), AppError> {
-        self.image_repository.create_image(image).await?;
-        Ok(())
-    }
-
     /// 根据 ID 获取图片
+    #[cfg(test)]
     pub async fn get_image_by_id(&self, id: Uuid, user_id: Uuid) -> Result<Image, AppError> {
         let image = self
             .image_repository
@@ -152,10 +146,10 @@ impl<I: ImageRepository, C: CategoryRepository> ImageDomainService<I, C> {
         self.image_repository.update_image(&image).await?;
 
         // 记录审计日志 (改为异步执行，避免阻塞主流程)
-        let pool = self.pool.clone();
+        let database = self.database.clone();
         tokio::spawn(async move {
-            let _ = log_audit(
-                &pool,
+            log_audit_db(
+                &database,
                 Some(user_id),
                 "image.view",
                 "image",

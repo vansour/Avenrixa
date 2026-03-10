@@ -662,8 +662,23 @@ body {
     gap: 14px;
 }
 
+.install-page {
+    width: min(980px, 100%);
+    margin: 0 auto;
+}
+
 .settings-hero {
     padding: 18px 20px;
+}
+
+.settings-hero-rich {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background:
+        radial-gradient(520px 180px at 0% 0%, rgba(13, 110, 253, 0.16), transparent 72%),
+        radial-gradient(420px 160px at 100% 0%, rgba(14, 165, 163, 0.14), transparent 72%),
+        linear-gradient(160deg, rgba(255, 255, 255, 0.94) 0%, rgba(247, 251, 255, 0.96) 100%);
+    box-shadow: var(--shadow-sm);
 }
 
 .settings-hero-main {
@@ -671,11 +686,47 @@ body {
     align-items: center;
 }
 
+.settings-hero-main-stack {
+    width: 100%;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.settings-eyebrow {
+    margin: 0 0 8px;
+    color: var(--brand-strong);
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+.settings-hero-copy,
+.settings-panel-copy,
+.settings-sidebar-copy,
+.settings-section-copy {
+    margin: 8px 0 0;
+    color: var(--text-muted);
+    font-size: 13px;
+    line-height: 1.65;
+}
+
+.settings-pill-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
 .settings-workspace {
     display: grid;
     grid-template-columns: minmax(230px, 280px) minmax(0, 1fr);
     gap: 16px;
     align-items: start;
+}
+
+.settings-workspace-install {
+    grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
 }
 
 .settings-sidebar {
@@ -733,13 +784,19 @@ body {
 
 .settings-nav-copy {
     min-width: 0;
-    display: flex;
-    align-items: center;
+    display: grid;
+    gap: 4px;
 }
 
 .settings-nav-copy strong {
     font-size: 15px;
     color: var(--text-main);
+}
+
+.settings-nav-copy small {
+    color: var(--text-muted);
+    font-size: 12px;
+    line-height: 1.5;
 }
 
 .settings-panel-column {
@@ -760,6 +817,14 @@ body {
     min-height: 100%;
 }
 
+.settings-panel-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 14px;
+    flex-wrap: wrap;
+}
+
 .settings-panel-title {
     margin: 0;
     font-size: 24px;
@@ -767,9 +832,37 @@ body {
     line-height: 1.1;
 }
 
+.settings-panel-badges,
+.settings-sidebar-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
 .settings-stack {
     display: grid;
     gap: 14px;
+}
+
+.settings-subcard {
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.9) 0%, rgba(248, 251, 255, 0.92) 100%);
+    padding: 16px;
+    display: grid;
+    gap: 12px;
+}
+
+.settings-subcard h3,
+.settings-sidebar-intro h2,
+.settings-checklist-card h3 {
+    margin: 0;
+    color: var(--text-main);
+    font-size: 20px;
+    font-family: var(--font-display);
+    line-height: 1.12;
 }
 
 .settings-grid-single {
@@ -856,6 +949,17 @@ body {
     flex-wrap: wrap;
 }
 
+.settings-actions-split {
+    align-items: center;
+    justify-content: space-between;
+}
+
+.install-file-meta {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 13px;
+}
+
 .settings-banner {
     border: 1px solid rgba(25, 135, 84, 0.18);
     border-radius: 14px;
@@ -870,6 +974,22 @@ body {
 
 .settings-banner-success {
     box-shadow: 0 10px 24px rgba(25, 135, 84, 0.08);
+}
+
+.settings-banner-neutral {
+    border-color: rgba(13, 110, 253, 0.18);
+    background:
+        radial-gradient(220px 90px at 0% 0%, rgba(13, 110, 253, 0.1), transparent 72%),
+        rgba(246, 250, 255, 0.94);
+    color: var(--text-main);
+}
+
+.settings-banner-warning {
+    border-color: rgba(220, 53, 69, 0.2);
+    background:
+        radial-gradient(220px 90px at 0% 0%, rgba(220, 53, 69, 0.08), transparent 72%),
+        rgba(255, 247, 247, 0.95);
+    color: #842029;
 }
 
 .settings-inline-actions {
@@ -929,6 +1049,76 @@ body {
     gap: 12px;
 }
 
+.settings-checklist {
+    display: grid;
+    gap: 10px;
+}
+
+.settings-checklist-item {
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 12px;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 10px;
+    align-items: flex-start;
+    background: rgba(255, 255, 255, 0.82);
+}
+
+.settings-checklist-item.is-done {
+    border-color: rgba(14, 165, 163, 0.24);
+    background:
+        radial-gradient(180px 70px at 0% 0%, rgba(14, 165, 163, 0.12), transparent 74%),
+        rgba(244, 255, 254, 0.96);
+}
+
+.settings-checklist-item.is-pending {
+    border-color: rgba(255, 176, 32, 0.22);
+    background:
+        radial-gradient(180px 70px at 100% 0%, rgba(255, 176, 32, 0.14), transparent 74%),
+        rgba(255, 251, 243, 0.96);
+}
+
+.settings-checklist-indicator {
+    width: 28px;
+    height: 28px;
+    border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 15px;
+    font-weight: 800;
+    background: rgba(13, 110, 253, 0.08);
+    color: var(--brand-strong);
+}
+
+.settings-checklist-item.is-done .settings-checklist-indicator {
+    background: rgba(14, 165, 163, 0.14);
+    color: var(--success);
+}
+
+.settings-checklist-item.is-pending .settings-checklist-indicator {
+    background: rgba(255, 176, 32, 0.18);
+    color: #9a6400;
+}
+
+.settings-checklist-copy {
+    display: grid;
+    gap: 4px;
+}
+
+.settings-checklist-copy strong {
+    font-size: 14px;
+    color: var(--text-main);
+}
+
+.settings-checklist-copy p {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 12px;
+    line-height: 1.5;
+}
+
 .settings-status-card,
 .settings-metric-card {
     padding: 16px;
@@ -967,6 +1157,47 @@ body {
 .settings-action-copy {
     display: grid;
     gap: 0;
+}
+
+.settings-action-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+
+.settings-action-note {
+    margin: 8px 0 0;
+    color: var(--text-muted);
+    font-size: 13px;
+    line-height: 1.6;
+}
+
+.settings-risk-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    padding: 4px 10px;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.settings-risk-badge.is-danger {
+    color: #8f1331;
+    background: rgba(223, 55, 95, 0.12);
+}
+
+.settings-risk-badge.is-warning {
+    color: #8a5a00;
+    background: rgba(255, 176, 32, 0.18);
+}
+
+.settings-risk-badge.is-safe {
+    color: #0f766e;
+    background: rgba(14, 165, 163, 0.16);
 }
 
 .settings-placeholder-compact {
@@ -1050,7 +1281,8 @@ body {
 }
 
 .settings-entity-meta,
-.settings-log-meta {
+.settings-log-meta,
+.settings-log-summary {
     margin: 0;
     color: var(--text-muted);
     font-size: 13px;
@@ -1114,6 +1346,30 @@ body {
 .settings-log-tag {
     background: rgba(255, 193, 7, 0.16);
     color: #8a5a00;
+}
+
+.settings-log-tag.is-danger,
+.settings-log-chip.is-danger {
+    background: rgba(223, 55, 95, 0.14);
+    color: #8f1331;
+}
+
+.settings-log-tag.is-warning,
+.settings-log-chip.is-warning {
+    background: rgba(255, 176, 32, 0.16);
+    color: #8a5a00;
+}
+
+.settings-log-tag.is-info,
+.settings-log-chip.is-info {
+    background: rgba(13, 110, 253, 0.12);
+    color: var(--brand-strong);
+}
+
+.settings-log-tag.is-neutral,
+.settings-log-chip.is-neutral {
+    background: rgba(28, 35, 52, 0.06);
+    color: var(--text-muted);
 }
 
 .settings-log-meta-grid {
@@ -1286,6 +1542,12 @@ body {
     color: var(--brand-strong);
     border-color: rgba(13, 110, 253, 0.3);
     background: rgba(13, 110, 253, 0.08);
+}
+
+.stat-pill-warning {
+    color: #8a5a00;
+    border-color: rgba(255, 176, 32, 0.3);
+    background: rgba(255, 176, 32, 0.14);
 }
 
 .list-controls {
@@ -1638,6 +1900,150 @@ body {
     border: 1px solid var(--border);
 }
 
+.confirm-dialog {
+    display: grid;
+    gap: 16px;
+}
+
+.confirm-head {
+    display: grid;
+    gap: 10px;
+}
+
+.confirm-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: fit-content;
+    border-radius: 999px;
+    padding: 5px 11px;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.confirm-badge.is-warning {
+    color: #8a5a00;
+    background: rgba(255, 176, 32, 0.18);
+}
+
+.confirm-badge.is-danger {
+    color: #8f1331;
+    background: rgba(223, 55, 95, 0.14);
+}
+
+.confirm-summary {
+    margin: 0;
+    color: var(--text-main);
+    font-size: 14px;
+    line-height: 1.7;
+}
+
+.confirm-section {
+    display: grid;
+    gap: 8px;
+}
+
+.confirm-section-title {
+    margin: 0;
+    color: var(--text-main);
+    font-size: 13px;
+    font-weight: 800;
+}
+
+.confirm-impact-list {
+    margin: 0;
+    padding-left: 18px;
+    display: grid;
+    gap: 8px;
+}
+
+.confirm-impact-list li {
+    color: var(--text-muted);
+    font-size: 13px;
+    line-height: 1.6;
+}
+
+.confirm-field {
+    margin-top: 2px;
+}
+
+.confirm-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.guide-modal {
+    display: grid;
+    gap: 18px;
+}
+
+.guide-intro {
+    margin: 0;
+    color: var(--text-main);
+    font-size: 14px;
+    line-height: 1.7;
+}
+
+.guide-overview {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.guide-task-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+}
+
+.guide-task-card {
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    background:
+        radial-gradient(220px 80px at 0% 0%, rgba(13, 110, 253, 0.08), transparent 72%),
+        rgba(255, 255, 255, 0.92);
+    padding: 16px;
+    display: grid;
+    gap: 8px;
+}
+
+.guide-task-card h3 {
+    margin: 0;
+    color: var(--text-main);
+    font-size: 20px;
+    font-family: var(--font-display);
+    line-height: 1.12;
+}
+
+.guide-task-card p {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 13px;
+    line-height: 1.6;
+}
+
+.guide-task-card .btn {
+    width: fit-content;
+    margin-top: 4px;
+}
+
+.guide-step {
+    color: var(--brand-strong);
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.guide-actions {
+    justify-content: flex-end;
+}
+
 .sidebar {
     width: 250px;
     background: var(--bg-panel);
@@ -1762,6 +2168,7 @@ body {
     }
 
     .settings-list-toolbar,
+    .settings-panel-head,
     .settings-entity-main,
     .settings-kv-head,
     .settings-log-head {
@@ -1839,6 +2246,10 @@ body {
 
     .settings-inline-field {
         min-width: 0;
+    }
+
+    .settings-actions-split {
+        align-items: stretch;
     }
 
     .upload-page {

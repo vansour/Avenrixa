@@ -40,19 +40,19 @@ fn test_verify_password() {
 fn test_generate_and_verify_token() {
     let service = create_test_service();
     let user_id = Uuid::new_v4();
-    let username = "testuser";
+    let email = "testuser@example.com";
     let role = "user";
     let token_version = 3;
 
     let token = service
-        .generate_token(user_id, username, role, token_version)
+        .generate_token(user_id, email, role, token_version)
         .expect("Failed to generate token");
 
     let claims = service
         .verify_token(&token)
         .expect("Failed to verify token");
     assert_eq!(claims.sub, user_id);
-    assert_eq!(claims.username, username);
+    assert_eq!(claims.email, email);
     assert_eq!(claims.role, role);
     assert_eq!(claims.token_version, token_version);
 }
@@ -70,7 +70,7 @@ fn test_generate_token_uses_cookie_max_age() {
     let service = AuthService::new(&config).expect("Failed to create test auth service");
 
     let token = service
-        .generate_token(Uuid::new_v4(), "testuser", "user", 0)
+        .generate_token(Uuid::new_v4(), "testuser@example.com", "user", 0)
         .expect("Failed to generate token");
     let claims = service
         .verify_token(&token)
@@ -108,14 +108,14 @@ fn test_generate_access_token() {
     let user_id = Uuid::new_v4();
 
     let token = service
-        .generate_access_token(user_id, "testuser", "user", 7)
+        .generate_access_token(user_id, "testuser@example.com", "user", 7)
         .expect("Failed to generate access token");
 
     let claims = service
         .verify_token(&token)
         .expect("Failed to verify token");
     assert_eq!(claims.sub, user_id);
-    assert_eq!(claims.username, "testuser");
+    assert_eq!(claims.email, "testuser@example.com");
     assert_eq!(claims.role, "user");
     assert_eq!(claims.token_version, 7);
 
@@ -145,7 +145,7 @@ fn test_verify_refresh_token_rejects_non_refresh_token() {
     let user_id = Uuid::new_v4();
 
     let access_token = service
-        .generate_access_token(user_id, "testuser", "user", 0)
+        .generate_access_token(user_id, "testuser@example.com", "user", 0)
         .expect("Failed to generate access token");
 
     let result = service.verify_refresh_token(&access_token);

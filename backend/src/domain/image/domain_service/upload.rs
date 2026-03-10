@@ -1,102 +1,6 @@
 use super::*;
 
-impl<I: ImageRepository, C: CategoryRepository> ImageDomainService<I, C> {
-    /// 提交文件保存任务
-    pub async fn submit_file_save_task(
-        &self,
-        image_id: Uuid,
-        storage_path: String,
-        thumbnail_path: String,
-        temp_image_path: String,
-        thumbnail_data: Vec<u8>,
-    ) -> Result<(), AppError> {
-        let task_id = Uuid::new_v4().to_string();
-        let result_key = self.file_save_queue.result_key_for_task(&task_id);
-        let task = FileSaveTask {
-            task_id: task_id.clone(),
-            image_id: image_id.to_string(),
-            storage_path: storage_path.clone(),
-            thumbnail_path: thumbnail_path.clone(),
-            temp_image_path: temp_image_path.clone(),
-            thumbnail_data,
-            attempts: 0,
-            max_retries: 3,
-            result_key,
-        };
-
-        let result = self
-            .file_save_queue
-            .submit_and_wait(task, Duration::from_secs(20))
-            .await;
-
-        let result = match result {
-            Ok(result) => result,
-            Err(e) => {
-                // 等待超时后标记取消，防止队列稍后成功造成“有文件无数据库记录”。
-                if let Err(cancel_err) = self.file_save_queue.cancel_task(&task_id).await {
-                    warn!(
-                        "Failed to mark task as cancelled [{}]: {}",
-                        image_id, cancel_err
-                    );
-                }
-
-                // 若任务在超时边界后刚好成功，立即做补偿清理。
-                if let Ok(Some(crate::file_queue::FileSaveResult::Success)) =
-                    self.file_save_queue.get_task_result(&task_id).await
-                {
-                    warn!(
-                        "Task finished after timeout, cleaning up potential orphan files: {}",
-                        image_id
-                    );
-                    let _ = tokio::fs::remove_file(&storage_path).await;
-                    let _ = tokio::fs::remove_file(&thumbnail_path).await;
-                }
-                // 超时场景先执行一次本地补偿删除，后续由取消标记兜底清理。
-                let _ = tokio::fs::remove_file(&storage_path).await;
-                let _ = tokio::fs::remove_file(&thumbnail_path).await;
-
-                return Err(AppError::Internal(anyhow::anyhow!(
-                    "文件保存队列错误: {}",
-                    e
-                )));
-            }
-        };
-
-        match result {
-            crate::file_queue::FileSaveResult::Success => {
-                info!("File save confirmed for image: {}", image_id);
-                Ok(())
-            }
-            crate::file_queue::FileSaveResult::ImageFailed => {
-                let _ = tokio::fs::remove_file(&storage_path).await;
-                let _ = tokio::fs::remove_file(&thumbnail_path).await;
-                let _ = tokio::fs::remove_file(&temp_image_path).await;
-                Err(AppError::Internal(anyhow::anyhow!(
-                    "主图片写入失败: {}",
-                    image_id
-                )))
-            }
-            crate::file_queue::FileSaveResult::ThumbnailFailed => {
-                let _ = tokio::fs::remove_file(&storage_path).await;
-                let _ = tokio::fs::remove_file(&thumbnail_path).await;
-                let _ = tokio::fs::remove_file(&temp_image_path).await;
-                Err(AppError::Internal(anyhow::anyhow!(
-                    "缩略图写入失败: {}",
-                    image_id
-                )))
-            }
-            crate::file_queue::FileSaveResult::Cancelled => {
-                let _ = tokio::fs::remove_file(&storage_path).await;
-                let _ = tokio::fs::remove_file(&thumbnail_path).await;
-                let _ = tokio::fs::remove_file(&temp_image_path).await;
-                Err(AppError::Internal(anyhow::anyhow!(
-                    "文件保存任务已取消: {}",
-                    image_id
-                )))
-            }
-        }
-    }
-
+impl<I: ImageRepository> ImageDomainService<I> {
     /// 验证文件名安全性
     pub fn validate_filename(&self, filename: &str) -> Result<(), AppError> {
         if filename.is_empty() || filename.len() > 255 {
@@ -127,7 +31,7 @@ impl<I: ImageRepository, C: CategoryRepository> ImageDomainService<I, C> {
     pub async fn upload_image_from_file(
         &self,
         user_id: Uuid,
-        username: &str,
+        actor_email: &str,
         filename: String,
         temp_path: std::path::PathBuf,
         content_type: Option<String>,
@@ -184,7 +88,7 @@ impl<I: ImageRepository, C: CategoryRepository> ImageDomainService<I, C> {
                 original_filename: None,
                 size: compressed_size,
                 hash,
-                format: ext,
+                format: ext.clone(),
                 views: 0,
                 status: "active".to_string(),
                 expires_at: None,
@@ -217,7 +121,7 @@ impl<I: ImageRepository, C: CategoryRepository> ImageDomainService<I, C> {
             original_filename: None,
             size: compressed_size,
             hash,
-            format: ext,
+            format: ext.clone(),
             views: 0,
             status: "active".to_string(),
             expires_at: None,
@@ -230,27 +134,39 @@ impl<I: ImageRepository, C: CategoryRepository> ImageDomainService<I, C> {
         let cache_hint = self.storage_manager.cache_hint(&stored_filename);
         self.cache_image_path(image_id, &cache_hint).await?;
 
-        log_audit(
-            &self.pool,
+        log_audit_db(
+            &self.database,
             Some(user_id),
             "image.upload",
             "image",
+            Some(image_id),
             None,
-            None,
-            None,
+            Some(serde_json::json!({
+                "actor_email": actor_email,
+                "original_filename": filename,
+                "stored_filename": stored_filename,
+                "size_bytes": compressed_size,
+                "format": ext,
+                "result": "completed",
+                "risk_level": "info",
+            })),
         )
         .await;
-        info!("Image uploaded (streaming): {} by {}", image_id, username);
+        info!(
+            "Image uploaded (streaming): {} by {}",
+            image_id, actor_email
+        );
 
         Ok(image)
     }
 
     /// 上传图片
+    #[cfg(test)]
     #[tracing::instrument(skip(self, data))]
     pub async fn upload_image(
         &self,
         user_id: Uuid,
-        username: &str,
+        actor_email: &str,
         filename: String,
         data: Vec<u8>,
         content_type: Option<String>,
@@ -266,7 +182,7 @@ impl<I: ImageRepository, C: CategoryRepository> ImageDomainService<I, C> {
         if data.len() < 16 {
             return Err(AppError::InvalidImageFormat);
         }
-        ImageProcessor::validate_image_bytes(&data[..16])?;
+        ImageProcessor::validate_image_bytes(&data)?;
 
         if !content_type
             .as_deref()
@@ -306,7 +222,7 @@ impl<I: ImageRepository, C: CategoryRepository> ImageDomainService<I, C> {
                 original_filename: None,
                 size: compressed_size,
                 hash,
-                format: ext,
+                format: ext.clone(),
                 views: 0,
                 status: "active".to_string(),
                 expires_at: None,
@@ -338,7 +254,7 @@ impl<I: ImageRepository, C: CategoryRepository> ImageDomainService<I, C> {
             original_filename: None,
             size: compressed_size,
             hash,
-            format: ext,
+            format: ext.clone(),
             views: 0,
             status: "active".to_string(),
             expires_at: None,
@@ -351,17 +267,25 @@ impl<I: ImageRepository, C: CategoryRepository> ImageDomainService<I, C> {
         let cache_hint = self.storage_manager.cache_hint(&stored_filename);
         self.cache_image_path(image_id, &cache_hint).await?;
 
-        log_audit(
-            &self.pool,
+        log_audit_db(
+            &self.database,
             Some(user_id),
             "image.upload",
             "image",
+            Some(image_id),
             None,
-            None,
-            None,
+            Some(serde_json::json!({
+                "actor_email": actor_email,
+                "original_filename": filename,
+                "stored_filename": stored_filename,
+                "size_bytes": compressed_size,
+                "format": ext,
+                "result": "completed",
+                "risk_level": "info",
+            })),
         )
         .await;
-        info!("Image uploaded: {} by {}", image_id, username);
+        info!("Image uploaded: {} by {}", image_id, actor_email);
 
         Ok(image)
     }

@@ -10,6 +10,27 @@ impl Config {
         if self.database.max_connections == 0 {
             return Err(ConfigError::InvalidPoolSize);
         }
+        match self.database.kind {
+            super::types::DatabaseKind::Postgres => {
+                if !matches!(
+                    self.database.url.split(':').next(),
+                    Some("postgresql") | Some("postgres")
+                ) {
+                    return Err(ConfigError::InvalidPostgresDatabaseUrl);
+                }
+            }
+            super::types::DatabaseKind::Sqlite => {
+                let database_url = self.database.url.trim();
+                if database_url.is_empty() {
+                    return Err(ConfigError::DatabaseUrlEmpty);
+                }
+                if database_url.starts_with("sqlite:") || !database_url.contains("://") {
+                    // Accept either sqlite://... DSN or a plain file path.
+                } else {
+                    return Err(ConfigError::InvalidSqliteDatabaseUrl);
+                }
+            }
+        }
 
         if self.redis.url.trim().is_empty() {
             return Err(ConfigError::RedisUrlEmpty);
@@ -20,9 +41,6 @@ impl Config {
 
         if self.storage.path.trim().is_empty() {
             return Err(ConfigError::StoragePathEmpty);
-        }
-        if self.storage.thumbnail_path.trim().is_empty() {
-            return Err(ConfigError::ThumbnailPathEmpty);
         }
         if self.storage.allowed_extensions.is_empty() {
             return Err(ConfigError::AllowedExtensionsEmpty);
@@ -129,9 +147,12 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::DatabaseKind;
 
     fn valid_mail_config() -> Config {
         let mut config = Config::default();
+        config.database.kind = DatabaseKind::Postgres;
+        config.database.url = "postgresql://user:pass@localhost:5432/image".to_string();
         config.mail.enabled = true;
         config.mail.smtp_host = "smtp.example.com".to_string();
         config.mail.smtp_port = 587;

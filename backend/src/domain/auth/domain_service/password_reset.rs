@@ -14,19 +14,14 @@ fn hash_reset_token(token: &str) -> String {
 impl<R: AuthRepository> AuthDomainService<R> {
     pub async fn request_password_reset(
         &self,
-        identity: &str,
+        email: &str,
     ) -> Result<Option<PasswordResetDispatch>, AppError> {
-        let identity = identity.trim();
-        if identity.is_empty() {
-            return Err(AppError::ValidationError(
-                "用户名或邮箱不能为空".to_string(),
-            ));
+        let email = email.trim().to_lowercase();
+        if email.is_empty() {
+            return Err(AppError::ValidationError("邮箱不能为空".to_string()));
         }
 
-        let Some(user) = self.repository.find_user_by_identity(identity).await? else {
-            return Ok(None);
-        };
-        let Some(email) = user.email.clone().filter(|value| !value.trim().is_empty()) else {
+        let Some(user) = self.repository.find_user_by_email(&email).await? else {
             return Ok(None);
         };
 
@@ -40,8 +35,7 @@ impl<R: AuthRepository> AuthDomainService<R> {
 
         Ok(Some(PasswordResetDispatch {
             user_id: user.id,
-            username: user.username,
-            email,
+            email: user.email,
             token,
         }))
     }

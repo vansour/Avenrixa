@@ -6,26 +6,26 @@ use thiserror::Error;
 pub enum ConfigError {
     #[error("数据库 URL 不能为空")]
     DatabaseUrlEmpty,
+    #[error("不支持的数据库类型: {0}")]
+    InvalidDatabaseKind(String),
+    #[error("PostgreSQL 数据库 URL 必须以 postgresql:// 或 postgres:// 开头")]
+    InvalidPostgresDatabaseUrl,
+    #[error("SQLite 数据库地址必须是 sqlite: 前缀或文件路径")]
+    InvalidSqliteDatabaseUrl,
     #[error("Redis URL 不能为空")]
     RedisUrlEmpty,
     #[error("存储路径不能为空")]
     StoragePathEmpty,
-    #[error("缩略图路径不能为空")]
-    ThumbnailPathEmpty,
     #[error("允许的扩展名列表不能为空")]
     AllowedExtensionsEmpty,
     #[error("数据库连接池大小必须大于 0")]
     InvalidPoolSize,
-    #[error("JWT secret 最小长度: {min}, 实际: {actual}")]
-    JwtSecretTooShort { min: usize, actual: usize },
     #[error("最大上传大小必须大于 0")]
     InvalidMaxUploadSize,
     #[error("服务端限流配置必须大于 0")]
     InvalidServerRateLimit,
     #[error("无效的去重策略: {0}，必须是 'user' 或 'global'")]
     InvalidDedupStrategy(String),
-    #[error("无效的文件检查并发阈值: {0}")]
-    InvalidFileCheckThreshold(String),
     #[error("保留图片天数必须大于 0")]
     InvalidRetentionDays,
     #[error("TTL 必须大于 0")]
@@ -98,8 +98,55 @@ pub(crate) fn default_frontend_dir() -> String {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DatabaseConfig {
+    #[serde(default)]
+    pub kind: DatabaseKind,
     pub url: String,
     pub max_connections: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DatabaseKind {
+    #[serde(rename = "postgresql")]
+    Postgres,
+    #[serde(rename = "sqlite")]
+    Sqlite,
+}
+
+impl Default for DatabaseKind {
+    fn default() -> Self {
+        Self::Postgres
+    }
+}
+
+impl DatabaseKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Postgres => "postgresql",
+            Self::Sqlite => "sqlite",
+        }
+    }
+
+    pub fn parse(value: &str) -> Result<Self, ConfigError> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "postgresql" | "postgres" => Ok(Self::Postgres),
+            "sqlite" => Ok(Self::Sqlite),
+            other => Err(ConfigError::InvalidDatabaseKind(other.to_string())),
+        }
+    }
+
+    pub fn infer_from_url(value: &str) -> Option<Self> {
+        let trimmed = value.trim().to_ascii_lowercase();
+        if matches!(
+            trimmed.split(':').next(),
+            Some("postgresql") | Some("postgres")
+        ) {
+            Some(Self::Postgres)
+        } else if trimmed.starts_with("sqlite:") {
+            Some(Self::Sqlite)
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -112,7 +159,6 @@ pub struct RedisConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StorageConfig {
     pub path: String,
-    pub thumbnail_path: String,
     pub allowed_extensions: Vec<String>,
     #[serde(default = "default_enable_file_check")]
     pub enable_file_check: bool,

@@ -1,7 +1,8 @@
 use crate::services::api_client::ApiClient;
 use crate::types::api::{
-    AdminUserSummary, AuditLogResponse, BackupResponse, HealthStatus, PaginationParams, Setting,
-    SystemStats, UpdateSettingRequest, UserUpdateRequest,
+    AdminUserSummary, AuditLogResponse, BackupFileSummary, BackupResponse,
+    BackupRestorePrecheckResponse, BackupRestoreScheduleResponse, BackupRestoreStatusResponse,
+    HealthStatus, PaginationParams, Setting, SystemStats, UpdateSettingRequest, UserUpdateRequest,
 };
 use crate::types::errors::Result;
 
@@ -73,6 +74,51 @@ impl AdminService {
         self.api_client
             .post_json_response("/api/v1/backup", &serde_json::json!({}))
             .await
+    }
+
+    pub async fn get_backups(&self) -> Result<Vec<BackupFileSummary>> {
+        self.api_client.get_json("/api/v1/backups").await
+    }
+
+    pub async fn get_backup_restore_status(&self) -> Result<BackupRestoreStatusResponse> {
+        self.api_client
+            .get_json("/api/v1/backup-restore/status")
+            .await
+    }
+
+    pub fn backup_download_url(&self, filename: &str) -> String {
+        self.api_client.url(&format!(
+            "/api/v1/backups/{}",
+            urlencoding::encode(filename)
+        ))
+    }
+
+    pub async fn precheck_backup_restore(
+        &self,
+        filename: &str,
+    ) -> Result<BackupRestorePrecheckResponse> {
+        let url = format!(
+            "/api/v1/backups/{}/restore/precheck",
+            urlencoding::encode(filename)
+        );
+        self.api_client
+            .post_json_response(&url, &serde_json::json!({}))
+            .await
+    }
+
+    pub async fn schedule_backup_restore(
+        &self,
+        filename: &str,
+    ) -> Result<BackupRestoreScheduleResponse> {
+        let url = format!("/api/v1/backups/{}/restore", urlencoding::encode(filename));
+        self.api_client
+            .post_json_response(&url, &serde_json::json!({}))
+            .await
+    }
+
+    pub async fn delete_backup(&self, filename: &str) -> Result<()> {
+        let url = format!("/api/v1/backups/{}", urlencoding::encode(filename));
+        self.api_client.delete(&url).await
     }
 
     fn build_query_params(params: &PaginationParams) -> String {

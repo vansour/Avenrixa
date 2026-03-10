@@ -18,13 +18,7 @@ pub async fn get_images(
     let page_size = params.page_size.unwrap_or(20).clamp(1, 100);
 
     let result = service
-        .get_images(
-            auth_user.id,
-            page,
-            page_size,
-            params.category_id,
-            params.tag.as_deref(),
-        )
+        .get_images(auth_user.id, page, page_size, params.tag.as_deref())
         .await?;
 
     Ok(Json(map_paginated_images(result)))

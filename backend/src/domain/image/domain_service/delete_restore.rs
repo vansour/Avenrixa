@@ -1,6 +1,6 @@
 use super::*;
 
-impl<I: ImageRepository, C: CategoryRepository> ImageDomainService<I, C> {
+impl<I: ImageRepository> ImageDomainService<I> {
     #[tracing::instrument(skip(self))]
     pub async fn soft_delete_images(
         &self,
@@ -48,17 +48,37 @@ impl<I: ImageRepository, C: CategoryRepository> ImageDomainService<I, C> {
             .into_iter()
             .map(|img| (img.id, img.filename, img.hash))
             .collect();
+        let owned_ids: Vec<Uuid> = delete_targets.iter().map(|(id, _, _)| *id).collect();
+        let unique_filenames: Vec<String> = delete_targets
+            .iter()
+            .map(|(_, filename, _)| filename.clone())
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+        let referenced_filenames: HashSet<String> = self
+            .image_repository
+            .find_filenames_still_referenced_excluding_ids(&unique_filenames, &owned_ids)
+            .await?
+            .into_iter()
+            .collect();
 
         let delete_concurrency = self.config.storage.file_check_concurrent_threshold.max(1);
         let storage_manager = self.storage_manager.clone();
+        let physical_delete_targets: Vec<String> = delete_targets
+            .iter()
+            .map(|(_, filename, _)| filename.clone())
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .filter(|filename| !referenced_filenames.contains(filename))
+            .collect();
 
-        if delete_targets.len() <= delete_concurrency {
-            for (_, filename, _) in &delete_targets {
+        if physical_delete_targets.len() <= delete_concurrency {
+            for filename in &physical_delete_targets {
                 let _ = storage_manager.delete(filename).await;
             }
         } else {
-            stream::iter(delete_targets.iter().cloned())
-                .map(|(_, filename, _)| {
+            stream::iter(physical_delete_targets.iter().cloned())
+                .map(|filename| {
                     let storage_manager = storage_manager.clone();
                     async move {
                         let _ = storage_manager.delete(&filename).await;
@@ -69,7 +89,6 @@ impl<I: ImageRepository, C: CategoryRepository> ImageDomainService<I, C> {
                 .await;
         }
 
-        let owned_ids: Vec<Uuid> = delete_targets.iter().map(|(id, _, _)| *id).collect();
         let affected_hashes: Vec<String> = delete_targets
             .iter()
             .map(|(_, _, hash)| hash.clone())
@@ -81,15 +100,6 @@ impl<I: ImageRepository, C: CategoryRepository> ImageDomainService<I, C> {
             .await?;
 
         Ok(())
-    }
-
-    /// 获取已删除的图片
-    pub async fn get_deleted_images(&self, user_id: Uuid) -> Result<Vec<Image>, AppError> {
-        let images = self
-            .image_repository
-            .find_deleted_images_by_user(user_id)
-            .await?;
-        Ok(images)
     }
 
     /// 分页获取已删除的图片

@@ -8,8 +8,7 @@ name = "frontend_lib"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-dioxus = { version = "0.7.3", features = ["router", "web"] }
-dioxus-logger = "0.7"
+dioxus = { version = "0.7.3", features = ["web"] }
 reqwest = { version = "0.13", default-features = false, features = ["json", "cookies", "multipart", "rustls"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -17,17 +16,21 @@ chrono = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 tokio = { version = "1", features = ["rt", "macros", "sync", "time"] }
-parking_lot = "0.12"
 urlencoding = "2.1"
+base64 = "0.22"
 wasm-bindgen = "=0.2.114"
 wasm-bindgen-futures = "0.4"
 web-sys = { version = "0.3", features = [
     "Blob",
     "Clipboard",
     "ClipboardItem",
+    "Document",
+    "Element",
+    "History",
+    "Location",
     "Navigator",
+    "Storage",
     "Window",
 ] }
 js-sys = "0.3"
-gloo-utils = "0.2"
 gloo-timers = "0.3"

@@ -1,6 +1,6 @@
 use super::types::{
-    CacheConfig, CleanupConfig, Config, CookieConfig, DatabaseConfig, ImageConfig, MailConfig,
-    RateLimitConfig, RedisConfig, ServerConfig, StorageConfig, default_frontend_dir,
+    CacheConfig, CleanupConfig, Config, CookieConfig, DatabaseConfig, DatabaseKind, ImageConfig,
+    MailConfig, RateLimitConfig, RedisConfig, ServerConfig, StorageConfig, default_frontend_dir,
     default_max_connections,
 };
 
@@ -17,7 +17,8 @@ impl Default for Config {
                 frontend_dir: default_frontend_dir(),
             },
             database: DatabaseConfig {
-                url: "postgresql://user:pass@postgres:5432/image".to_string(),
+                kind: DatabaseKind::Postgres,
+                url: String::new(),
                 max_connections: default_max_connections(),
             },
             redis: RedisConfig {
@@ -27,7 +28,6 @@ impl Default for Config {
             },
             storage: StorageConfig {
                 path: "/data/images".to_string(),
-                thumbnail_path: "/data/thumbnails".to_string(),
                 allowed_extensions: vec![
                     "jpg".to_string(),
                     "jpeg".to_string(),

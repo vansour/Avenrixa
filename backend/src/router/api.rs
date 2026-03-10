@@ -1,25 +1,23 @@
 use crate::config::Config;
 use crate::db::AppState;
-use crate::routes::create_routes;
+use crate::handlers::admin;
+use crate::routes::{api, media};
 use axum::{Router, routing};
 use tower_governor::{GovernorLayer, governor::GovernorConfigBuilder};
 
 pub(super) fn create_root_routes(state: AppState) -> Router {
     Router::new()
-        .route("/health", routing::get(crate::admin_handlers::health_check))
-        .route(
-            "/images/{filename}",
-            routing::get(crate::routes::serve_image),
-        )
+        .route("/health", routing::get(admin::health_check))
+        .route("/images/{filename}", routing::get(media::serve_image))
         .route(
             "/thumbnails/{image_key}",
-            routing::get(crate::routes::serve_thumbnail),
+            routing::get(media::serve_thumbnail),
         )
         .with_state(state)
 }
 
 pub(super) fn create_api_v1_router(state: AppState, config: &Config) -> Router {
-    let api_routes = create_routes().with_state(state);
+    let api_routes = api::create_api_routes().with_state(state);
     let mut governor_conf = GovernorConfigBuilder::default();
     governor_conf
         .per_second(config.server.rate_limit_per_second as u64)

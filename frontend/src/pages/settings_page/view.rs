@@ -1,5 +1,6 @@
 use crate::types::api::{
-    AdminUserSummary, AuditLog, BackupResponse, ComponentStatus, HealthStatus, Setting, SystemStats,
+    AdminUserSummary, AuditLog, BackupFileSummary, BackupResponse, BackupRestoreStatusResponse,
+    ComponentStatus, HealthStatus, Setting, SystemStats,
 };
 use chrono::{DateTime, Utc};
 use dioxus::prelude::*;
@@ -54,6 +55,20 @@ impl SettingsSection {
         self.label()
     }
 
+    pub fn description(self) -> &'static str {
+        match self {
+            Self::Account => "查看当前登录账户信息，并管理当前会话。",
+            Self::General => "维护站点名称、邮件发送和验证链接等基础配置。",
+            Self::Storage => "配置图片写入位置，并决定使用本地目录还是对象存储。",
+            Self::Security => "修改当前账户密码，收紧登录安全。",
+            Self::System => "查看健康检查、容量和整体运行状态。",
+            Self::Maintenance => "执行清理与备份等高风险维护操作。",
+            Self::Users => "查看账户列表，并调整用户权限。",
+            Self::Audit => "追踪关键管理操作与系统事件。",
+            Self::Advanced => "处理底层键值配置，仅在明确知道影响时修改。",
+        }
+    }
+
     pub fn uses_global_settings_actions(self) -> bool {
         matches!(self, Self::General | Self::Storage)
     }
@@ -73,7 +88,7 @@ pub fn render_settings_fields(
 
 #[component]
 pub fn AccountSettingsSection(
-    username: String,
+    email: String,
     role: String,
     created_at: String,
     is_logging_out: bool,
@@ -82,7 +97,7 @@ pub fn AccountSettingsSection(
     rsx! {
         div { class: "settings-stack",
             div { class: "settings-metric-grid",
-                {render_metric_card("用户名", username)}
+                {render_metric_card("邮箱", email)}
                 {render_metric_card("角色", role_label(&role).to_string())}
                 {render_metric_card("创建时间", created_at)}
             }
@@ -111,6 +126,7 @@ pub fn SecuritySettingsSection(
     confirm_password: Signal<String>,
     error_message: String,
     success_message: String,
+    helper_text: String,
     is_submitting: bool,
     #[props(default)] on_submit: EventHandler<MouseEvent>,
 ) -> Element {
@@ -154,6 +170,10 @@ pub fn SecuritySettingsSection(
                         disabled: is_submitting,
                     }
                 }
+            }
+
+            if !helper_text.is_empty() {
+                p { class: "settings-section-copy", "{helper_text}" }
             }
 
             div { class: "settings-actions",
@@ -241,20 +261,69 @@ pub fn MaintenanceSettingsSection(
     error_message: String,
     success_message: String,
     last_backup: Option<BackupResponse>,
+    backup_files: Vec<(BackupFileSummary, String)>,
+    restore_status: Option<BackupRestoreStatusResponse>,
     last_deleted_cleanup_count: Option<usize>,
     last_expired_cleanup_count: Option<i64>,
     is_cleaning_deleted: bool,
     is_cleaning_expired: bool,
     is_backing_up: bool,
+    deleting_backup_filename: Option<String>,
+    processing_restore_filename: Option<String>,
+    is_loading_backups: bool,
+    is_loading_restore_status: bool,
     #[props(default)] on_cleanup_deleted: EventHandler<MouseEvent>,
     #[props(default)] on_cleanup_expired: EventHandler<MouseEvent>,
     #[props(default)] on_backup: EventHandler<MouseEvent>,
+    #[props(default)] on_refresh_backups: EventHandler<MouseEvent>,
+    #[props(default)] on_refresh_restore_status: EventHandler<MouseEvent>,
+    #[props(default)] on_delete_backup: EventHandler<String>,
+    #[props(default)] on_restore_backup: EventHandler<String>,
 ) -> Element {
-    let _ = (
-        last_backup,
-        last_deleted_cleanup_count,
-        last_expired_cleanup_count,
-    );
+    let last_backup_name = last_backup
+        .as_ref()
+        .map(|backup| backup.filename.clone())
+        .unwrap_or_else(|| "暂无备份".to_string());
+    let last_backup_time = last_backup
+        .as_ref()
+        .map(|backup| format_timestamp(backup.created_at))
+        .unwrap_or_else(|| "未生成".to_string());
+    let deleted_cleanup_summary = last_deleted_cleanup_count
+        .map(|count| format!("{} 个文件", count))
+        .unwrap_or_else(|| "未执行".to_string());
+    let expired_cleanup_summary = last_expired_cleanup_count
+        .map(|count| format!("{} 张图片", count))
+        .unwrap_or_else(|| "未执行".to_string());
+    let pending_restore = restore_status
+        .as_ref()
+        .and_then(|status| status.pending.clone());
+    let last_restore_result = restore_status
+        .as_ref()
+        .and_then(|status| status.last_result.clone());
+    let pending_restore_filename = pending_restore.as_ref().map(|item| item.filename.clone());
+    let pending_restore_summary = pending_restore
+        .as_ref()
+        .map(|item| item.filename.clone())
+        .unwrap_or_else(|| "无".to_string());
+    let pending_restore_time = pending_restore
+        .as_ref()
+        .map(|item| format_timestamp(item.scheduled_at))
+        .unwrap_or_else(|| "未计划".to_string());
+    let last_restore_status = last_restore_result
+        .as_ref()
+        .map(|item| restore_status_label(&item.status).to_string())
+        .unwrap_or_else(|| "暂无记录".to_string());
+    let last_restore_time = last_restore_result
+        .as_ref()
+        .map(|item| format_timestamp(item.finished_at))
+        .unwrap_or_else(|| "未执行".to_string());
+    let maintenance_busy = is_cleaning_deleted
+        || is_cleaning_expired
+        || is_backing_up
+        || deleting_backup_filename.is_some()
+        || processing_restore_filename.is_some();
+    let has_pending_restore = pending_restore.is_some();
+    let pending_restore_count = if has_pending_restore { 1 } else { 0 };
 
     rsx! {
         div { class: "settings-stack",
@@ -266,14 +335,29 @@ pub fn MaintenanceSettingsSection(
                 div { class: "settings-banner settings-banner-success", "{success_message}" }
             }
 
+            div { class: "settings-banner settings-banner-neutral",
+                "维护工具已启用分级确认：回收站清理属于高风险操作，需要输入确认词；过期图片处理属于警告级操作，需要二次确认；数据库备份可直接执行。"
+            }
+
+            div { class: "settings-metric-grid",
+                {render_metric_card("最近备份文件", last_backup_name)}
+                {render_metric_card("最近备份时间", last_backup_time)}
+                {render_metric_card("最近永久清理", deleted_cleanup_summary)}
+                {render_metric_card("最近过期处理", expired_cleanup_summary)}
+            }
+
             div { class: "settings-action-grid",
                 article { class: "settings-action-card settings-action-card-danger",
                     div { class: "settings-action-copy",
+                        div { class: "settings-action-meta",
+                            span { class: "settings-risk-badge is-danger", "Danger" }
+                        }
                         h3 { "清理已删除文件" }
+                        p { class: "settings-action-note", "彻底删除回收站中的文件和记录，无法撤销。" }
                     }
                     button {
                         class: "btn btn-danger",
-                        disabled: is_cleaning_deleted || is_cleaning_expired || is_backing_up,
+                        disabled: maintenance_busy,
                         onclick: move |event| on_cleanup_deleted.call(event),
                         if is_cleaning_deleted { "清理中..." } else { "执行清理" }
                     }
@@ -281,11 +365,15 @@ pub fn MaintenanceSettingsSection(
 
                 article { class: "settings-action-card",
                     div { class: "settings-action-copy",
+                        div { class: "settings-action-meta",
+                            span { class: "settings-risk-badge is-warning", "Warning" }
+                        }
                         h3 { "清理过期图片" }
+                        p { class: "settings-action-note", "把已过期图片批量移入回收站，后续仍可恢复。" }
                     }
                     button {
                         class: "btn",
-                        disabled: is_cleaning_deleted || is_cleaning_expired || is_backing_up,
+                        disabled: maintenance_busy,
                         onclick: move |event| on_cleanup_expired.call(event),
                         if is_cleaning_expired { "处理中..." } else { "处理过期图片" }
                     }
@@ -293,13 +381,209 @@ pub fn MaintenanceSettingsSection(
 
                 article { class: "settings-action-card settings-action-card-accent",
                     div { class: "settings-action-copy",
+                        div { class: "settings-action-meta",
+                            span { class: "settings-risk-badge is-safe", "Safe" }
+                        }
                         h3 { "数据库备份" }
+                        p { class: "settings-action-note", "生成当前数据库快照，建议在执行高风险维护前先备份。" }
                     }
                     button {
                         class: "btn btn-primary",
-                        disabled: is_cleaning_deleted || is_cleaning_expired || is_backing_up,
+                        disabled: maintenance_busy,
                         onclick: move |event| on_backup.call(event),
                         if is_backing_up { "备份中..." } else { "生成备份" }
+                    }
+                }
+            }
+
+            div { class: "settings-subcard",
+                h3 { "SQLite 恢复状态" }
+                p { class: "settings-section-copy",
+                    "第一版恢复是冷恢复流程：先写入恢复计划，再在下一次服务启动前替换 SQLite 数据库文件。"
+                }
+
+                div { class: "settings-list-toolbar",
+                    div { class: "settings-toolbar-meta",
+                        span { class: "stat-pill", "待执行计划 {pending_restore_count}" }
+                        if is_loading_restore_status {
+                            span { class: "stat-pill stat-pill-warning", "状态刷新中" }
+                        }
+                    }
+                    div { class: "settings-inline-actions",
+                        button {
+                            class: "btn",
+                            disabled: maintenance_busy || is_loading_restore_status,
+                            onclick: move |event| on_refresh_restore_status.call(event),
+                            if is_loading_restore_status { "刷新中..." } else { "刷新恢复状态" }
+                        }
+                    }
+                }
+
+                if is_loading_restore_status && restore_status.is_none() {
+                    div { class: "settings-placeholder settings-placeholder-compact",
+                        h3 { "正在加载恢复状态" }
+                    }
+                } else {
+                    div { class: "settings-metric-grid",
+                        {render_metric_card("待执行恢复", pending_restore_summary)}
+                        {render_metric_card("计划写入时间", pending_restore_time)}
+                        {render_metric_card("最近恢复结果", last_restore_status)}
+                        {render_metric_card("最近结果时间", last_restore_time)}
+                    }
+
+                    if let Some(pending) = pending_restore.clone() {
+                        div { class: "settings-banner settings-banner-warning",
+                            "检测到待执行的 SQLite 恢复计划。请立即重启服务；真正的数据库替换会在下一次启动前完成。"
+                        }
+                        article { class: "settings-entity-card",
+                            div { class: "settings-entity-main",
+                                div { class: "settings-entity-copy",
+                                    div { class: "settings-entity-title",
+                                        h3 { "{pending.filename}" }
+                                        span { class: "settings-kv-badge is-warning", "待执行" }
+                                    }
+                                    p { class: "settings-entity-meta",
+                                        "计划写入于 {format_timestamp(pending.scheduled_at)} · 备份创建于 {format_timestamp(pending.backup_created_at)} · {format_storage_bytes_u64(pending.backup_size_bytes)}"
+                                    }
+                                    p { class: "settings-action-note",
+                                        "申请人 {pending.requested_by_email}。恢复完成后，当前所有登录会话都会失效。"
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        div { class: "settings-banner settings-banner-neutral",
+                            "当前没有待执行的 SQLite 恢复计划。选择某个 .sqlite3 备份后，系统会先做预检，再要求你输入文件名确认。"
+                        }
+                    }
+
+                    if let Some(result) = last_restore_result.clone() {
+                        article { class: "settings-entity-card",
+                            div { class: "settings-entity-main",
+                                div { class: "settings-entity-copy",
+                                    div { class: "settings-entity-title",
+                                        h3 { "最近一次恢复结果" }
+                                        span {
+                                            class: format!(
+                                                "settings-kv-badge {}",
+                                                restore_status_surface_class(&result.status)
+                                            ),
+                                            "{restore_status_label(&result.status)}"
+                                        }
+                                    }
+                                    p { class: "settings-entity-meta",
+                                        "备份 {result.filename} · 完成于 {format_timestamp(result.finished_at)}"
+                                    }
+                                    p { class: "settings-action-note", "{result.message}" }
+                                    if let Some(rollback_filename) = result.rollback_filename.clone() {
+                                        p { class: "settings-entity-meta", "回滚快照 {rollback_filename}" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            div { class: "settings-subcard",
+                h3 { "备份文件" }
+                p { class: "settings-section-copy",
+                    "这里展示当前备份目录中的数据库快照。SQLite 备份文件支持“恢复到此备份”；PostgreSQL 备份暂时只支持下载和删除。"
+                }
+
+                div { class: "settings-list-toolbar",
+                    div { class: "settings-toolbar-meta",
+                        span { class: "stat-pill", "可下载备份 {backup_files.len()} 个" }
+                        if is_loading_backups {
+                            span { class: "stat-pill stat-pill-warning", "列表刷新中" }
+                        }
+                    }
+                    div { class: "settings-inline-actions",
+                        button {
+                            class: "btn",
+                            disabled: is_loading_backups || maintenance_busy,
+                            onclick: move |event| on_refresh_backups.call(event),
+                            if is_loading_backups { "刷新中..." } else { "刷新备份列表" }
+                        }
+                    }
+                }
+
+                if is_loading_backups && backup_files.is_empty() {
+                    div { class: "settings-placeholder settings-placeholder-compact",
+                        h3 { "正在加载备份列表" }
+                    }
+                } else if backup_files.is_empty() {
+                    div { class: "settings-placeholder settings-placeholder-compact",
+                        h3 { "暂时没有可下载的备份" }
+                    }
+                } else {
+                    div { class: "settings-entity-list",
+                        {backup_files.into_iter().map(|(backup, download_url)| {
+                            let filename_for_download = backup.filename.clone();
+                            let filename_for_delete = backup.filename.clone();
+                            let filename_for_restore = backup.filename.clone();
+                            let kind_label = backup_database_kind_label(&backup.filename);
+                            let backup_meta = format!(
+                                "{} · {}",
+                                format_timestamp(backup.created_at),
+                                format_storage_bytes_u64(backup.size_bytes)
+                            );
+                            let is_row_deleting = deleting_backup_filename
+                                .as_deref()
+                                .is_some_and(|value| value == backup.filename.as_str());
+                            let is_row_restoring = processing_restore_filename
+                                .as_deref()
+                                .is_some_and(|value| value == backup.filename.as_str());
+                            let is_pending_target = pending_restore_filename
+                                .as_deref()
+                                .is_some_and(|value| value == backup.filename.as_str());
+                            let supports_restore = backup_supports_restore(&backup.filename);
+                            rsx! {
+                                article { class: "settings-entity-card",
+                                    div { class: "settings-entity-main",
+                                        div { class: "settings-entity-copy",
+                                            div { class: "settings-entity-title",
+                                                h3 { "{backup.filename}" }
+                                                span { class: "settings-kv-badge", "{kind_label}" }
+                                            }
+                                            p { class: "settings-entity-meta", "{backup_meta}" }
+                                            if !supports_restore {
+                                                p { class: "settings-action-note", "当前这类备份暂不支持页面内恢复。" }
+                                            }
+                                        }
+
+                                        div { class: "settings-entity-controls",
+                                            a {
+                                                class: "btn btn-primary",
+                                                href: "{download_url}",
+                                                download: "{filename_for_download}",
+                                                "下载备份"
+                                            }
+                                            button {
+                                                class: "btn btn-danger",
+                                                disabled: !supports_restore || maintenance_busy || is_loading_restore_status || has_pending_restore,
+                                                onclick: move |_| on_restore_backup.call(filename_for_restore.clone()),
+                                                if is_row_restoring {
+                                                    "处理中..."
+                                                } else if is_pending_target {
+                                                    "已计划恢复"
+                                                } else if !supports_restore {
+                                                    "仅 SQLite 恢复"
+                                                } else {
+                                                    "恢复到此备份"
+                                                }
+                                            }
+                                            button {
+                                                class: "btn btn-danger",
+                                                disabled: maintenance_busy || is_loading_backups || has_pending_restore,
+                                                onclick: move |_| on_delete_backup.call(filename_for_delete.clone()),
+                                                if is_row_deleting { "删除中..." } else { "删除备份" }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        })}
                     }
                 }
             }
@@ -344,6 +628,10 @@ pub fn UsersSettingsSection(
                 div { class: "settings-banner settings-banner-success", "{success_message}" }
             }
 
+            div { class: "settings-banner settings-banner-neutral",
+                "用户角色变更属于权限操作：普通提升会要求二次确认，管理员降级会升级为高风险确认。"
+            }
+
             if is_loading && users.is_empty() {
                 div { class: "settings-placeholder settings-placeholder-compact",
                     h3 { "正在加载用户列表" }
@@ -367,7 +655,7 @@ pub fn UsersSettingsSection(
                                 div { class: "settings-entity-main",
                                     div { class: "settings-entity-copy",
                                         div { class: "settings-entity-title",
-                                            h3 { "{user.username}" }
+                                            h3 { "{user.email}" }
                                             span {
                                                 class: format!(
                                                     "settings-role-badge {}",
@@ -491,27 +779,7 @@ pub fn AuditSettingsSection(
             } else {
                 div { class: "settings-log-list",
                     for log in logs {
-                        article { class: "settings-log-card",
-                            div { class: "settings-log-head",
-                                div { class: "settings-log-title",
-                                    h3 { "{humanize_action(&log.action)}" }
-                                    p { class: "settings-log-meta",
-                                        "{format_timestamp(log.created_at)} · 目标 {log.target_type}"
-                                    }
-                                }
-                                span { class: "settings-log-tag", "{log.action}" }
-                            }
-
-                            div { class: "settings-log-meta-grid",
-                                span { class: "settings-log-chip", "用户 {optional_short_id(log.user_id.as_deref())}" }
-                                span { class: "settings-log-chip", "目标ID {optional_short_id(log.target_id.as_deref())}" }
-                                span { class: "settings-log-chip", {"IP ".to_string() + &log.ip_address.clone().unwrap_or_else(|| "未知".to_string())} }
-                            }
-
-                            if let Some(details) = &log.details {
-                                pre { class: "settings-code-block", "{format_json_details(details)}" }
-                            }
-                        }
+                        {render_audit_log_card(log)}
                     }
                 }
             }
@@ -556,6 +824,10 @@ pub fn AdvancedSettingsSection(
                 div { class: "settings-banner settings-banner-success", "{success_message}" }
             }
 
+            div { class: "settings-banner settings-banner-neutral",
+                "原始键值会直接写入底层 settings 表。标记为“需确认”的条目会触发分级确认，涉及存储切换时还会要求输入设置键名。"
+            }
+
             if is_loading && settings.is_empty() {
                 div { class: "settings-placeholder settings-placeholder-compact",
                     h3 { "正在加载原始设置" }
@@ -588,7 +860,7 @@ pub fn AdvancedSettingsSection(
                                                 span { class: "settings-kv-badge is-warning", "已脱敏" }
                                             }
                                             if setting.requires_confirmation {
-                                                span { class: "settings-kv-badge is-warning", "需确认" }
+                                                span { class: "settings-kv-badge is-warning", "需二次确认" }
                                             }
                                         }
                                     }
@@ -626,19 +898,147 @@ pub fn AdvancedSettingsSection(
     }
 }
 
-fn render_general_fields(form: SettingsFormState, disabled: bool) -> Element {
+pub fn render_general_fields(form: SettingsFormState, disabled: bool) -> Element {
     let mut site_name = form.site_name;
+    let mut mail_enabled = form.mail_enabled;
+    let mut mail_smtp_host = form.mail_smtp_host;
+    let mut mail_smtp_port = form.mail_smtp_port;
+    let mut mail_smtp_user = form.mail_smtp_user;
+    let mut mail_smtp_password = form.mail_smtp_password;
+    let mail_smtp_password_set = form.mail_smtp_password_set;
+    let mut mail_from_email = form.mail_from_email;
+    let mut mail_from_name = form.mail_from_name;
+    let mut mail_link_base_url = form.mail_link_base_url;
+    let mail_is_enabled = mail_enabled();
+    let mail_jump_target = summary_value(mail_link_base_url());
 
     rsx! {
         div { class: "settings-stack",
-            div { class: "settings-grid settings-grid-single",
-                label { class: "settings-field settings-field-full",
-                    span { "网站名称" }
-                    input {
-                        r#type: "text",
-                        value: "{site_name()}",
-                        oninput: move |event| site_name.set(event.value()),
-                        disabled,
+            div { class: "settings-status-summary",
+                {render_metric_card("站点名称", summary_value(site_name()))}
+                {render_metric_card("邮件服务", if mail_is_enabled { "已启用".to_string() } else { "未启用".to_string() })}
+                {render_metric_card("验证/重置跳转", mail_jump_target)}
+            }
+
+            if mail_is_enabled {
+                div { class: "settings-banner settings-banner-neutral",
+                    "邮件服务已开启。公开注册、邮箱验证和密码找回都会依赖这里的 SMTP 与跳转地址配置。"
+                }
+            } else {
+                div { class: "settings-banner settings-banner-neutral",
+                    "邮件服务当前关闭。用户仍可登录，但公开注册后的邮箱验证和密码找回邮件不会发送。"
+                }
+            }
+
+            div { class: "settings-subcard",
+                h3 { "站点识别" }
+                p { class: "settings-section-copy",
+                    "这些信息直接影响用户看到的站点名称、邮件署名以及验证后的返回地址。"
+                }
+                div { class: "settings-grid",
+                    label { class: "settings-field settings-field-full",
+                        span { "网站名称" }
+                        input {
+                            r#type: "text",
+                            value: "{site_name()}",
+                            oninput: move |event| site_name.set(event.value()),
+                            disabled,
+                        }
+                    }
+
+                    label { class: "settings-field",
+                        span { "发件邮箱" }
+                        input {
+                            r#type: "email",
+                            value: "{mail_from_email()}",
+                            oninput: move |event| mail_from_email.set(event.value()),
+                            disabled,
+                        }
+                    }
+
+                    label { class: "settings-field",
+                        span { "发件人名称" }
+                        input {
+                            r#type: "text",
+                            value: "{mail_from_name()}",
+                            oninput: move |event| mail_from_name.set(event.value()),
+                            disabled,
+                        }
+                    }
+
+                    label { class: "settings-field settings-field-full",
+                        span { "邮件跳转地址（用于密码重置和邮箱验证）" }
+                        input {
+                            r#type: "url",
+                            value: "{mail_link_base_url()}",
+                            oninput: move |event| mail_link_base_url.set(event.value()),
+                            disabled,
+                        }
+                    }
+                }
+            }
+
+            div { class: "settings-subcard",
+                h3 { "邮件投递" }
+                p { class: "settings-section-copy",
+                    "如果 SMTP 用户名和密码留空，系统将尝试匿名投递；一旦填写用户名，密码也必须同时提供。"
+                }
+                div { class: "settings-grid",
+                    label { class: "settings-check settings-field-full",
+                        input {
+                            r#type: "checkbox",
+                            checked: mail_enabled(),
+                            onchange: move |event| mail_enabled.set(event.checked()),
+                            disabled,
+                        }
+                        span { "启用邮件服务" }
+                    }
+
+                    label { class: "settings-field",
+                        span { "SMTP 主机" }
+                        input {
+                            r#type: "text",
+                            value: "{mail_smtp_host()}",
+                            oninput: move |event| mail_smtp_host.set(event.value()),
+                            disabled,
+                        }
+                    }
+
+                    label { class: "settings-field",
+                        span { "SMTP 端口" }
+                        input {
+                            r#type: "number",
+                            min: "1",
+                            value: "{mail_smtp_port()}",
+                            oninput: move |event| mail_smtp_port.set(event.value()),
+                            disabled,
+                        }
+                    }
+
+                    label { class: "settings-field",
+                        span { "SMTP 用户名（可选）" }
+                        input {
+                            r#type: "text",
+                            value: "{mail_smtp_user()}",
+                            oninput: move |event| mail_smtp_user.set(event.value()),
+                            disabled,
+                        }
+                    }
+
+                    label { class: "settings-field",
+                        span {
+                            if mail_smtp_password_set() {
+                                "SMTP 密码（留空表示不修改）"
+                            } else {
+                                "SMTP 密码（可选）"
+                            }
+                        }
+                        input {
+                            r#type: "password",
+                            value: "{mail_smtp_password()}",
+                            oninput: move |event| mail_smtp_password.set(event.value()),
+                            disabled,
+                        }
                     }
                 }
             }
@@ -646,37 +1046,71 @@ fn render_general_fields(form: SettingsFormState, disabled: bool) -> Element {
     }
 }
 
-fn render_storage_fields(form: SettingsFormState, disabled: bool) -> Element {
+pub fn render_storage_fields(form: SettingsFormState, disabled: bool) -> Element {
     let mut storage_backend = form.storage_backend;
     let mut local_storage_path = form.local_storage_path;
     let show_s3_fields = form.is_s3_backend();
+    let backend_label = if show_s3_fields {
+        "对象存储".to_string()
+    } else {
+        "本地目录".to_string()
+    };
+    let bucket_summary = if show_s3_fields {
+        summary_value((form.s3_bucket)())
+    } else {
+        "未启用".to_string()
+    };
 
     rsx! {
         div { class: "settings-stack",
-            div { class: "settings-grid",
-                label { class: "settings-field",
-                    span { "存储后端" }
-                    select {
-                        value: "{storage_backend()}",
-                        onchange: move |event| storage_backend.set(event.value()),
-                        disabled,
-                        option { value: "local", "local" }
-                        option { value: "s3", "s3" }
+            div { class: "settings-status-summary",
+                {render_metric_card("当前后端", backend_label)}
+                {render_metric_card("本地目录", summary_value(local_storage_path()))}
+                {render_metric_card("S3 Bucket", bucket_summary)}
+            }
+
+            div { class: "settings-banner settings-banner-neutral",
+                "存储后端切换属于运行时关键配置。保存后如果提示需要重启，请先确认目录或对象存储参数无误。"
+            }
+
+            div { class: "settings-subcard",
+                h3 { "写入策略" }
+                p { class: "settings-section-copy",
+                    "本地模式适合单机部署；S3 模式适合对象存储或 MinIO。无论使用哪种方式，本地目录仍建议保留为可访问的数据卷路径。"
+                }
+                div { class: "settings-grid",
+                    label { class: "settings-field",
+                        span { "存储后端" }
+                        select {
+                            value: "{storage_backend()}",
+                            onchange: move |event| storage_backend.set(event.value()),
+                            disabled,
+                            option { value: "local", "local" }
+                            option { value: "s3", "s3" }
+                        }
+                    }
+
+                    label { class: "settings-field settings-field-full",
+                        span { "本地存储路径" }
+                        input {
+                            r#type: "text",
+                            value: "{local_storage_path()}",
+                            oninput: move |event| local_storage_path.set(event.value()),
+                            disabled,
+                        }
                     }
                 }
+            }
 
-                label { class: "settings-field settings-field-full",
-                    span { "本地存储路径" }
-                    input {
-                        r#type: "text",
-                        value: "{local_storage_path()}",
-                        oninput: move |event| local_storage_path.set(event.value()),
-                        disabled,
+            if show_s3_fields {
+                div { class: "settings-subcard",
+                    h3 { "对象存储参数" }
+                    p { class: "settings-section-copy",
+                        "切到 S3 后，后端将使用 endpoint / region / bucket / key 进行读写。MinIO 通常需要开启 path style。"
                     }
-                }
-
-                if show_s3_fields {
-                    {render_s3_fields(form, disabled)}
+                    div { class: "settings-grid",
+                        {render_s3_fields(form, disabled)}
+                    }
                 }
             }
         }
@@ -831,7 +1265,7 @@ fn role_surface_class(role: &str) -> &'static str {
 
 fn humanize_action(action: &str) -> String {
     action
-        .split('_')
+        .split(|ch| ch == '_' || ch == '.')
         .filter(|segment| !segment.trim().is_empty())
         .map(|segment| {
             let mut chars = segment.chars();
@@ -842,6 +1276,502 @@ fn humanize_action(action: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+fn audit_title(log: &AuditLog) -> String {
+    match log.action.as_str() {
+        "admin.maintenance.deleted_files_cleanup.completed" | "cleanup_completed" => {
+            "已永久清理回收站文件".to_string()
+        }
+        "admin.maintenance.deleted_files_cleanup.failed" | "cleanup_failed" => {
+            "永久清理回收站失败".to_string()
+        }
+        "admin.maintenance.expired_images_cleanup.completed" | "expire_completed" => {
+            "已批量处理过期图片".to_string()
+        }
+        "admin.maintenance.expired_images_cleanup.failed" | "expire_failed" => {
+            "批量处理过期图片失败".to_string()
+        }
+        "admin.maintenance.database_backup.created" | "backup_created" => {
+            "已创建数据库备份".to_string()
+        }
+        "admin.maintenance.database_backup.downloaded" => "已下载数据库备份".to_string(),
+        "admin.maintenance.database_backup.deleted" => "已删除数据库备份".to_string(),
+        "admin.maintenance.database_backup.delete_failed" => "删除数据库备份失败".to_string(),
+        "admin.maintenance.database_backup.failed" => "数据库备份失败".to_string(),
+        "admin.maintenance.database_restore.prechecked" => "数据库恢复预检已通过".to_string(),
+        "admin.maintenance.database_restore.precheck_failed" => "数据库恢复预检未通过".to_string(),
+        "admin.maintenance.database_restore.scheduled" => "已写入数据库恢复计划".to_string(),
+        "system.database_restore.completed" => "数据库恢复已完成".to_string(),
+        "system.database_restore.rollback_applied" => "数据库恢复后已自动回滚".to_string(),
+        "system.database_restore.failed" => "数据库恢复失败".to_string(),
+        "admin.user.role_updated" => "已更新用户角色".to_string(),
+        "admin.settings.config_updated" => "已保存系统设置".to_string(),
+        "admin.settings.raw_setting_updated" => "已更新原始设置项".to_string(),
+        "system.install_completed" => "已完成安装向导".to_string(),
+        "image.upload" => "已上传图片".to_string(),
+        "image.view" => "已访问图片".to_string(),
+        "user.login" => "用户已登录".to_string(),
+        _ => humanize_action(&log.action),
+    }
+}
+
+fn audit_summary(log: &AuditLog) -> String {
+    match log.action.as_str() {
+        "admin.maintenance.deleted_files_cleanup.completed" | "cleanup_completed" => {
+            if let Some(count) = audit_detail_i64(log.details.as_ref(), "removed_count") {
+                format!("共永久移除 {} 个已删除文件。", count)
+            } else {
+                "已完成回收站文件永久清理。".to_string()
+            }
+        }
+        "admin.maintenance.deleted_files_cleanup.failed" | "cleanup_failed" => {
+            audit_error_summary(log)
+                .unwrap_or_else(|| "回收站文件永久清理失败，请检查数据库与存储状态。".to_string())
+        }
+        "admin.maintenance.expired_images_cleanup.completed" | "expire_completed" => {
+            if let Some(count) = audit_detail_i64(log.details.as_ref(), "affected_count") {
+                format!("共处理 {} 张已过期图片，并移入回收站。", count)
+            } else {
+                "已处理所有符合条件的过期图片。".to_string()
+            }
+        }
+        "admin.maintenance.expired_images_cleanup.failed" | "expire_failed" => {
+            audit_error_summary(log)
+                .unwrap_or_else(|| "过期图片批量处理失败，请检查图片数据与数据库状态。".to_string())
+        }
+        "admin.maintenance.database_backup.created" | "backup_created" => {
+            audit_detail_str(log.details.as_ref(), "filename")
+                .map(|filename| format!("备份文件已生成：{}。", filename))
+                .unwrap_or_else(|| "数据库备份已生成。".to_string())
+        }
+        "admin.maintenance.database_backup.downloaded" => {
+            let filename = audit_detail_str(log.details.as_ref(), "filename")
+                .unwrap_or_else(|| "数据库备份".to_string());
+            match audit_detail_i64(log.details.as_ref(), "size_bytes") {
+                Some(size_bytes) => format!(
+                    "已下载备份文件 {}，大小 {}。",
+                    filename,
+                    format_storage_bytes(size_bytes)
+                ),
+                None => format!("已下载备份文件 {}。", filename),
+            }
+        }
+        "admin.maintenance.database_backup.deleted" => {
+            let filename = audit_detail_str(log.details.as_ref(), "filename")
+                .unwrap_or_else(|| "数据库备份".to_string());
+            match audit_detail_i64(log.details.as_ref(), "size_bytes") {
+                Some(size_bytes) => format!(
+                    "已删除备份文件 {}，释放 {}。",
+                    filename,
+                    format_storage_bytes(size_bytes)
+                ),
+                None => format!("已删除备份文件 {}。", filename),
+            }
+        }
+        "admin.maintenance.database_backup.delete_failed" => audit_error_summary(log)
+            .unwrap_or_else(|| {
+                "删除数据库备份失败，请检查文件是否仍存在以及备份目录权限。".to_string()
+            }),
+        "admin.maintenance.database_backup.failed" => {
+            audit_error_summary(log).unwrap_or_else(|| {
+                "数据库备份失败，请检查备份目录、数据库连接和导出命令。".to_string()
+            })
+        }
+        "admin.maintenance.database_restore.prechecked" => {
+            let filename = audit_detail_str(log.details.as_ref(), "filename")
+                .unwrap_or_else(|| "SQLite 备份".to_string());
+            let warnings = audit_detail_string_list(log.details.as_ref(), "warnings");
+            if warnings.is_empty() {
+                format!(
+                    "备份 {} 已通过恢复预检，可以在下一次重启前执行文件级恢复。",
+                    filename
+                )
+            } else {
+                format!(
+                    "备份 {} 已通过恢复预检；注意事项：{}。",
+                    filename,
+                    warnings.join("；")
+                )
+            }
+        }
+        "admin.maintenance.database_restore.precheck_failed" => {
+            let filename = audit_detail_str(log.details.as_ref(), "filename")
+                .unwrap_or_else(|| "SQLite 备份".to_string());
+            let blockers = audit_detail_string_list(log.details.as_ref(), "blockers");
+            if blockers.is_empty() {
+                format!("备份 {} 未通过恢复预检。", filename)
+            } else {
+                format!(
+                    "备份 {} 未通过恢复预检：{}。",
+                    filename,
+                    blockers.join("；")
+                )
+            }
+        }
+        "admin.maintenance.database_restore.scheduled" => {
+            let filename = audit_detail_str(log.details.as_ref(), "filename")
+                .unwrap_or_else(|| "SQLite 备份".to_string());
+            format!(
+                "备份 {} 的恢复计划已写入；需要尽快重启服务，真正恢复会在下一次启动前执行。",
+                filename
+            )
+        }
+        "system.database_restore.completed" => {
+            let filename = audit_detail_str(log.details.as_ref(), "filename")
+                .unwrap_or_else(|| "SQLite 备份".to_string());
+            let rollback_filename = audit_detail_str(log.details.as_ref(), "rollback_filename");
+            match rollback_filename {
+                Some(rollback) => format!(
+                    "备份 {} 已完成恢复，同时保留回滚快照 {} 以便必要时手工追溯。",
+                    filename, rollback
+                ),
+                None => format!("备份 {} 已在启动前完成恢复。", filename),
+            }
+        }
+        "system.database_restore.rollback_applied" => {
+            audit_detail_str(log.details.as_ref(), "message").unwrap_or_else(|| {
+                "恢复后的数据库启动失败，系统已自动回滚到恢复前快照。".to_string()
+            })
+        }
+        "system.database_restore.failed" => audit_detail_str(log.details.as_ref(), "message")
+            .unwrap_or_else(|| "数据库恢复失败，请检查最后一次恢复结果与启动日志。".to_string()),
+        "admin.user.role_updated" => {
+            let email = audit_detail_str(log.details.as_ref(), "user_email")
+                .unwrap_or_else(|| "目标用户".to_string());
+            let previous_role = audit_detail_str(log.details.as_ref(), "previous_role")
+                .unwrap_or_else(|| "unknown".to_string());
+            let new_role = audit_detail_str(log.details.as_ref(), "new_role")
+                .unwrap_or_else(|| "unknown".to_string());
+            format!(
+                "{} 的角色已从 {} 调整为 {}。",
+                email,
+                role_label(&previous_role),
+                role_label(&new_role)
+            )
+        }
+        "admin.settings.config_updated" => {
+            let changed_keys = audit_detail_string_list(log.details.as_ref(), "changed_keys")
+                .into_iter()
+                .map(|key| setting_key_label(&key).to_string())
+                .collect::<Vec<_>>();
+            let restart_required = audit_detail_bool(log.details.as_ref(), "restart_required");
+            if changed_keys.is_empty() {
+                "已保存结构化系统设置。".to_string()
+            } else if restart_required {
+                format!(
+                    "已更新 {}，且这些调整需要重启服务后完全生效。",
+                    changed_keys.join("、")
+                )
+            } else {
+                format!("已更新 {}。", changed_keys.join("、"))
+            }
+        }
+        "admin.settings.raw_setting_updated" => {
+            let key = audit_detail_str(log.details.as_ref(), "setting_key")
+                .map(|value| setting_key_label(&value).to_string())
+                .unwrap_or_else(|| "未知键名".to_string());
+            let restart_required = audit_detail_bool(log.details.as_ref(), "restart_required");
+            if restart_required {
+                format!("已通过高级设置修改 {}，需要重启服务后完全生效。", key)
+            } else {
+                format!("已通过高级设置修改 {}。", key)
+            }
+        }
+        "system.install_completed" => {
+            let site_name = audit_detail_str(log.details.as_ref(), "site_name")
+                .unwrap_or_else(|| "站点".to_string());
+            let storage_backend = audit_detail_str(log.details.as_ref(), "storage_backend")
+                .unwrap_or_else(|| "local".to_string());
+            let storage_label = if storage_backend.eq_ignore_ascii_case("s3") {
+                "S3 / MinIO"
+            } else {
+                "本地目录"
+            };
+            let mail_status = if audit_detail_bool(log.details.as_ref(), "mail_enabled") {
+                "邮件已启用"
+            } else {
+                "邮件未启用"
+            };
+            let favicon_status = if audit_detail_bool(log.details.as_ref(), "favicon_configured") {
+                "图标已配置"
+            } else {
+                "图标未配置"
+            };
+            format!(
+                "安装完成，站点名称为 {}，存储使用 {}，{}，{}。",
+                site_name, storage_label, mail_status, favicon_status
+            )
+        }
+        "image.upload" => {
+            let filename = audit_detail_str(log.details.as_ref(), "original_filename")
+                .or_else(|| audit_detail_str(log.details.as_ref(), "stored_filename"))
+                .unwrap_or_else(|| "未命名图片".to_string());
+            let mut segments = vec![format!("已上传 {}", filename)];
+            if let Some(format) = audit_detail_str(log.details.as_ref(), "format") {
+                segments.push(format!("格式 {}", format.to_uppercase()));
+            }
+            if let Some(size_bytes) = audit_detail_i64(log.details.as_ref(), "size_bytes") {
+                segments.push(format!("大小 {}", format_storage_bytes(size_bytes)));
+            }
+            format!("{}。", segments.join("，"))
+        }
+        "image.view" => {
+            if let Some(target_id) = log.target_id.as_deref() {
+                format!(
+                    "已记录一次图片访问，目标ID 为 {}。",
+                    short_identifier(target_id)
+                )
+            } else {
+                "已记录一次图片访问。".to_string()
+            }
+        }
+        "user.login" => audit_detail_str(log.details.as_ref(), "email")
+            .map(|email| format!("{email} 已登录控制台。"))
+            .unwrap_or_else(|| "当前账户已登录控制台。".to_string()),
+        _ => log
+            .details
+            .as_ref()
+            .map(format_json_details)
+            .unwrap_or_else(|| "无附加详情".to_string()),
+    }
+}
+
+fn audit_category_label(log: &AuditLog) -> &'static str {
+    match log.action.as_str() {
+        "admin.maintenance.deleted_files_cleanup.completed"
+        | "admin.maintenance.deleted_files_cleanup.failed"
+        | "cleanup_completed"
+        | "cleanup_failed"
+        | "admin.maintenance.expired_images_cleanup.completed"
+        | "admin.maintenance.expired_images_cleanup.failed"
+        | "expire_completed"
+        | "expire_failed"
+        | "admin.maintenance.database_backup.created"
+        | "admin.maintenance.database_backup.deleted"
+        | "admin.maintenance.database_backup.delete_failed"
+        | "admin.maintenance.database_backup.failed"
+        | "admin.maintenance.database_backup.downloaded"
+        | "admin.maintenance.database_restore.prechecked"
+        | "admin.maintenance.database_restore.precheck_failed"
+        | "admin.maintenance.database_restore.scheduled"
+        | "system.database_restore.completed"
+        | "system.database_restore.rollback_applied"
+        | "system.database_restore.failed"
+        | "backup_created" => "维护操作",
+        "admin.user.role_updated" => "权限变更",
+        "admin.settings.config_updated" | "admin.settings.raw_setting_updated" => "设置变更",
+        "system.install_completed" => "安装初始化",
+        "image.upload" | "image.view" => "图片操作",
+        "user.login" => "认证事件",
+        _ => "系统事件",
+    }
+}
+
+fn audit_category_class(log: &AuditLog) -> &'static str {
+    match audit_risk_value(log).as_deref() {
+        Some("danger") => "is-danger",
+        Some("warning") => "is-warning",
+        Some("info") => "is-info",
+        _ => "is-neutral",
+    }
+}
+
+fn audit_risk_label(log: &AuditLog) -> &'static str {
+    match audit_risk_value(log).as_deref() {
+        Some("danger") => "高风险",
+        Some("warning") => "需确认",
+        Some("info") => "常规",
+        _ => "事件",
+    }
+}
+
+fn audit_risk_value(log: &AuditLog) -> Option<String> {
+    audit_detail_str(log.details.as_ref(), "risk_level").or_else(|| match log.action.as_str() {
+        "admin.maintenance.deleted_files_cleanup.completed"
+        | "admin.maintenance.deleted_files_cleanup.failed"
+        | "cleanup_completed"
+        | "cleanup_failed"
+        | "admin.maintenance.database_backup.deleted"
+        | "admin.maintenance.database_backup.delete_failed"
+        | "admin.maintenance.database_restore.prechecked"
+        | "admin.maintenance.database_restore.precheck_failed"
+        | "admin.maintenance.database_restore.scheduled"
+        | "system.database_restore.completed"
+        | "system.database_restore.rollback_applied"
+        | "system.database_restore.failed"
+        | "admin.user.role_updated" => Some("danger".to_string()),
+        "admin.maintenance.expired_images_cleanup.completed"
+        | "admin.maintenance.expired_images_cleanup.failed"
+        | "expire_completed"
+        | "expire_failed"
+        | "admin.settings.config_updated"
+        | "admin.settings.raw_setting_updated" => Some("warning".to_string()),
+        "admin.maintenance.database_backup.created"
+        | "admin.maintenance.database_backup.failed"
+        | "admin.maintenance.database_backup.downloaded"
+        | "backup_created"
+        | "system.install_completed"
+        | "image.upload"
+        | "image.view"
+        | "user.login" => Some("info".to_string()),
+        _ => None,
+    })
+}
+
+fn is_bootstrap_admin_id(value: &str) -> bool {
+    value == "00000000-0000-0000-0000-000000000001"
+}
+
+fn is_maintenance_action(action: &str, target_type: &str) -> bool {
+    matches!(
+        action,
+        "admin.maintenance.deleted_files_cleanup.completed"
+            | "admin.maintenance.deleted_files_cleanup.failed"
+            | "cleanup_completed"
+            | "cleanup_failed"
+            | "admin.maintenance.expired_images_cleanup.completed"
+            | "admin.maintenance.expired_images_cleanup.failed"
+            | "expire_completed"
+            | "expire_failed"
+            | "admin.maintenance.database_backup.created"
+            | "admin.maintenance.database_backup.deleted"
+            | "admin.maintenance.database_backup.delete_failed"
+            | "admin.maintenance.database_backup.failed"
+            | "admin.maintenance.database_backup.downloaded"
+            | "admin.maintenance.database_restore.prechecked"
+            | "admin.maintenance.database_restore.precheck_failed"
+            | "admin.maintenance.database_restore.scheduled"
+            | "system.database_restore.completed"
+            | "system.database_restore.rollback_applied"
+            | "system.database_restore.failed"
+            | "backup_created"
+    ) || target_type == "maintenance"
+}
+
+fn audit_target_type_label(target_type: &str) -> String {
+    match target_type {
+        "maintenance" => "维护任务".to_string(),
+        "settings" => "系统设置".to_string(),
+        "setting" => "原始设置项".to_string(),
+        "user" => "用户".to_string(),
+        "image" => "图片".to_string(),
+        "system" => "系统".to_string(),
+        _ => humanize_action(target_type),
+    }
+}
+
+fn audit_actor_label(log: &AuditLog) -> String {
+    audit_detail_str(log.details.as_ref(), "admin_email")
+        .or_else(|| audit_detail_str(log.details.as_ref(), "actor_email"))
+        .or_else(|| audit_detail_str(log.details.as_ref(), "email"))
+        .or_else(|| {
+            if log.action == "user.login" {
+                Some("当前用户".to_string())
+            } else if log.action == "system.install_completed" {
+                Some("安装向导".to_string())
+            } else if is_maintenance_action(&log.action, &log.target_type)
+                && log.user_id.as_deref().is_some_and(is_bootstrap_admin_id)
+            {
+                Some("系统任务".to_string())
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| optional_short_id(log.user_id.as_deref()))
+}
+
+fn audit_error_summary(log: &AuditLog) -> Option<String> {
+    audit_detail_str(log.details.as_ref(), "error").map(|error| format!("错误信息：{}。", error))
+}
+
+fn audit_detail_str(details: Option<&serde_json::Value>, key: &str) -> Option<String> {
+    details?.get(key)?.as_str().map(|value| value.to_string())
+}
+
+fn audit_detail_i64(details: Option<&serde_json::Value>, key: &str) -> Option<i64> {
+    details?.get(key)?.as_i64()
+}
+
+fn audit_detail_bool(details: Option<&serde_json::Value>, key: &str) -> bool {
+    details
+        .and_then(|value| value.get(key))
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+}
+
+fn audit_detail_string_list(details: Option<&serde_json::Value>, key: &str) -> Vec<String> {
+    details
+        .and_then(|value| value.get(key))
+        .and_then(|value| value.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str().map(|value| value.to_string()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn setting_key_label(key: &str) -> String {
+    match key {
+        "site_name" => "网站名称".to_string(),
+        "storage_backend" => "存储后端".to_string(),
+        "local_storage_path" => "本地存储路径".to_string(),
+        "mail_enabled" => "邮件服务开关".to_string(),
+        "mail_smtp_host" => "SMTP 主机".to_string(),
+        "mail_smtp_port" => "SMTP 端口".to_string(),
+        "mail_smtp_user" => "SMTP 用户名".to_string(),
+        "mail_smtp_password" => "SMTP 密码".to_string(),
+        "mail_from_email" => "发件邮箱".to_string(),
+        "mail_from_name" => "发件人名称".to_string(),
+        "mail_link_base_url" => "邮件跳转地址".to_string(),
+        "s3_endpoint" => "S3 Endpoint".to_string(),
+        "s3_region" => "S3 Region".to_string(),
+        "s3_bucket" => "S3 Bucket".to_string(),
+        "s3_prefix" => "S3 Prefix".to_string(),
+        "s3_access_key" => "S3 Access Key".to_string(),
+        "s3_secret_key" => "S3 Secret Key".to_string(),
+        "s3_force_path_style" => "S3 Path Style".to_string(),
+        _ => key.to_string(),
+    }
+}
+
+fn render_audit_log_card(log: AuditLog) -> Element {
+    let audit_title = audit_title(&log);
+    let audit_summary = audit_summary(&log);
+    let audit_category = audit_category_label(&log);
+    let audit_category_class = audit_category_class(&log);
+    let audit_risk = audit_risk_label(&log);
+    let target_type = audit_target_type_label(&log.target_type);
+    let actor = audit_actor_label(&log);
+
+    rsx! {
+        article { class: "settings-log-card",
+            div { class: "settings-log-head",
+                div { class: "settings-log-title",
+                    h3 { "{audit_title}" }
+                    p { class: "settings-log-meta",
+                        "{format_timestamp(log.created_at)} · 目标 {target_type}"
+                    }
+                    p { class: "settings-log-summary", "{audit_summary}" }
+                }
+                span { class: format!("settings-log-tag {}", audit_category_class), "{audit_category}" }
+            }
+
+            div { class: "settings-log-meta-grid",
+                span { class: format!("settings-log-chip {}", audit_category_class), "{audit_risk}" }
+                span { class: "settings-log-chip", "{log.action}" }
+                span { class: "settings-log-chip", "操作者 {actor}" }
+                span { class: "settings-log-chip", "目标ID {optional_short_id(log.target_id.as_deref())}" }
+                span { class: "settings-log-chip", {"IP ".to_string() + &log.ip_address.clone().unwrap_or_else(|| "未知".to_string())} }
+            }
+
+            if let Some(details) = &log.details {
+                pre { class: "settings-code-block", "{format_json_details(details)}" }
+            }
+        }
+    }
 }
 
 fn format_timestamp(timestamp: DateTime<Utc>) -> String {
@@ -864,10 +1794,60 @@ fn format_storage_bytes(bytes: i64) -> String {
     }
 }
 
+fn format_storage_bytes_u64(bytes: u64) -> String {
+    if bytes > i64::MAX as u64 {
+        format!("{} B", bytes)
+    } else {
+        format_storage_bytes(bytes as i64)
+    }
+}
+
+fn backup_database_kind_label(filename: &str) -> &'static str {
+    if filename.ends_with(".sqlite3") {
+        "SQLite"
+    } else if filename.ends_with(".sql") {
+        "PostgreSQL"
+    } else {
+        "Backup"
+    }
+}
+
+fn backup_supports_restore(filename: &str) -> bool {
+    filename.ends_with(".sqlite3")
+}
+
+fn restore_status_label(status: &str) -> &'static str {
+    match status {
+        "completed" => "已完成",
+        "rolled_back" => "已回滚",
+        "failed" => "失败",
+        "pending" => "待执行",
+        _ => "未知",
+    }
+}
+
+fn restore_status_surface_class(status: &str) -> &'static str {
+    match status {
+        "completed" => "is-info",
+        "rolled_back" | "failed" => "is-danger",
+        "pending" => "is-warning",
+        _ => "",
+    }
+}
+
 fn format_storage_mb(storage_used_mb: Option<f64>) -> String {
     storage_used_mb
         .map(|value| format!("{value:.2} MB"))
         .unwrap_or_else(|| "未知".to_string())
+}
+
+fn summary_value(value: String) -> String {
+    let value = value.trim().to_string();
+    if value.is_empty() {
+        "未配置".to_string()
+    } else {
+        value
+    }
 }
 
 fn short_identifier(value: &str) -> String {

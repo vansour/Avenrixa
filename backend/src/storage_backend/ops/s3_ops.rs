@@ -94,28 +94,6 @@ pub(super) async fn delete(
     Ok(())
 }
 
-pub(super) async fn copy(
-    manager: &StorageManager,
-    settings: &RuntimeSettings,
-    src_key: &str,
-    dst_key: &str,
-) -> Result<(), AppError> {
-    let cached = manager.resolve_s3_client(settings).await?;
-    let src_object_key = build_s3_object_key(cached.prefix.as_deref(), src_key);
-    let dst_object_key = build_s3_object_key(cached.prefix.as_deref(), dst_key);
-    let copy_source = format!("{}/{}", cached.bucket, src_object_key);
-    cached
-        .client
-        .copy_object()
-        .bucket(cached.bucket.clone())
-        .key(dst_object_key)
-        .copy_source(copy_source)
-        .send()
-        .await
-        .map_err(|error| s3_error("copy S3 object", error))?;
-    Ok(())
-}
-
 fn s3_error(action: &str, error: impl std::fmt::Display) -> AppError {
     AppError::Internal(anyhow::anyhow!("Failed to {}: {}", action, error))
 }

@@ -17,28 +17,36 @@ pub enum AppError {
     RateLimitExceeded(String),
     #[error("用户不存在")]
     UserNotFound,
-    #[error("用户名已存在")]
-    UsernameExists,
+    #[error("邮箱已被使用")]
+    EmailExists,
+    #[error("邮箱尚未验证，请先完成邮件验证")]
+    EmailNotVerified,
     #[error("邮件服务未启用")]
     MailServiceNotEnabled,
     #[error("重置令牌已过期")]
     ResetTokenExpired,
     #[error("重置令牌无效")]
     ResetTokenInvalid,
+    #[error("邮箱验证链接已过期")]
+    EmailVerificationExpired,
+    #[error("邮箱验证链接无效")]
+    EmailVerificationInvalid,
     #[error("图片不存在")]
     ImageNotFound,
+    #[error("备份文件不存在")]
+    BackupNotFound,
     #[error("无效的图片格式")]
     InvalidImageFormat,
     #[error("权限不足")]
     Forbidden,
     #[error("需要管理员权限")]
     AdminRequired,
-    #[error("用户名长度必须在3-50 字符之间")]
-    InvalidUsernameLength,
+    #[error("系统尚未完成安装")]
+    AppNotInstalled,
+    #[error("系统已完成安装")]
+    AppAlreadyInstalled,
     #[error("密码长度至少为 6 个字符")]
     InvalidPasswordLength,
-    #[error("分类名称不能为空")]
-    EmptyCategoryName,
     #[error("无效的分页参数")]
     InvalidPagination,
     #[error("{0}")]
@@ -64,17 +72,21 @@ impl AppError {
             Self::HashError(_) => "HASH_ERROR",
             Self::PasswordAlreadyUsed => "PASSWORD_ALREADY_USED",
             Self::UserNotFound => "USER_NOT_FOUND",
-            Self::UsernameExists => "USERNAME_EXISTS",
+            Self::EmailExists => "EMAIL_EXISTS",
+            Self::EmailNotVerified => "EMAIL_NOT_VERIFIED",
             Self::MailServiceNotEnabled => "MAIL_SERVICE_NOT_ENABLED",
             Self::ResetTokenExpired => "RESET_TOKEN_EXPIRED",
             Self::ResetTokenInvalid => "RESET_TOKEN_INVALID",
+            Self::EmailVerificationExpired => "EMAIL_VERIFICATION_EXPIRED",
+            Self::EmailVerificationInvalid => "EMAIL_VERIFICATION_INVALID",
             Self::ImageNotFound => "IMAGE_NOT_FOUND",
+            Self::BackupNotFound => "BACKUP_NOT_FOUND",
             Self::InvalidImageFormat => "INVALID_IMAGE_FORMAT",
             Self::Forbidden => "FORBIDDEN",
             Self::AdminRequired => "ADMIN_REQUIRED",
-            Self::InvalidUsernameLength => "INVALID_USERNAME_LENGTH",
+            Self::AppNotInstalled => "APP_NOT_INSTALLED",
+            Self::AppAlreadyInstalled => "APP_ALREADY_INSTALLED",
             Self::InvalidPasswordLength => "INVALID_PASSWORD_LENGTH",
-            Self::EmptyCategoryName => "EMPTY_CATEGORY_NAME",
             Self::RateLimitExceeded(_) => "RATE_LIMIT_EXCEEDED",
             Self::InvalidPagination => "INVALID_PAGINATION",
             Self::ValidationError(_) => "VALIDATION_ERROR",
@@ -94,17 +106,21 @@ impl AppError {
                 | Self::InvalidPassword
                 | Self::PasswordAlreadyUsed
                 | Self::UserNotFound
-                | Self::UsernameExists
+                | Self::EmailExists
+                | Self::EmailNotVerified
                 | Self::MailServiceNotEnabled
                 | Self::ResetTokenExpired
                 | Self::ResetTokenInvalid
+                | Self::EmailVerificationExpired
+                | Self::EmailVerificationInvalid
                 | Self::ImageNotFound
+                | Self::BackupNotFound
                 | Self::InvalidImageFormat
                 | Self::Forbidden
                 | Self::AdminRequired
-                | Self::InvalidUsernameLength
+                | Self::AppNotInstalled
+                | Self::AppAlreadyInstalled
                 | Self::InvalidPasswordLength
-                | Self::EmptyCategoryName
                 | Self::RateLimitExceeded(_)
                 | Self::InvalidPagination
                 | Self::ValidationError(_)
@@ -123,7 +139,8 @@ impl From<StatusCode> for AppError {
             StatusCode::FORBIDDEN => AppError::Forbidden,
             StatusCode::NOT_FOUND => AppError::ImageNotFound,
             StatusCode::BAD_REQUEST => AppError::ValidationError("请求参数错误".to_string()),
-            StatusCode::CONFLICT => AppError::UsernameExists,
+            StatusCode::CONFLICT => AppError::EmailExists,
+            StatusCode::SERVICE_UNAVAILABLE => AppError::AppNotInstalled,
             _ => AppError::Internal(anyhow::anyhow!("HTTP error: {}", status)),
         }
     }

@@ -1,9 +1,9 @@
 use crate::app_context::{use_image_service, use_image_store, use_toast_store};
 use crate::components::{ImageGrid, Loading};
+use crate::store::ImageCollectionKind;
 use crate::types::api::PaginationParams;
 use crate::types::models::ImageItem;
 use dioxus::prelude::*;
-use std::collections::HashSet;
 
 #[cfg(target_arch = "wasm32")]
 fn open_in_new_tab(url: &str) -> bool {
@@ -23,91 +23,76 @@ pub fn ImageListPage() -> Element {
     let image_service = use_image_service();
     let image_store = use_image_store();
     let toast_store = use_toast_store();
-
-    let mut is_loading = use_signal(|| false);
-    let mut is_deleting = use_signal(|| false);
-    let mut error_message = use_signal(String::new);
-    let mut selected_ids = use_signal(HashSet::<String>::new);
-    let mut reload_tick = use_signal(|| 0_u64);
-    let mut current_page = use_signal(|| 1_i32);
-    let mut page_size = use_signal(|| 20_i32);
+    let kind = ImageCollectionKind::Active;
 
     let _load_images = use_resource({
         let image_service = image_service.clone();
         let image_store = image_store.clone();
         let toast_store = toast_store.clone();
         move || {
-            let _ = reload_tick();
-            let page = current_page().max(1);
-            let size = page_size().clamp(1, 100);
+            let state = image_store.collection(kind);
+            let page = state.current_page.max(1) as i32;
+            let size = state.page_size.clamp(1, 100) as i32;
+            let _ = state.reload_token;
             let image_service = image_service.clone();
             let image_store = image_store.clone();
             let toast_store = toast_store.clone();
             async move {
-                is_loading.set(true);
-                image_store.set_loading(true);
-                error_message.set(String::new());
+                image_store.set_loading(kind, true);
+                image_store.clear_error(kind);
 
                 let params = PaginationParams {
                     page: Some(page),
                     page_size: Some(size),
-                    category_id: None,
                     tag: None,
                 };
 
                 match image_service.get_images(params).await {
                     Ok(result) => {
                         if result.data.is_empty() && page > 1 && result.total > 0 {
-                            current_page.set(page - 1);
-                            image_store.set_loading(false);
-                            is_loading.set(false);
+                            image_store.set_page(kind, (page - 1) as u32);
+                            image_store.set_loading(kind, false);
                             return;
                         }
-
-                        let normalized_page = result.page.max(1);
-                        if normalized_page != page {
-                            current_page.set(normalized_page);
-                        }
-                        selected_ids.set(HashSet::new());
                     }
                     Err(error) => {
                         let message = format!("加载图片失败: {}", error);
-                        error_message.set(message.clone());
+                        image_store.set_error_message(kind, message.clone());
                         toast_store.show_error(message);
                     }
                 }
 
-                image_store.set_loading(false);
-                is_loading.set(false);
+                image_store.set_loading(kind, false);
             }
         }
     });
 
+    let image_store_for_refresh = image_store.clone();
     let handle_refresh = move |_| {
-        reload_tick.set(reload_tick().wrapping_add(1));
+        image_store_for_refresh.mark_for_reload(kind);
     };
 
+    let image_store_for_prev_page = image_store.clone();
     let handle_prev_page = move |_| {
-        if is_loading() || current_page() <= 1 {
+        let state = image_store_for_prev_page.collection(kind);
+        if state.is_loading || state.is_processing || state.current_page <= 1 {
             return;
         }
-        current_page.set(current_page() - 1);
+        image_store_for_prev_page.set_page(kind, state.current_page - 1);
     };
 
     let image_store_for_next_page = image_store.clone();
     let handle_next_page = move |_| {
-        if is_loading() || !image_store_for_next_page.has_more() {
+        let state = image_store_for_next_page.collection(kind);
+        if state.is_loading || state.is_processing || !state.has_more {
             return;
         }
-        current_page.set(current_page() + 1);
+        image_store_for_next_page.set_page(kind, state.current_page + 1);
     };
 
+    let image_store_for_toggle_select = image_store.clone();
     let handle_toggle_select = move |image_key: String| {
-        let mut ids = selected_ids();
-        if !ids.insert(image_key.clone()) {
-            ids.remove(&image_key);
-        }
-        selected_ids.set(ids);
+        image_store_for_toggle_select.toggle_selection(kind, &image_key);
     };
 
     let toast_store_for_download = toast_store.clone();
@@ -119,16 +104,19 @@ pub fn ImageListPage() -> Element {
     };
 
     let image_service_for_delete = image_service.clone();
+    let image_store_for_delete = image_store.clone();
     let toast_store_for_delete = toast_store.clone();
     let handle_delete = move |image: ImageItem| {
-        if is_deleting() {
+        let state = image_store_for_delete.collection(kind);
+        if state.is_processing {
             return;
         }
 
         let image_service = image_service_for_delete.clone();
+        let image_store = image_store_for_delete.clone();
         let toast_store = toast_store_for_delete.clone();
         spawn(async move {
-            is_deleting.set(true);
+            image_store.set_processing(kind, true);
 
             match image_service
                 .delete_images(vec![image.image_key.clone()], false)
@@ -136,96 +124,77 @@ pub fn ImageListPage() -> Element {
             {
                 Ok(_) => {
                     toast_store.show_success(format!("已删除: {}", image.display_name()));
-                    let mut ids = selected_ids();
-                    ids.remove(&image.image_key);
-                    selected_ids.set(ids);
-                    reload_tick.set(reload_tick().wrapping_add(1));
+                    image_store.remove_selection(kind, &image.image_key);
+                    image_store.mark_for_reload(kind);
                 }
                 Err(error) => {
                     toast_store.show_error(format!("删除失败: {}", error));
                 }
             }
 
-            is_deleting.set(false);
+            image_store.set_processing(kind, false);
         });
     };
 
     let image_store_for_toggle_all = image_store.clone();
     let handle_toggle_all = move |_| {
-        let images = image_store_for_toggle_all.images();
-        if images.is_empty() {
-            selected_ids.set(HashSet::new());
-            return;
-        }
-
-        let mut ids = selected_ids();
-        let is_all_selected = images.iter().all(|image| ids.contains(&image.image_key));
-        if is_all_selected {
-            for image in images {
-                ids.remove(&image.image_key);
-            }
-        } else {
-            for image in images {
-                ids.insert(image.image_key);
-            }
-        }
-        selected_ids.set(ids);
+        image_store_for_toggle_all.toggle_all_visible(kind);
     };
 
+    let image_store_for_page_size = image_store.clone();
     let handle_page_size_change = move |event: Event<FormData>| {
         let raw = event.value();
-        if let Ok(size) = raw.parse::<i32>() {
+        if let Ok(size) = raw.parse::<u32>() {
             let normalized_size = size.clamp(1, 100);
-            if normalized_size != page_size() {
-                page_size.set(normalized_size);
-                current_page.set(1);
-                selected_ids.set(HashSet::new());
+            let state = image_store_for_page_size.collection(kind);
+            if normalized_size != state.page_size {
+                image_store_for_page_size.set_page_size(kind, normalized_size);
+                image_store_for_page_size.set_page(kind, 1);
+                image_store_for_page_size.clear_selection(kind);
             }
         }
     };
 
     let image_service_for_batch_delete = image_service.clone();
+    let image_store_for_batch_delete = image_store.clone();
     let toast_store_for_batch_delete = toast_store.clone();
     let handle_delete_selected = move |_| {
-        if is_deleting() {
+        let state = image_store_for_batch_delete.collection(kind);
+        if state.is_processing || state.selected_ids.is_empty() {
             return;
         }
 
-        let ids = selected_ids();
-        if ids.is_empty() {
-            return;
-        }
-
-        let delete_list: Vec<String> = ids.iter().cloned().collect();
+        let delete_list: Vec<String> = state.selected_ids.iter().cloned().collect();
         let count = delete_list.len();
         let image_service = image_service_for_batch_delete.clone();
+        let image_store = image_store_for_batch_delete.clone();
         let toast_store = toast_store_for_batch_delete.clone();
 
         spawn(async move {
-            is_deleting.set(true);
+            image_store.set_processing(kind, true);
 
             match image_service.delete_images(delete_list, false).await {
                 Ok(_) => {
                     toast_store.show_success(format!("已删除 {} 张图片", count));
-                    selected_ids.set(HashSet::new());
-                    reload_tick.set(reload_tick().wrapping_add(1));
+                    image_store.clear_selection(kind);
+                    image_store.mark_for_reload(kind);
                 }
                 Err(error) => {
                     toast_store.show_error(format!("批量删除失败: {}", error));
                 }
             }
 
-            is_deleting.set(false);
+            image_store.set_processing(kind, false);
         });
     };
 
-    let current_images = image_store.images();
-    let selected_now = selected_ids();
-    let selected_count = selected_now.len();
-    let all_selected_on_page = !current_images.is_empty()
-        && current_images
+    let state = image_store.collection(kind);
+    let selected_count = state.selected_ids.len();
+    let all_selected_on_page = !state.images.is_empty()
+        && state
+            .images
             .iter()
-            .all(|image| selected_now.contains(&image.image_key));
+            .all(|image| state.selected_ids.contains(&image.image_key));
     let page_summary = "默认按上传时间倒序";
 
     rsx! {
@@ -242,23 +211,23 @@ pub fn ImageListPage() -> Element {
                     if selected_count > 0 {
                         button {
                             class: "btn btn-danger",
-                            disabled: is_loading() || is_deleting(),
+                            disabled: state.is_loading || state.is_processing,
                             onclick: handle_delete_selected,
                             "删除所选 ({selected_count})"
                         }
                     }
                     button {
                         class: "btn btn-primary",
-                        disabled: is_loading() || is_deleting(),
+                        disabled: state.is_loading || state.is_processing,
                         onclick: handle_refresh,
-                        if is_loading() { "刷新中..." } else { "刷新" }
+                        if state.is_loading { "刷新中..." } else { "刷新" }
                     }
                 }
 
                 div { class: "image-hero-stats",
-                    span { class: "stat-pill", "总计 {image_store.total_items()} 张" }
-                    span { class: "stat-pill", "当前第 {current_page()} 页" }
-                    span { class: "stat-pill", "每页 {page_size()} 张" }
+                    span { class: "stat-pill", "总计 {state.total_items} 张" }
+                    span { class: "stat-pill", "当前第 {state.current_page} 页" }
+                    span { class: "stat-pill", "每页 {state.page_size} 张" }
                     if selected_count > 0 {
                         span { class: "stat-pill stat-pill-active", "已选 {selected_count} 张" }
                     }
@@ -271,7 +240,7 @@ pub fn ImageListPage() -> Element {
                         input {
                             r#type: "checkbox",
                             checked: all_selected_on_page,
-                            disabled: is_loading() || is_deleting() || current_images.is_empty(),
+                            disabled: state.is_loading || state.is_processing || state.images.is_empty(),
                             onchange: handle_toggle_all,
                         }
                         span { "全选当前页" }
@@ -281,8 +250,8 @@ pub fn ImageListPage() -> Element {
                         span { "每页" }
                         select {
                             class: "page-size-select",
-                            value: "{page_size()}",
-                            disabled: is_loading() || is_deleting(),
+                            value: "{state.page_size}",
+                            disabled: state.is_loading || state.is_processing,
                             onchange: handle_page_size_change,
                             option { value: "12", "12" }
                             option { value: "20", "20" }
@@ -297,34 +266,35 @@ pub fn ImageListPage() -> Element {
                 div { class: "page-actions",
                     button {
                         class: "btn",
-                        disabled: is_loading() || is_deleting() || current_page() <= 1,
+                        disabled: state.is_loading || state.is_processing || state.current_page <= 1,
                         onclick: handle_prev_page,
                         "上一页"
                     }
                     button {
                         class: "btn",
-                        disabled: is_loading() || is_deleting() || !image_store.has_more(),
+                        disabled: state.is_loading || state.is_processing || !state.has_more,
                         onclick: handle_next_page,
                         "下一页"
                     }
                 }
             }
 
-            if !error_message().is_empty() {
-                div { class: "error-banner", "{error_message()}" }
+            if !state.error_message.is_empty() {
+                div { class: "error-banner", "{state.error_message}" }
             }
 
             div { class: "image-list-wrapper",
-                if is_loading() {
+                if state.is_loading {
                     Loading {}
-                } else if current_images.is_empty() {
+                } else if state.images.is_empty() {
                     div { class: "empty-state",
-                        p { "暂无图片" }
+                        h3 { "暂无图片" }
+                        p { "上传图片开始使用吧！" }
                     }
                 } else {
                     ImageGrid {
-                        images: current_images.clone(),
-                        selected_ids: selected_now.clone(),
+                        images: state.images.clone(),
+                        selected_ids: state.selected_ids.clone(),
                         on_toggle_select: handle_toggle_select,
                         on_download: handle_download,
                         on_delete: handle_delete,

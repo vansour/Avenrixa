@@ -1,6 +1,9 @@
-use crate::services::{AdminService, ApiClient, AuthService, ImageService, SettingsService};
+use crate::services::{
+    AdminService, ApiClient, AuthService, ImageService, InstallService, SettingsService,
+};
 use crate::store::auth::AuthStore;
 use crate::store::images::ImageStore;
+use crate::store::navigation::NavigationStore;
 use crate::store::toast_store::ToastStore;
 use dioxus::prelude::*;
 
@@ -9,10 +12,12 @@ use dioxus::prelude::*;
 pub struct AppContext {
     pub auth_store: AuthStore,
     pub image_store: ImageStore,
+    pub navigation_store: NavigationStore,
     pub api_client: ApiClient,
     pub auth_service: AuthService,
     pub admin_service: AdminService,
     pub image_service: ImageService,
+    pub install_service: InstallService,
     pub settings_service: SettingsService,
     pub toast_store: ToastStore,
 }
@@ -22,6 +27,7 @@ impl AppContext {
     pub fn new(base_url: String) -> Self {
         let auth_store = AuthStore::new();
         let image_store = ImageStore::new();
+        let navigation_store = NavigationStore::new();
         let toast_store = ToastStore::new();
         let api_client = ApiClient::new(base_url);
 
@@ -29,15 +35,18 @@ impl AppContext {
         let auth_service = AuthService::new(api_client.clone(), auth_store.clone());
         let admin_service = AdminService::new(api_client.clone());
         let image_service = ImageService::new(api_client.clone(), image_store.clone());
+        let install_service = InstallService::new(api_client.clone());
         let settings_service = SettingsService::new(api_client.clone());
 
         Self {
             auth_store,
             image_store,
+            navigation_store,
             api_client,
             auth_service,
             admin_service,
             image_service,
+            install_service,
             settings_service,
             toast_store,
         }
@@ -51,6 +60,11 @@ pub fn use_auth_store() -> AuthStore {
 
 /// AppContext Hook - 获取 ImageStore
 pub fn use_image_store() -> ImageStore {
+    use_context()
+}
+
+/// AppContext Hook - 获取 NavigationStore
+pub fn use_navigation_store() -> NavigationStore {
     use_context()
 }
 
@@ -76,6 +90,11 @@ pub fn use_admin_service() -> AdminService {
 
 /// AppContext Hook - 获取 SettingsService
 pub fn use_settings_service() -> SettingsService {
+    use_context()
+}
+
+/// AppContext Hook - 获取 InstallService
+pub fn use_install_service() -> InstallService {
     use_context()
 }
 

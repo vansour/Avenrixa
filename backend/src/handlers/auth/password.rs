@@ -1,5 +1,5 @@
 use super::common::{append_cleared_session_cookies, auth_domain_service};
-use crate::audit::log_audit;
+use crate::audit::log_audit_db;
 use crate::db::AppState;
 use crate::domain::auth::user_token_version_key;
 use crate::error::AppError;
@@ -31,8 +31,8 @@ pub async fn change_password(
         .incr(user_token_version_key(auth_user.id), 1_u64)
         .await?;
 
-    log_audit(
-        &state.pool,
+    log_audit_db(
+        &state.database,
         Some(auth_user.id),
         "user.password_changed",
         "user",

@@ -1,12 +1,12 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use sqlx::PgPool;
 use tokio::sync::RwLock;
 
 use crate::config::Config;
+use crate::db::DatabasePool;
 use crate::error::AppError;
-use crate::models::{AdminSettingsConfig, UpdateAdminSettingsConfigRequest};
+use crate::models::UpdateAdminSettingsConfigRequest;
 
 use super::model::{RuntimeSettings, admin_setting_policy};
 use super::store::{load_from_db, persist_settings};
@@ -16,13 +16,13 @@ const SETTINGS_CACHE_TTL: Duration = Duration::from_secs(5);
 
 #[derive(Clone)]
 pub struct RuntimeSettingsService {
-    pool: PgPool,
+    pool: DatabasePool,
     defaults: RuntimeSettings,
     cache: Arc<RwLock<Option<(Instant, RuntimeSettings)>>>,
 }
 
 impl RuntimeSettingsService {
-    pub fn new(pool: PgPool, config: &Config) -> Self {
+    pub fn new(pool: DatabasePool, config: &Config) -> Self {
         Self {
             pool,
             defaults: RuntimeSettings::from_defaults(config),
@@ -48,19 +48,15 @@ impl RuntimeSettingsService {
         Ok(fetched)
     }
 
-    pub async fn get_admin_settings_config(&self) -> Result<AdminSettingsConfig, AppError> {
-        Ok(self.get_runtime_settings().await?.to_admin_config())
-    }
-
     pub async fn update_admin_settings_config(
         &self,
         req: UpdateAdminSettingsConfigRequest,
-    ) -> Result<AdminSettingsConfig, AppError> {
+    ) -> Result<RuntimeSettings, AppError> {
         let current = self.get_runtime_settings().await?;
         let validated = validate_and_merge(current, req)?;
         persist_settings(&self.pool, &validated).await?;
         self.invalidate_cache().await;
-        self.get_admin_settings_config().await
+        self.get_runtime_settings().await
     }
 
     pub async fn update_raw_setting(
@@ -79,9 +75,5 @@ impl RuntimeSettingsService {
         persist_settings(&self.pool, &validated).await?;
         self.invalidate_cache().await;
         self.get_runtime_settings().await
-    }
-
-    pub async fn get_site_name(&self) -> Result<String, AppError> {
-        Ok(self.get_runtime_settings().await?.site_name)
     }
 }

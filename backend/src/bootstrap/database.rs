@@ -1,29 +1,116 @@
-use crate::config::Config;
+use std::path::{Path, PathBuf};
+use std::str::FromStr;
+use std::time::Duration;
+
+use crate::config::{Config, DatabaseKind};
 use crate::db;
-use sqlx::{PgPool, postgres::PgPoolOptions};
+use crate::db::DatabasePool;
+use sqlx::postgres::PgPoolOptions;
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use tracing::info;
 
-pub async fn initialize_database(config: &Config) -> anyhow::Result<PgPool> {
-    info!("Connecting to database...");
-    let pool = PgPoolOptions::new()
-        .max_connections(config.database.max_connections)
-        .connect(&config.database.url)
-        .await?;
+pub async fn initialize_database(config: &Config) -> anyhow::Result<DatabasePool> {
+    match config.database.kind {
+        DatabaseKind::Postgres => {
+            info!("Connecting to PostgreSQL database...");
+            let pool = PgPoolOptions::new()
+                .max_connections(config.database.max_connections)
+                .connect(&config.database.url)
+                .await?;
 
-    info!("Initializing database schema...");
-    db::init_schema(&pool).await?;
-    initialize_admin_account(&pool).await?;
+            info!("Running PostgreSQL database migrations...");
+            let database = DatabasePool::Postgres(pool);
+            db::run_migrations(&database).await?;
 
-    Ok(pool)
+            Ok(database)
+        }
+        DatabaseKind::Sqlite => {
+            info!("Connecting to SQLite database...");
+            let pool = SqlitePoolOptions::new()
+                .max_connections(config.database.max_connections)
+                .connect_with(sqlite_connect_options(&config.database.url).await?)
+                .await?;
+
+            info!("Running SQLite database migrations...");
+            let database = DatabasePool::Sqlite(pool);
+            db::run_migrations(&database).await?;
+
+            Ok(database)
+        }
+    }
 }
 
-async fn initialize_admin_account(pool: &PgPool) -> anyhow::Result<()> {
-    let init = db::create_admin_account(pool).await?;
-    if init.created {
-        info!("Admin account initialized successfully: {}", init.username);
-    } else {
-        info!("Admin account loaded: {}", init.username);
+pub async fn test_sqlite_connection(database_url: &str) -> anyhow::Result<()> {
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(sqlite_connect_options(database_url).await?)
+        .await?;
+    sqlx::query_scalar::<_, i32>("SELECT 1")
+        .fetch_one(&pool)
+        .await?;
+    pool.close().await;
+    Ok(())
+}
+
+pub async fn sqlite_connect_options(database_url: &str) -> anyhow::Result<SqliteConnectOptions> {
+    let trimmed = database_url.trim();
+    if trimmed.is_empty() {
+        anyhow::bail!("SQLite 数据库地址不能为空");
     }
 
-    Ok(())
+    if let Some(parent) = sqlite_database_parent(trimmed) {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+
+    let options = if trimmed.starts_with("sqlite:") {
+        SqliteConnectOptions::from_str(trimmed)?
+    } else {
+        SqliteConnectOptions::new().filename(trimmed)
+    };
+
+    Ok(options
+        .create_if_missing(true)
+        .foreign_keys(true)
+        .busy_timeout(Duration::from_secs(5))
+        .journal_mode(SqliteJournalMode::Wal)
+        .synchronous(SqliteSynchronous::Normal))
+}
+
+fn sqlite_database_parent(database_url: &str) -> Option<PathBuf> {
+    resolve_sqlite_database_path(database_url)
+        .ok()
+        .and_then(|path| path.parent().map(Path::to_path_buf))
+        .and_then(|parent| {
+            if parent.as_os_str().is_empty() {
+                None
+            } else {
+                Some(parent)
+            }
+        })
+}
+
+pub fn resolve_sqlite_database_path(database_url: &str) -> anyhow::Result<PathBuf> {
+    let trimmed = database_url.trim();
+    if trimmed.is_empty() {
+        anyhow::bail!("SQLite 数据库地址不能为空");
+    }
+
+    if let Some(path) = trimmed.strip_prefix("sqlite://") {
+        if path.is_empty() || path == ":memory:" || path.starts_with('?') || path.contains('?') {
+            anyhow::bail!("当前 SQLite 连接不是受支持的文件型数据库地址");
+        }
+        Ok(Path::new(path).to_path_buf())
+    } else if let Some(path) = trimmed.strip_prefix("sqlite:") {
+        if path.is_empty() || path == ":memory:" || path.starts_with('?') || path.contains('?') {
+            anyhow::bail!("当前 SQLite 连接不是受支持的文件型数据库地址");
+        }
+        Ok(Path::new(path).to_path_buf())
+    } else if !trimmed.contains("://") {
+        if trimmed == ":memory:" {
+            anyhow::bail!("当前 SQLite 连接不是受支持的文件型数据库地址");
+        }
+        Ok(Path::new(trimmed).to_path_buf())
+    } else {
+        anyhow::bail!("当前 SQLite 连接不是受支持的文件型数据库地址")
+    }
 }

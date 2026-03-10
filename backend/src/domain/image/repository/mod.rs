@@ -2,16 +2,15 @@
 //!
 //! 定义图片相关的数据访问接口
 
-mod category_repository;
 mod image_commands;
 mod image_impl;
 mod image_queries;
 mod sql;
 mod traits;
 
-use sqlx::PgPool;
+use sqlx::{PgPool, SqlitePool};
 
-pub use traits::{CategoryRepository, ImageRepository};
+pub use traits::ImageRepository;
 
 /// PostgreSQL 图片仓库实现
 pub struct PostgresImageRepository {
@@ -24,13 +23,18 @@ impl PostgresImageRepository {
     }
 }
 
-/// PostgreSQL 分类仓库实现
-pub struct PostgresCategoryRepository {
-    pub(super) pool: PgPool,
+/// SQLite 图片仓库实现
+pub struct SqliteImageRepository {
+    pub(super) pool: SqlitePool,
 }
 
-impl PostgresCategoryRepository {
-    pub fn new(pool: PgPool) -> Self {
+impl SqliteImageRepository {
+    pub fn new(pool: SqlitePool) -> Self {
         Self { pool }
     }
+}
+
+pub enum DatabaseImageRepository {
+    Postgres(PostgresImageRepository),
+    Sqlite(SqliteImageRepository),
 }

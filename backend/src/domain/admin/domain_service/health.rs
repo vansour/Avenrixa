@@ -2,25 +2,18 @@ use chrono::Utc;
 use redis::AsyncCommands;
 
 use super::AdminDomainService;
+use crate::db::DatabasePool;
 use crate::error::AppError;
 use crate::models::{ComponentStatus, HealthMetrics, HealthStatus};
 
 impl AdminDomainService {
     #[tracing::instrument(skip(self))]
     pub async fn health_check(&self, uptime_seconds: u64) -> Result<HealthStatus, AppError> {
-        use sqlx::Executor;
-
         let timestamp = Utc::now();
         let mut overall_status = "healthy".to_string();
 
-        let db_status = match self.pool.acquire().await {
-            Ok(mut conn) => match conn.execute(sqlx::query("SELECT 1")).await {
-                Ok(_) => ComponentStatus::healthy(),
-                Err(e) => {
-                    overall_status = "unhealthy".to_string();
-                    ComponentStatus::unhealthy(e.to_string())
-                }
-            },
+        let db_status = match self.database_ping().await {
+            Ok(_) => ComponentStatus::healthy(),
             Err(e) => {
                 overall_status = "unhealthy".to_string();
                 ComponentStatus::unhealthy(e.to_string())
@@ -63,30 +56,72 @@ impl AdminDomainService {
     }
 
     async fn collect_health_metrics(&self) -> Result<HealthMetrics, AppError> {
-        let images_count: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM images WHERE deleted_at IS NULL")
-                .fetch_one(&self.pool)
-                .await
-                .unwrap_or(0);
-
-        let users_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
-            .fetch_one(&self.pool)
-            .await
-            .unwrap_or(0);
-
-        let storage_used_mb: Option<f64> = {
-            let total_size: Option<i64> =
-                sqlx::query_scalar("SELECT CAST(SUM(size) AS BIGINT) FROM images")
-                    .fetch_one(&self.pool)
+        let images_count: i64 = match &self.database {
+            DatabasePool::Postgres(pool) => {
+                sqlx::query_scalar("SELECT COUNT(*) FROM images WHERE deleted_at IS NULL")
+                    .fetch_one(pool)
                     .await
-                    .unwrap_or(None);
-            total_size.map(|size| size as f64 / 1024.0 / 1024.0)
+                    .unwrap_or(0)
+            }
+            DatabasePool::Sqlite(pool) => {
+                sqlx::query_scalar("SELECT COUNT(*) FROM images WHERE deleted_at IS NULL")
+                    .fetch_one(pool)
+                    .await
+                    .unwrap_or(0)
+            }
         };
+
+        let users_count: i64 = match &self.database {
+            DatabasePool::Postgres(pool) => sqlx::query_scalar("SELECT COUNT(*) FROM users")
+                .fetch_one(pool)
+                .await
+                .unwrap_or(0),
+            DatabasePool::Sqlite(pool) => sqlx::query_scalar("SELECT COUNT(*) FROM users")
+                .fetch_one(pool)
+                .await
+                .unwrap_or(0),
+        };
+
+        let storage_used_mb = self.storage_used_mb().await;
 
         Ok(HealthMetrics {
             images_count,
             users_count,
             storage_used_mb,
         })
+    }
+
+    async fn database_ping(&self) -> Result<(), sqlx::Error> {
+        match &self.database {
+            DatabasePool::Postgres(pool) => {
+                sqlx::query_scalar::<_, i32>("SELECT 1")
+                    .fetch_one(pool)
+                    .await?;
+            }
+            DatabasePool::Sqlite(pool) => {
+                sqlx::query_scalar::<_, i32>("SELECT 1")
+                    .fetch_one(pool)
+                    .await?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn storage_used_mb(&self) -> Option<f64> {
+        let total_size = match &self.database {
+            DatabasePool::Postgres(pool) => {
+                sqlx::query_scalar::<_, Option<i64>>("SELECT CAST(SUM(size) AS BIGINT) FROM images")
+                    .fetch_one(pool)
+                    .await
+                    .unwrap_or(None)
+            }
+            DatabasePool::Sqlite(pool) => {
+                sqlx::query_scalar::<_, Option<i64>>("SELECT SUM(size) FROM images")
+                    .fetch_one(pool)
+                    .await
+                    .unwrap_or(None)
+            }
+        };
+        total_size.map(|size| size as f64 / 1024.0 / 1024.0)
     }
 }

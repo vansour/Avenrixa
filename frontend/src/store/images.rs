@@ -4,118 +4,191 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 use std::rc::Rc;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ImageCollectionKind {
+    Active,
+    Deleted,
+}
+
 #[derive(Clone, Default)]
-struct ImageState {
-    images: Vec<ImageItem>,
-    current_page: u32,
-    total_items: u64,
-    selected_ids: HashSet<String>,
-    is_loading: bool,
-    has_more: bool,
+pub struct ImageCollectionSnapshot {
+    pub images: Vec<ImageItem>,
+    pub current_page: u32,
+    pub page_size: u32,
+    pub total_items: u64,
+    pub selected_ids: HashSet<String>,
+    pub is_loading: bool,
+    pub is_processing: bool,
+    pub has_more: bool,
+    pub error_message: String,
+    pub reload_token: u64,
+}
+
+#[derive(Clone, Default)]
+struct ImageCollectionsState {
+    active: ImageCollectionSnapshot,
+    deleted: ImageCollectionSnapshot,
+}
+
+impl ImageCollectionsState {
+    fn collection(&self, kind: ImageCollectionKind) -> &ImageCollectionSnapshot {
+        match kind {
+            ImageCollectionKind::Active => &self.active,
+            ImageCollectionKind::Deleted => &self.deleted,
+        }
+    }
+
+    fn collection_mut(&mut self, kind: ImageCollectionKind) -> &mut ImageCollectionSnapshot {
+        match kind {
+            ImageCollectionKind::Active => &mut self.active,
+            ImageCollectionKind::Deleted => &mut self.deleted,
+        }
+    }
 }
 
 /// 图片状态管理 Store
 #[derive(Clone)]
 pub struct ImageStore {
-    state: Rc<RefCell<Signal<ImageState>>>,
+    state: Rc<RefCell<Signal<ImageCollectionsState>>>,
 }
 
 impl ImageStore {
     pub fn new() -> Self {
-        let initial_state = ImageState {
-            images: Vec::new(),
-            current_page: 1,
-            total_items: 0,
-            selected_ids: HashSet::new(),
-            is_loading: false,
-            has_more: true,
-        };
+        let mut initial_state = ImageCollectionsState::default();
+        initial_state.active.current_page = 1;
+        initial_state.active.page_size = 20;
+        initial_state.active.has_more = true;
+        initial_state.deleted.current_page = 1;
+        initial_state.deleted.page_size = 20;
+        initial_state.deleted.has_more = true;
 
         Self {
             state: Rc::new(RefCell::new(Signal::new(initial_state))),
         }
     }
 
-    /// 获取图片列表
-    pub fn images(&self) -> Vec<ImageItem> {
-        self.state.borrow().read().images.clone()
+    pub fn collection(&self, kind: ImageCollectionKind) -> ImageCollectionSnapshot {
+        self.state.borrow().read().collection(kind).clone()
     }
 
-    /// 检查图片列表是否为空
-    pub fn images_is_empty(&self) -> bool {
-        self.state.borrow().read().images.is_empty()
+    pub fn set_loading(&self, kind: ImageCollectionKind, is_loading: bool) {
+        self.state
+            .borrow_mut()
+            .write()
+            .collection_mut(kind)
+            .is_loading = is_loading;
     }
 
-    /// 获取当前页码
-    pub fn current_page(&self) -> u32 {
-        self.state.borrow().read().current_page
+    pub fn set_processing(&self, kind: ImageCollectionKind, is_processing: bool) {
+        self.state
+            .borrow_mut()
+            .write()
+            .collection_mut(kind)
+            .is_processing = is_processing;
     }
 
-    /// 获取总项目数
-    pub fn total_items(&self) -> u64 {
-        self.state.borrow().read().total_items
+    pub fn set_error_message(&self, kind: ImageCollectionKind, message: impl Into<String>) {
+        self.state
+            .borrow_mut()
+            .write()
+            .collection_mut(kind)
+            .error_message = message.into();
     }
 
-    /// 添加图片
-    pub fn add_images(&self, new_images: Vec<ImageItem>) {
-        self.state.borrow_mut().write().images.extend(new_images);
+    pub fn clear_error(&self, kind: ImageCollectionKind) {
+        self.set_error_message(kind, String::new());
     }
 
-    /// 设置加载状态
-    pub fn set_loading(&self, loading: bool) {
-        self.state.borrow_mut().write().is_loading = loading;
+    pub fn set_page(&self, kind: ImageCollectionKind, page: u32) {
+        self.state
+            .borrow_mut()
+            .write()
+            .collection_mut(kind)
+            .current_page = page.max(1);
     }
 
-    /// 获取加载状态
-    pub fn is_loading(&self) -> bool {
-        self.state.borrow().read().is_loading
+    pub fn set_page_size(&self, kind: ImageCollectionKind, page_size: u32) {
+        self.state
+            .borrow_mut()
+            .write()
+            .collection_mut(kind)
+            .page_size = page_size.clamp(1, 100);
     }
 
-    /// 增加页码
-    pub fn increment_page(&self) {
-        self.state.borrow_mut().write().current_page += 1;
+    pub fn replace_page(
+        &self,
+        kind: ImageCollectionKind,
+        images: Vec<ImageItem>,
+        current_page: u32,
+        page_size: u32,
+        total_items: u64,
+        has_more: bool,
+    ) {
+        let mut state = self.state.borrow_mut();
+        let mut state = state.write();
+        let collection = state.collection_mut(kind);
+        collection.images = images;
+        collection.current_page = current_page.max(1);
+        collection.page_size = page_size.clamp(1, 100);
+        collection.total_items = total_items;
+        collection.has_more = has_more;
+        collection.selected_ids.clear();
     }
 
-    /// 设置当前页码
-    pub fn set_current_page(&self, page: u32) {
-        self.state.borrow_mut().write().current_page = page.max(1);
+    pub fn toggle_selection(&self, kind: ImageCollectionKind, image_key: &str) {
+        let mut state = self.state.borrow_mut();
+        let mut state = state.write();
+        let selected_ids = &mut state.collection_mut(kind).selected_ids;
+        if !selected_ids.insert(image_key.to_string()) {
+            selected_ids.remove(image_key);
+        }
     }
 
-    /// 设置是否有更多
-    pub fn set_has_more(&self, more: bool) {
-        self.state.borrow_mut().write().has_more = more;
+    pub fn clear_selection(&self, kind: ImageCollectionKind) {
+        self.state
+            .borrow_mut()
+            .write()
+            .collection_mut(kind)
+            .selected_ids
+            .clear();
     }
 
-    /// 获取是否有更多
-    pub fn has_more(&self) -> bool {
-        self.state.borrow().read().has_more
+    pub fn remove_selection(&self, kind: ImageCollectionKind, image_key: &str) {
+        self.state
+            .borrow_mut()
+            .write()
+            .collection_mut(kind)
+            .selected_ids
+            .remove(image_key);
     }
 
-    /// 清空图片列表
-    pub fn clear_images(&self) {
-        let mut state_signal = self.state.borrow_mut();
-        let mut state = state_signal.write();
-        state.images.clear();
-        state.current_page = 1;
+    pub fn toggle_all_visible(&self, kind: ImageCollectionKind) {
+        let mut state = self.state.borrow_mut();
+        let mut state = state.write();
+        let collection = state.collection_mut(kind);
+        let is_all_selected = !collection.images.is_empty()
+            && collection
+                .images
+                .iter()
+                .all(|image| collection.selected_ids.contains(&image.image_key));
+
+        if is_all_selected {
+            for image in &collection.images {
+                collection.selected_ids.remove(&image.image_key);
+            }
+        } else {
+            for image in &collection.images {
+                collection.selected_ids.insert(image.image_key.clone());
+            }
+        }
     }
 
-    /// 设置图片列表
-    pub fn set_images(&self, new_images: Vec<ImageItem>) {
-        self.state.borrow_mut().write().images = new_images;
-    }
-
-    /// 设置分页元数据
-    pub fn set_pagination(&self, page: u32, total_items: u64, has_more: bool) {
-        let mut state_signal = self.state.borrow_mut();
-        let mut state = state_signal.write();
-        state.current_page = page.max(1);
-        state.total_items = total_items;
-        state.has_more = has_more;
-    }
-
-    #[allow(dead_code)]
-    pub fn selected_ids(&self) -> HashSet<String> {
-        self.state.borrow().read().selected_ids.clone()
+    pub fn mark_for_reload(&self, kind: ImageCollectionKind) {
+        self.state
+            .borrow_mut()
+            .write()
+            .collection_mut(kind)
+            .reload_token += 1;
     }
 }
 

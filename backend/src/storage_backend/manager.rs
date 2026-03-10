@@ -4,36 +4,33 @@ use tokio::fs;
 
 use super::StorageManager;
 use crate::error::AppError;
-use crate::runtime_settings::{RuntimeSettings, RuntimeSettingsService, StorageBackend};
+use crate::runtime_settings::{RuntimeSettings, StorageBackend};
 
 impl StorageManager {
-    pub fn new(runtime_settings: Arc<RuntimeSettingsService>) -> Self {
+    pub fn new(active_settings: RuntimeSettings) -> Self {
         Self {
-            runtime_settings,
+            active_settings,
             s3_client_cache: Arc::new(tokio::sync::RwLock::new(None)),
         }
     }
 
-    pub async fn runtime_settings(&self) -> Result<RuntimeSettings, AppError> {
-        self.runtime_settings.get_runtime_settings().await
+    pub fn active_settings(&self) -> &RuntimeSettings {
+        &self.active_settings
     }
 
-    pub async fn ensure_local_storage_dir(&self) -> Result<(), AppError> {
-        let settings = self.runtime_settings().await?;
-        let local_path = settings.local_storage_path;
-        fs::create_dir_all(local_path).await?;
-        Ok(())
+    pub fn restart_required(&self, settings: &RuntimeSettings) -> bool {
+        self.active_settings.storage_settings() != settings.storage_settings()
     }
 
     pub async fn check_health(&self) -> Result<(), AppError> {
-        let settings = self.runtime_settings().await?;
+        let settings = self.active_settings();
         match settings.storage_backend {
             StorageBackend::Local => {
-                fs::metadata(settings.local_storage_path).await?;
+                fs::metadata(&settings.local_storage_path).await?;
                 Ok(())
             }
             StorageBackend::S3 => {
-                let cached = self.resolve_s3_client(&settings).await?;
+                let cached = self.resolve_s3_client(settings).await?;
                 cached
                     .client
                     .head_bucket()

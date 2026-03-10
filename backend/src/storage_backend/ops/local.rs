@@ -34,17 +34,3 @@ pub(super) async fn delete(settings: &RuntimeSettings, file_key: &str) -> Result
         Err(error) => Err(AppError::IoError(error)),
     }
 }
-
-pub(super) async fn copy(
-    settings: &RuntimeSettings,
-    src_key: &str,
-    dst_key: &str,
-) -> Result<(), AppError> {
-    let src = join_local_path(&settings.local_storage_path, src_key)?;
-    let dst = join_local_path(&settings.local_storage_path, dst_key)?;
-    if let Some(parent) = dst.parent() {
-        fs::create_dir_all(parent).await?;
-    }
-    fs::copy(src, dst).await?;
-    Ok(())
-}

@@ -4,8 +4,6 @@ use tracing::info;
 
 pub struct RedisConnections {
     pub app: ConnectionManager,
-    pub queue: ConnectionManager,
-    pub worker: ConnectionManager,
 }
 
 pub async fn connect_redis(config: &Config) -> anyhow::Result<RedisConnections> {
@@ -14,7 +12,5 @@ pub async fn connect_redis(config: &Config) -> anyhow::Result<RedisConnections> 
 
     Ok(RedisConnections {
         app: redis_client.get_connection_manager().await?,
-        queue: redis_client.get_connection_manager().await?,
-        worker: redis_client.get_connection_manager().await?,
     })
 }

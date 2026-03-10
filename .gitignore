@@ -1,10 +1,15 @@
 /target
 frontend/node_modules
 frontend/dist
+frontend/frontend-*.js
+frontend/frontend-*_bg.wasm
+frontend/styles-*.css
+frontend/snippets/
 *.log
 .env
 .DS_Store
 data
+data-sqlite
 pg_data
 cookie.txt
 test-results/

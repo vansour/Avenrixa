@@ -1,4 +1,5 @@
 use super::ImageProcessor;
+#[cfg(test)]
 use anyhow::Result;
 
 impl ImageProcessor {
@@ -20,6 +21,7 @@ impl ImageProcessor {
         content_type.is_some_and(|content_type| content_type.starts_with("image/"))
     }
 
+    #[cfg(test)]
     pub fn validate_image_bytes(data: &[u8]) -> Result<()> {
         const JPEG_SIGNATURE: &[u8] = &[0xFF, 0xD8, 0xFF];
         const PNG_SIGNATURE: &[u8] = &[0x89, 0x50, 0x4E, 0x47];

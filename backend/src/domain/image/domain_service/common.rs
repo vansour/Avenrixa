@@ -1,6 +1,7 @@
 use super::*;
+use redis::AsyncCommands;
 
-impl<I: ImageRepository, C: CategoryRepository> ImageDomainService<I, C> {
+impl<I: ImageRepository> ImageDomainService<I> {
     pub(super) fn validate_image_key(image_key: &str) -> Result<(), AppError> {
         if image_key.len() == 64 && image_key.chars().all(|c| c.is_ascii_hexdigit()) {
             return Ok(());
@@ -39,19 +40,13 @@ impl<I: ImageRepository, C: CategoryRepository> ImageDomainService<I, C> {
         Ok(normalized)
     }
 
-    pub fn new(
-        deps: ImageDomainServiceDependencies,
-        image_repository: I,
-        category_repository: C,
-    ) -> Self {
+    pub fn new(deps: ImageDomainServiceDependencies, image_repository: I) -> Self {
         Self {
-            pool: deps.pool,
+            database: deps.database,
             redis: deps.redis,
             config: deps.config,
             image_repository,
-            category_repository,
             image_processor: deps.image_processor,
-            file_save_queue: deps.file_save_queue,
             storage_manager: deps.storage_manager,
         }
     }
@@ -95,28 +90,18 @@ impl<I: ImageRepository, C: CategoryRepository> ImageDomainService<I, C> {
         Ok(())
     }
 
-    pub(super) async fn invalidate_hash_cache_patterns_for_user(
+    pub(super) async fn cache_image_path(
         &self,
-        user_id: Uuid,
+        image_id: Uuid,
+        storage_path: &str,
     ) -> Result<(), AppError> {
-        let Some(manager) = self.redis.as_ref() else {
-            return Ok(());
-        };
-
-        let mut redis = manager.clone();
-        let _ = Cache::del_pattern(
-            &mut redis,
-            HashCache::user_existing_info_invalidate(user_id),
-        )
-        .await;
-        let _ = Cache::del_pattern(&mut redis, HashCache::user_hash_invalidate()).await;
-
-        if self.config.image.dedup_strategy == "global" {
-            let _ =
-                Cache::del_pattern(&mut redis, HashCache::global_existing_info_invalidate()).await;
-            let _ = Cache::del_pattern(&mut redis, HashCache::global_hash_invalidate()).await;
+        if let Some(manager) = self.redis.as_ref() {
+            let cache_key = format!("{}{}", self.config.redis.key_prefix, image_id);
+            let mut redis = manager.clone();
+            let _: Result<(), _> = redis
+                .set_ex(cache_key, storage_path, self.config.redis.ttl)
+                .await;
         }
-
         Ok(())
     }
 

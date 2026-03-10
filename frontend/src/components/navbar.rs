@@ -1,46 +1,26 @@
-use crate::app_context::use_auth_store;
+use crate::app_context::{use_auth_store, use_navigation_store};
+use crate::store::DashboardPage;
 use dioxus::prelude::*;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TopPage {
-    Upload,
-    History,
-    Trash,
-    Api,
-    Settings,
-}
-
-impl TopPage {
-    fn label(self) -> &'static str {
-        match self {
-            TopPage::Upload => "上传中心",
-            TopPage::History => "历史图库",
-            TopPage::Trash => "回收站",
-            TopPage::Api => "API 接入",
-            TopPage::Settings => "系统设置",
-        }
-    }
-}
-
-const AUTH_NAV_PAGES: [TopPage; 5] = [
-    TopPage::Upload,
-    TopPage::History,
-    TopPage::Trash,
-    TopPage::Api,
-    TopPage::Settings,
+const AUTH_NAV_PAGES: [DashboardPage; 5] = [
+    DashboardPage::Upload,
+    DashboardPage::History,
+    DashboardPage::Trash,
+    DashboardPage::Api,
+    DashboardPage::Settings,
 ];
 
 /// 导航栏组件
 #[component]
-pub fn NavBar(
-    site_name: String,
-    current_page: TopPage,
-    #[props(default)] on_navigate: EventHandler<TopPage>,
-) -> Element {
+pub fn NavBar(site_name: String) -> Element {
     let auth_store = use_auth_store();
+    let navigation_store = use_navigation_store();
+    let brand_navigation_store = navigation_store.clone();
+    let login_navigation_store = navigation_store.clone();
     let mut is_mobile_menu_open = use_signal(|| false);
 
     let is_authenticated = auth_store.is_authenticated();
+    let current_page = navigation_store.current_page();
 
     let nav_panel_class = if is_mobile_menu_open() {
         "navbar-panel is-open"
@@ -56,11 +36,15 @@ pub fn NavBar(
     rsx! {
         nav { class: "navbar",
             div { class: "navbar-container",
-                div { class: "navbar-brand",
-                    a { href: "/",
-                        span { class: "navbar-brand-mark", "VI" }
-                        span { class: "navbar-brand-title", "{site_name}" }
-                    }
+                button {
+                    r#type: "button",
+                    class: "navbar-brand",
+                    onclick: move |_| {
+                        brand_navigation_store.reset();
+                        is_mobile_menu_open.set(false);
+                    },
+                    span { class: "navbar-brand-mark", "VI" }
+                    span { class: "navbar-brand-title", "{site_name}" }
                 }
 
                 if is_authenticated {
@@ -70,7 +54,6 @@ pub fn NavBar(
                                 NavTabItem {
                                     page,
                                     current_page,
-                                    on_navigate: on_navigate.clone(),
                                     close_menu: is_mobile_menu_open,
                                 }
                             }
@@ -88,8 +71,10 @@ pub fn NavBar(
                         }
                     }
                 } else {
-                    a { href: "/",
+                    button {
+                        r#type: "button",
                         class: "btn btn-primary navbar-login-btn",
+                        onclick: move |_| login_navigation_store.reset(),
                         "登录"
                     }
                 }
@@ -100,11 +85,11 @@ pub fn NavBar(
 
 #[component]
 fn NavTabItem(
-    page: TopPage,
-    current_page: TopPage,
-    on_navigate: EventHandler<TopPage>,
+    page: DashboardPage,
+    current_page: DashboardPage,
     close_menu: Signal<bool>,
 ) -> Element {
+    let navigation_store = use_navigation_store();
     let class_name = if current_page == page {
         "nav-tab active"
     } else {
@@ -117,7 +102,7 @@ fn NavTabItem(
             class: "{class_name}",
             onclick: move |_| {
                 close_menu.set(false);
-                on_navigate.call(page);
+                navigation_store.navigate(page);
             },
             strong { class: "nav-tab-title", "{page.label()}" }
         }

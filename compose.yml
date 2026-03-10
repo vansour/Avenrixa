@@ -3,34 +3,21 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: vansour-image
     image: ghcr.io/vansour/vansour-image:latest
     ports:
-      - "8080:8080"
+      - "${APP_HOST_PORT:-8080}:8080"
     depends_on:
       postgres:
         condition: service_healthy
       dragonfly:
         condition: service_healthy
     environment:
-      - DATABASE_URL=postgresql://user:pass@postgres:5432/image
       - REDIS_URL=redis://dragonfly:6379
       - JWT_SECRET=your-secret-key-change-in-production
-      - ADMIN_USERNAME=admin
-      - ADMIN_EMAIL=admin@example.com
-      - ADMIN_PASSWORD=change-this-admin-password
       - AUTH_COOKIE_SECURE=false
       - AUTH_COOKIE_SAME_SITE=Strict
-      - MAIL_ENABLED=false
-      - SMTP_HOST=smtp.example.com
-      - SMTP_PORT=587
-      - SMTP_USER=
-      - SMTP_PASSWORD=
-      - MAIL_FROM=noreply@example.com
-      - MAIL_FROM_NAME=Vansour Image
-      - RESET_LINK_BASE_URL=http://localhost:8080/reset-password
     volumes:
-      - ./data:/data
+      - "${DATA_DIR:-./data}:/data"
     restart: unless-stopped
     healthcheck:
       test: curl -f http://localhost:8080/health || exit 1
@@ -40,22 +27,32 @@ services:
       start_period: 40s
   postgres:
     image: postgres:trixie
-    container_name: vansour-image-postgres
+    depends_on:
+      postgres-init:
+        condition: service_completed_successfully
     environment:
       - POSTGRES_DB=image
       - POSTGRES_USER=user
       - POSTGRES_PASSWORD=pass
     volumes:
-      - ./pg_data:/var/lib/postgresql
+      - "${POSTGRES_DATA_DIR:-./pg_data}:/var/lib/postgresql"
     healthcheck:
       test: pg_isready -U user -d image
       interval: 5s
       timeout: 5s
       retries: 5
     restart: unless-stopped
+  postgres-init:
+    image: alpine:3.22
+    user: "0:0"
+    volumes:
+      - "${POSTGRES_DATA_DIR:-./pg_data}:/pg_data"
+    command:
+      - sh
+      - -c
+      - chown -R 999:999 /pg_data && chmod 700 /pg_data
   dragonfly:
     image: ghcr.io/dragonflydb/dragonfly:latest
-    container_name: vansour-image-dragonfly
     command: --dir=/data
     healthcheck:
       test: redis-cli ping

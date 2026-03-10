@@ -1,4 +1,6 @@
-use crate::domain::auth::repository::{AuthRepository, PasswordResetStatus};
+use crate::domain::auth::repository::{
+    AuthRepository, EmailVerificationStatus, PasswordResetStatus,
+};
 use crate::models::User;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -10,6 +12,7 @@ use uuid::Uuid;
 pub struct MockAuthRepository {
     pub users: Arc<std::sync::Mutex<Vec<User>>>,
     pub reset_tokens: Arc<std::sync::Mutex<HashMap<String, (Uuid, DateTime<Utc>, bool)>>>,
+    pub verification_tokens: Arc<std::sync::Mutex<HashMap<String, (Uuid, DateTime<Utc>, bool)>>>,
 }
 
 impl MockAuthRepository {
@@ -17,6 +20,7 @@ impl MockAuthRepository {
         Self {
             users: Arc::new(std::sync::Mutex::new(Vec::new())),
             reset_tokens: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            verification_tokens: Arc::new(std::sync::Mutex::new(HashMap::new())),
         }
     }
 }
@@ -28,17 +32,9 @@ impl AuthRepository for MockAuthRepository {
         Ok(users.iter().find(|u| u.id == id).cloned())
     }
 
-    async fn find_user_by_username(&self, username: &str) -> Result<Option<User>, sqlx::Error> {
+    async fn find_user_by_email(&self, email: &str) -> Result<Option<User>, sqlx::Error> {
         let users = self.users.lock().unwrap();
-        Ok(users.iter().find(|u| u.username == username).cloned())
-    }
-
-    async fn find_user_by_identity(&self, identity: &str) -> Result<Option<User>, sqlx::Error> {
-        let users = self.users.lock().unwrap();
-        Ok(users
-            .iter()
-            .find(|u| u.username == identity || u.email.as_deref() == Some(identity))
-            .cloned())
+        Ok(users.iter().find(|u| u.email == email).cloned())
     }
 
     async fn create_user(&self, user: &User) -> Result<(), sqlx::Error> {
@@ -94,5 +90,42 @@ impl AuthRepository for MockAuthRepository {
         user.password_hash = password_hash.to_string();
         *used = true;
         Ok(PasswordResetStatus::Applied(user.clone()))
+    }
+
+    async fn store_email_verification_token(
+        &self,
+        user_id: Uuid,
+        token_hash: &str,
+        expires_at: DateTime<Utc>,
+    ) -> Result<(), sqlx::Error> {
+        let mut verification_tokens = self.verification_tokens.lock().unwrap();
+        verification_tokens
+            .retain(|_, (stored_user_id, _, used)| *stored_user_id != user_id || *used);
+        verification_tokens.insert(token_hash.to_string(), (user_id, expires_at, false));
+        Ok(())
+    }
+
+    async fn verify_email_by_token(
+        &self,
+        token_hash: &str,
+    ) -> Result<EmailVerificationStatus, sqlx::Error> {
+        let mut verification_tokens = self.verification_tokens.lock().unwrap();
+        let Some((user_id, expires_at, used)) = verification_tokens.get_mut(token_hash) else {
+            return Ok(EmailVerificationStatus::Invalid);
+        };
+        if *used {
+            return Ok(EmailVerificationStatus::Invalid);
+        }
+        if *expires_at < Utc::now() {
+            return Ok(EmailVerificationStatus::Expired);
+        }
+
+        let mut users = self.users.lock().unwrap();
+        let Some(user) = users.iter_mut().find(|u| u.id == *user_id) else {
+            return Ok(EmailVerificationStatus::Invalid);
+        };
+        user.email_verified_at = Some(Utc::now());
+        *used = true;
+        Ok(EmailVerificationStatus::Applied(user.clone()))
     }
 }

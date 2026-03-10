@@ -1,8 +1,9 @@
 use super::common::{
-    REFRESH_TOKEN_COOKIE_NAME, append_session_cookies, auth_domain_service, read_cookie,
+    REFRESH_TOKEN_COOKIE_NAME, append_session_cookies, auth_domain_service, ensure_app_installed,
+    read_cookie,
 };
 use crate::db::AppState;
-use crate::domain::auth::user_token_version_key;
+use crate::domain::auth::{auth_valid_after_key, user_token_version_key};
 use crate::error::AppError;
 use axum::{extract::State, http::HeaderMap};
 use redis::AsyncCommands;
@@ -11,6 +12,7 @@ pub async fn refresh_session(
     headers: HeaderMap,
     State(state): State<AppState>,
 ) -> Result<(HeaderMap, ()), AppError> {
+    ensure_app_installed(&state).await?;
     let refresh_token =
         read_cookie(&headers, REFRESH_TOKEN_COOKIE_NAME).ok_or(AppError::Unauthorized)?;
     let claims = state
@@ -32,6 +34,10 @@ pub async fn refresh_session(
     if claims.token_version < current_token_version {
         return Err(AppError::Unauthorized);
     }
+    let auth_valid_after: Option<i64> = redis.get(auth_valid_after_key()).await?;
+    if crate::sqlite_restore::token_issued_before_cutoff(claims.iat, auth_valid_after) {
+        return Err(AppError::Unauthorized);
+    }
 
     let auth_domain_service = auth_domain_service(&state)?;
     let user = auth_domain_service.get_current_user(claims.sub).await?;
@@ -45,7 +51,7 @@ pub async fn refresh_session(
 
     let access_token = state.auth.generate_access_token(
         user.id,
-        &user.username,
+        &user.email,
         &user.role,
         current_token_version,
     )?;

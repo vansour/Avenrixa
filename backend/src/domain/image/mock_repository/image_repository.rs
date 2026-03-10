@@ -30,7 +30,6 @@ impl ImageRepository for MockImageRepository {
         user_id: Uuid,
         limit: i32,
         offset: i32,
-        category_id: Option<Uuid>,
         _tag: Option<&str>,
     ) -> Result<Vec<Image>, sqlx::Error> {
         let images = self.images.lock().unwrap();
@@ -39,10 +38,6 @@ impl ImageRepository for MockImageRepository {
             .filter(|image| image.user_id == user_id && image.deleted_at.is_none())
             .cloned()
             .collect();
-
-        if let Some(category_id) = category_id {
-            filtered.retain(|image| image.category_id == Some(category_id));
-        }
 
         filtered.sort_by(|left, right| {
             right
@@ -66,14 +61,6 @@ impl ImageRepository for MockImageRepository {
         Ok(page)
     }
 
-    async fn count_images_by_user(&self, user_id: Uuid) -> Result<i64, sqlx::Error> {
-        let images = self.images.lock().unwrap();
-        Ok(images
-            .iter()
-            .filter(|image| image.user_id == user_id && image.deleted_at.is_none())
-            .count() as i64)
-    }
-
     async fn create_image(&self, image: &Image) -> Result<(), sqlx::Error> {
         let mut images = self.images.lock().unwrap();
         images.push(image.clone());
@@ -85,20 +72,6 @@ impl ImageRepository for MockImageRepository {
         if let Some(index) = images.iter().position(|current| current.id == image.id) {
             images[index] = image.clone();
         }
-        Ok(())
-    }
-
-    async fn soft_delete_image(&self, id: Uuid) -> Result<(), sqlx::Error> {
-        let mut images = self.images.lock().unwrap();
-        if let Some(image) = images.iter_mut().find(|image| image.id == id) {
-            image.deleted_at = Some(chrono::Utc::now());
-        }
-        Ok(())
-    }
-
-    async fn hard_delete_image(&self, id: Uuid) -> Result<(), sqlx::Error> {
-        let mut images = self.images.lock().unwrap();
-        images.retain(|image| image.id != id);
         Ok(())
     }
 
@@ -181,6 +154,24 @@ impl ImageRepository for MockImageRepository {
         Ok((before - images.len()) as u64)
     }
 
+    async fn find_filenames_still_referenced_excluding_ids(
+        &self,
+        filenames: &[String],
+        excluded_ids: &[Uuid],
+    ) -> Result<Vec<String>, sqlx::Error> {
+        let images = self.images.lock().unwrap();
+        let mut referenced = std::collections::BTreeSet::new();
+        for image in images.iter() {
+            if excluded_ids.contains(&image.id) {
+                continue;
+            }
+            if filenames.contains(&image.filename) {
+                referenced.insert(image.filename.clone());
+            }
+        }
+        Ok(referenced.into_iter().collect())
+    }
+
     async fn find_image_by_hash(
         &self,
         hash: &str,
@@ -201,15 +192,6 @@ impl ImageRepository for MockImageRepository {
             .iter()
             .find(|image| image.hash == hash && image.deleted_at.is_none())
             .cloned())
-    }
-
-    async fn find_deleted_images_by_user(&self, user_id: Uuid) -> Result<Vec<Image>, sqlx::Error> {
-        let images = self.images.lock().unwrap();
-        Ok(images
-            .iter()
-            .filter(|image| image.user_id == user_id && image.deleted_at.is_some())
-            .cloned()
-            .collect())
     }
 
     async fn find_deleted_images_by_user_paginated(
@@ -240,48 +222,5 @@ impl ImageRepository for MockImageRepository {
         }
 
         Ok(page)
-    }
-
-    async fn find_images_by_user_cursor(
-        &self,
-        user_id: Uuid,
-        cursor: Option<(chrono::DateTime<chrono::Utc>, Uuid)>,
-        limit: i32,
-    ) -> Result<Vec<Image>, sqlx::Error> {
-        let images = self.images.lock().unwrap();
-        let mut filtered: Vec<Image> = images
-            .iter()
-            .filter(|image| image.user_id == user_id && image.deleted_at.is_none())
-            .cloned()
-            .collect();
-
-        filtered.sort_by(|left, right| {
-            right
-                .created_at
-                .cmp(&left.created_at)
-                .then_with(|| right.id.cmp(&left.id))
-        });
-
-        let mut result = Vec::new();
-        let mut found_cursor = cursor.is_none();
-
-        for image in filtered {
-            if !found_cursor
-                && let Some((cursor_time, cursor_id)) = cursor
-                && (image.created_at < cursor_time
-                    || (image.created_at == cursor_time && image.id < cursor_id))
-            {
-                found_cursor = true;
-            }
-
-            if found_cursor {
-                result.push(image);
-                if result.len() >= limit as usize {
-                    break;
-                }
-            }
-        }
-
-        Ok(result)
     }
 }

@@ -1,4 +1,6 @@
 use crate::db::AppState;
+use crate::db::DatabasePool;
+use crate::middleware::AuthUser;
 use axum::http::{StatusCode, header};
 use axum::{
     extract::{Path, State},
@@ -19,8 +21,89 @@ fn is_valid_filename(value: &str) -> bool {
         && !value.contains("..")
 }
 
+async fn find_active_filename_by_hash(
+    database: &DatabasePool,
+    image_key: &str,
+    user_id: uuid::Uuid,
+) -> Result<Option<String>, sqlx::Error> {
+    match database {
+        DatabasePool::Postgres(pool) => {
+            sqlx::query_scalar::<_, String>(
+                "SELECT filename
+                 FROM images
+                 WHERE hash = $1
+                   AND user_id = $2
+                   AND deleted_at IS NULL
+                   AND status = 'active'
+                 LIMIT 1",
+            )
+            .bind(image_key)
+            .bind(user_id)
+            .fetch_optional(pool)
+            .await
+        }
+        DatabasePool::Sqlite(pool) => {
+            sqlx::query_scalar::<_, String>(
+                "SELECT filename
+                 FROM images
+                 WHERE hash = ?1
+                   AND user_id = ?2
+                   AND deleted_at IS NULL
+                   AND status = 'active'
+                 LIMIT 1",
+            )
+            .bind(image_key)
+            .bind(user_id)
+            .fetch_optional(pool)
+            .await
+        }
+    }
+}
+
+async fn active_image_exists_by_filename(
+    database: &DatabasePool,
+    filename: &str,
+    user_id: uuid::Uuid,
+) -> Result<bool, sqlx::Error> {
+    let exists = match database {
+        DatabasePool::Postgres(pool) => {
+            sqlx::query_scalar::<_, i32>(
+                "SELECT 1
+                 FROM images
+                 WHERE filename = $1
+                   AND user_id = $2
+                   AND deleted_at IS NULL
+                   AND status = 'active'
+                 LIMIT 1",
+            )
+            .bind(filename)
+            .bind(user_id)
+            .fetch_optional(pool)
+            .await?
+        }
+        DatabasePool::Sqlite(pool) => {
+            sqlx::query_scalar::<_, i32>(
+                "SELECT 1
+                 FROM images
+                 WHERE filename = ?1
+                   AND user_id = ?2
+                   AND deleted_at IS NULL
+                   AND status = 'active'
+                 LIMIT 1",
+            )
+            .bind(filename)
+            .bind(user_id)
+            .fetch_optional(pool)
+            .await?
+        }
+    };
+
+    Ok(exists.is_some())
+}
+
 pub(crate) async fn serve_thumbnail(
     Path(path_key): Path<String>,
+    auth_user: AuthUser,
     State(state): State<AppState>,
 ) -> Result<Response, StatusCode> {
     let Some(image_key) = path_key.strip_suffix(".webp") else {
@@ -30,17 +113,13 @@ pub(crate) async fn serve_thumbnail(
         return Err(StatusCode::NOT_FOUND);
     }
 
-    let filename = sqlx::query_scalar::<_, String>(
-        "SELECT filename FROM images WHERE hash = $1 AND deleted_at IS NULL AND status = 'active' LIMIT 1",
-    )
-    .bind(image_key)
-    .fetch_optional(&state.pool)
-    .await
-    .map_err(|error| {
-        error!("Failed to query image by hash: {}", error);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?
-    .ok_or(StatusCode::NOT_FOUND)?;
+    let filename = find_active_filename_by_hash(&state.database, image_key, auth_user.id)
+        .await
+        .map_err(|error| {
+            error!("Failed to query image by hash: {}", error);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .ok_or(StatusCode::NOT_FOUND)?;
 
     let data = state
         .storage_manager
@@ -78,23 +157,19 @@ pub(crate) async fn serve_thumbnail(
 
 pub(crate) async fn serve_image(
     Path(filename): Path<String>,
+    auth_user: AuthUser,
     State(state): State<AppState>,
 ) -> Result<Response, StatusCode> {
     if !is_valid_filename(&filename) {
         return Err(StatusCode::NOT_FOUND);
     }
 
-    let exists = sqlx::query_scalar::<_, i32>(
-        "SELECT 1 FROM images WHERE filename = $1 AND deleted_at IS NULL AND status = 'active' LIMIT 1",
-    )
-    .bind(&filename)
-    .fetch_optional(&state.pool)
-    .await
-    .map_err(|error| {
-        error!("Failed to query image by filename: {}", error);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?
-    .is_some();
+    let exists = active_image_exists_by_filename(&state.database, &filename, auth_user.id)
+        .await
+        .map_err(|error| {
+            error!("Failed to query image by filename: {}", error);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
 
     if !exists {
         return Err(StatusCode::NOT_FOUND);

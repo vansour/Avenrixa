@@ -1,8 +1,8 @@
 use crate::services::api_client::ApiClient;
 use crate::store::auth::AuthStore;
 use crate::types::api::{
-    LoginRequest, PasswordResetConfirmRequest, PasswordResetRequest, UpdateProfileRequest,
-    UserResponse,
+    EmailVerificationConfirmRequest, LoginRequest, PasswordResetConfirmRequest,
+    PasswordResetRequest, RegisterRequest, UpdateProfileRequest, UserResponse,
 };
 use crate::types::errors::Result;
 
@@ -36,6 +36,12 @@ impl AuthService {
         Ok(user)
     }
 
+    pub async fn register(&self, req: RegisterRequest) -> Result<()> {
+        self.api_client
+            .post_json_no_response("/api/v1/auth/register", &req)
+            .await
+    }
+
     /// 获取当前用户
     pub async fn get_me(&self) -> Result<UserResponse> {
         self.api_client.get_json("/api/v1/auth/me").await
@@ -58,11 +64,11 @@ impl AuthService {
         Ok(())
     }
 
-    pub async fn request_password_reset(&self, identity: String) -> Result<()> {
+    pub async fn request_password_reset(&self, email: String) -> Result<()> {
         self.api_client
             .post_json_no_response(
                 "/api/v1/auth/password-reset/request",
-                &PasswordResetRequest { identity },
+                &PasswordResetRequest { email },
             )
             .await
     }
@@ -75,6 +81,15 @@ impl AuthService {
                     token,
                     new_password,
                 },
+            )
+            .await
+    }
+
+    pub async fn confirm_email_verification(&self, token: String) -> Result<()> {
+        self.api_client
+            .post_json_no_response(
+                "/api/v1/auth/register/verify",
+                &EmailVerificationConfirmRequest { token },
             )
             .await
     }

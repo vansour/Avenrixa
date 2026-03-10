@@ -5,16 +5,17 @@ use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, deco
 use uuid::Uuid;
 
 impl AuthService {
+    #[cfg(test)]
     pub fn generate_token(
         &self,
         user_id: Uuid,
-        username: &str,
+        email: &str,
         role: &str,
         token_version: u64,
     ) -> anyhow::Result<String> {
         self.encode_claims(build_claims(
             user_id,
-            username,
+            email,
             role,
             self.session_ttl_seconds,
             token_version,
@@ -40,13 +41,13 @@ impl AuthService {
     pub fn generate_access_token(
         &self,
         user_id: Uuid,
-        username: &str,
+        email: &str,
         role: &str,
         token_version: u64,
     ) -> anyhow::Result<String> {
         self.encode_claims(build_claims(
             user_id,
-            username,
+            email,
             role,
             Self::ACCESS_TOKEN_TTL_SECONDS,
             token_version,
@@ -67,6 +68,7 @@ impl AuthService {
         ))
     }
 
+    #[cfg(test)]
     pub fn verify_refresh_token(&self, token: &str) -> anyhow::Result<Uuid> {
         Ok(self.verify_refresh_token_claims(token)?.sub)
     }
@@ -91,7 +93,7 @@ impl AuthService {
 
 fn build_claims(
     user_id: Uuid,
-    username: &str,
+    email: &str,
     role: &str,
     ttl_seconds: u64,
     token_version: u64,
@@ -102,7 +104,7 @@ fn build_claims(
 
     Claims {
         sub: user_id,
-        username: username.to_string(),
+        email: email.to_string(),
         role: role.to_string(),
         token_version,
         exp: exp.timestamp(),

@@ -4,14 +4,20 @@ use serde::{Deserialize, Serialize};
 /// 登录请求
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoginRequest {
-    pub username: String,
+    pub email: String,
+    pub password: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegisterRequest {
+    pub email: String,
     pub password: String,
 }
 
 /// 用户响应
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserResponse {
-    pub username: String,
+    pub email: String,
     pub role: String,
     pub created_at: DateTime<Utc>,
 }
@@ -24,8 +30,6 @@ pub struct PaginationParams {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub page_size: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub category_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub tag: Option<String>,
 }
 
@@ -34,7 +38,6 @@ impl Default for PaginationParams {
         Self {
             page: Some(1),
             page_size: Some(20),
-            category_id: None,
             tag: None,
         }
     }
@@ -48,13 +51,6 @@ pub struct Paginated<T> {
     pub page_size: i32,
     pub total: i64,
     pub has_next: bool,
-}
-
-/// Cursor-based 分页响应
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CursorPaginated<T> {
-    pub data: Vec<T>,
-    pub next_cursor: Option<String>,
 }
 
 /// 批量删除请求
@@ -76,24 +72,22 @@ pub struct SetExpiryRequest {
     pub expires_at: Option<DateTime<Utc>>,
 }
 
-/// 更新分类请求
+/// 更新图片请求
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UpdateCategoryRequest {
-    pub category_id: Option<String>,
+pub struct UpdateImageRequest {
     pub tags: Option<Vec<String>>,
 }
 
 /// 修改密码请求
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateProfileRequest {
-    pub username: Option<String>,
     pub current_password: String,
     pub new_password: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PasswordResetRequest {
-    pub identity: String,
+    pub email: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -102,12 +96,25 @@ pub struct PasswordResetConfirmRequest {
     pub new_password: String,
 }
 
-/// 管理员设置配置（结构化）
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmailVerificationConfirmRequest {
+    pub token: String,
+}
+
+/// 管理员设置配置（结构化）
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AdminSettingsConfig {
     pub site_name: String,
     pub storage_backend: String,
     pub local_storage_path: String,
+    pub mail_enabled: bool,
+    pub mail_smtp_host: String,
+    pub mail_smtp_port: u16,
+    pub mail_smtp_user: Option<String>,
+    pub mail_smtp_password_set: bool,
+    pub mail_from_email: String,
+    pub mail_from_name: String,
+    pub mail_link_base_url: String,
     pub s3_endpoint: Option<String>,
     pub s3_region: Option<String>,
     pub s3_bucket: Option<String>,
@@ -118,12 +125,39 @@ pub struct AdminSettingsConfig {
     pub restart_required: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InstallStatusResponse {
+    pub installed: bool,
+    pub has_admin: bool,
+    pub favicon_configured: bool,
+    pub config: AdminSettingsConfig,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BootstrapStatusResponse {
+    pub mode: String,
+    pub database_kind: String,
+    pub database_configured: bool,
+    pub database_url_masked: Option<String>,
+    pub database_max_connections: Option<u32>,
+    pub restart_required: bool,
+    pub runtime_error: Option<String>,
+}
+
 /// 更新管理员设置请求
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateAdminSettingsConfigRequest {
     pub site_name: String,
     pub storage_backend: String,
     pub local_storage_path: String,
+    pub mail_enabled: bool,
+    pub mail_smtp_host: String,
+    pub mail_smtp_port: Option<u16>,
+    pub mail_smtp_user: Option<String>,
+    pub mail_smtp_password: Option<String>,
+    pub mail_from_email: String,
+    pub mail_from_name: String,
+    pub mail_link_base_url: String,
     pub s3_endpoint: Option<String>,
     pub s3_region: Option<String>,
     pub s3_bucket: Option<String>,
@@ -131,6 +165,37 @@ pub struct UpdateAdminSettingsConfigRequest {
     pub s3_access_key: Option<String>,
     pub s3_secret_key: Option<String>,
     pub s3_force_path_style: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateBootstrapDatabaseConfigRequest {
+    pub database_kind: String,
+    pub database_url: String,
+    pub database_max_connections: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UpdateBootstrapDatabaseConfigResponse {
+    pub database_kind: String,
+    pub database_configured: bool,
+    pub database_url_masked: String,
+    pub database_max_connections: u32,
+    pub restart_required: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InstallBootstrapRequest {
+    pub admin_email: String,
+    pub admin_password: String,
+    pub favicon_data_url: Option<String>,
+    pub config: UpdateAdminSettingsConfigRequest,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InstallBootstrapResponse {
+    pub user: UserResponse,
+    pub favicon_configured: bool,
+    pub config: AdminSettingsConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -175,9 +240,79 @@ pub struct BackupResponse {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BackupFileSummary {
+    pub filename: String,
+    pub created_at: DateTime<Utc>,
+    pub size_bytes: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BackupRestoreStorageSummary {
+    pub storage_backend: String,
+    pub local_storage_path: String,
+    pub s3_endpoint: Option<String>,
+    pub s3_region: Option<String>,
+    pub s3_bucket: Option<String>,
+    pub s3_prefix: Option<String>,
+    pub s3_force_path_style: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BackupRestorePrecheckResponse {
+    pub eligible: bool,
+    pub filename: String,
+    pub backup_created_at: DateTime<Utc>,
+    pub backup_size_bytes: u64,
+    pub current_database_kind: String,
+    pub integrity_check_passed: bool,
+    pub app_installed: bool,
+    pub has_admin: bool,
+    pub storage_compatible: bool,
+    pub current_storage: BackupRestoreStorageSummary,
+    pub backup_storage: BackupRestoreStorageSummary,
+    pub warnings: Vec<String>,
+    pub blockers: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PendingBackupRestore {
+    pub filename: String,
+    pub requested_by_user_id: String,
+    pub requested_by_email: String,
+    pub scheduled_at: DateTime<Utc>,
+    pub backup_created_at: DateTime<Utc>,
+    pub backup_size_bytes: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BackupRestoreResult {
+    pub status: String,
+    pub filename: String,
+    pub message: String,
+    pub scheduled_at: Option<DateTime<Utc>>,
+    pub started_at: Option<DateTime<Utc>>,
+    pub finished_at: DateTime<Utc>,
+    pub rollback_filename: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BackupRestoreStatusResponse {
+    pub pending: Option<PendingBackupRestore>,
+    pub last_result: Option<BackupRestoreResult>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BackupRestoreScheduleResponse {
+    pub scheduled: bool,
+    pub restart_required: bool,
+    pub pending: PendingBackupRestore,
+    pub precheck: BackupRestorePrecheckResponse,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AdminUserSummary {
     pub id: String,
-    pub username: String,
+    pub email: String,
     pub role: String,
     pub created_at: DateTime<Utc>,
 }

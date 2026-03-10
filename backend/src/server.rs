@@ -16,52 +16,84 @@ pub fn spawn_cleanup_tasks(state: &AppState) {
     }
     let deleted_cleanup_interval = config.cleanup.deleted_cleanup_interval_seconds;
     let expiry_check_interval = config.cleanup.expiry_check_interval_seconds;
+    let cleanup_pool = state.postgres_pool_owned().ok();
 
     // 启动清理已删除文件任务（每天）
-    let cleanup_pool = state.pool.clone();
-    let cleanup_storage_path = config.storage.path.clone();
-    let cleanup_thumbnail_path = config.storage.thumbnail_path.clone();
+    if cleanup_pool.is_none() && state.admin_domain_service.is_none() {
+        info!("Skipping background cleanup tasks because no cleanup executor is available",);
+        return;
+    }
+    let cleanup_storage_path = state
+        .storage_manager
+        .active_settings()
+        .local_storage_path
+        .clone();
     let cleanup_retention_days = config.cleanup.deleted_images_retention_days;
     let admin_service_for_cleanup = state.admin_domain_service.clone();
+    let installed_state_for_cleanup = state.database.clone();
 
+    let cleanup_pool_for_deleted = cleanup_pool.clone();
     tokio::spawn(async move {
         let mut interval =
             tokio::time::interval(tokio::time::Duration::from_secs(deleted_cleanup_interval));
         loop {
             interval.tick().await;
+            if !crate::db::is_app_installed(&installed_state_for_cleanup)
+                .await
+                .unwrap_or(false)
+            {
+                continue;
+            }
             info!("Running cleanup task...");
             if let Some(service) = admin_service_for_cleanup.as_ref() {
                 if let Err(e) = service.cleanup_deleted_files(ADMIN_USER_ID, "system").await {
                     tracing::error!("Cleanup task failed: {}", e);
                 }
-            } else if let Err(e) = tasks::cleanup_expired_images(
-                &cleanup_pool,
-                cleanup_retention_days,
-                &cleanup_storage_path,
-                &cleanup_thumbnail_path,
-            )
-            .await
-            {
-                tracing::error!("Cleanup task failed: {}", e);
+            } else if let Some(pool) = cleanup_pool_for_deleted.as_ref() {
+                if let Err(e) = tasks::cleanup_expired_images(
+                    pool,
+                    cleanup_retention_days,
+                    &cleanup_storage_path,
+                )
+                .await
+                {
+                    tracing::error!("Cleanup task failed: {}", e);
+                }
+            } else {
+                tracing::warn!("Cleanup task skipped: no executor available");
             }
         }
     });
 
     // 启动过期检查任务（每小时）
-    let expiry_pool = state.pool.clone();
+    let expiry_pool = cleanup_pool;
     let admin_service_for_expiry = state.admin_domain_service.clone();
+    let installed_state_for_expiry = state.database.clone();
 
     tokio::spawn(async move {
         let mut interval =
             tokio::time::interval(tokio::time::Duration::from_secs(expiry_check_interval));
         loop {
             interval.tick().await;
+            if !crate::db::is_app_installed(&installed_state_for_expiry)
+                .await
+                .unwrap_or(false)
+            {
+                continue;
+            }
             if let Some(service) = admin_service_for_expiry.as_ref() {
-                if let Err(e) = service.cleanup_expired_images(ADMIN_USER_ID).await {
+                if let Err(e) = service
+                    .cleanup_expired_images(ADMIN_USER_ID, "system")
+                    .await
+                {
                     tracing::error!("Expiry check failed: {}", e);
                 }
-            } else if let Err(e) = tasks::move_expired_to_trash(&expiry_pool).await {
-                tracing::error!("Expiry check failed: {}", e);
+            } else if let Some(pool) = expiry_pool.as_ref() {
+                if let Err(e) = tasks::move_expired_to_trash(pool).await {
+                    tracing::error!("Expiry check failed: {}", e);
+                }
+            } else {
+                tracing::warn!("Expiry task skipped: no executor available");
             }
         }
     });

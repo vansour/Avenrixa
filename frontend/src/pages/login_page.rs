@@ -1,16 +1,18 @@
 use crate::app_context::{use_auth_service, use_toast_store};
-use crate::types::api::LoginRequest;
+use crate::types::api::{LoginRequest, RegisterRequest};
 use dioxus::prelude::*;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum LoginMode {
     Login,
+    Register,
     RequestReset,
     ConfirmReset,
+    ConfirmEmailVerification,
 }
 
 #[cfg(target_arch = "wasm32")]
-fn read_reset_token_from_location() -> Option<String> {
+fn read_query_param(name: &str) -> Option<String> {
     let search = web_sys::window()
         .and_then(|window| window.location().search().ok())
         .unwrap_or_default();
@@ -23,7 +25,7 @@ fn read_reset_token_from_location() -> Option<String> {
         let Some((key, value)) = pair.split_once('=') else {
             continue;
         };
-        if key == "token" {
+        if key == name {
             return urlencoding::decode(value)
                 .ok()
                 .map(|value| value.into_owned());
@@ -34,12 +36,12 @@ fn read_reset_token_from_location() -> Option<String> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn read_reset_token_from_location() -> Option<String> {
+fn read_query_param(_name: &str) -> Option<String> {
     None
 }
 
 #[cfg(target_arch = "wasm32")]
-fn clear_reset_token_from_location() {
+fn clear_auth_query_from_location() {
     use wasm_bindgen::JsValue;
 
     if let Some(window) = web_sys::window()
@@ -51,7 +53,17 @@ fn clear_reset_token_from_location() {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn clear_reset_token_from_location() {}
+fn clear_auth_query_from_location() {}
+
+fn initial_mode() -> LoginMode {
+    match read_query_param("mode").as_deref() {
+        Some("verify-email") if read_query_param("token").is_some() => {
+            LoginMode::ConfirmEmailVerification
+        }
+        _ if read_query_param("token").is_some() => LoginMode::ConfirmReset,
+        _ => LoginMode::Login,
+    }
+}
 
 /// 登录页面组件
 #[component]
@@ -59,27 +71,26 @@ pub fn LoginPage() -> Element {
     let auth_service = use_auth_service();
     let toast_store = use_toast_store();
 
-    let initial_reset_token = read_reset_token_from_location();
-    let mut mode = use_signal(|| {
-        if initial_reset_token.is_some() {
-            LoginMode::ConfirmReset
-        } else {
-            LoginMode::Login
-        }
-    });
+    let initial_token = read_query_param("token");
+    let mut mode = use_signal(initial_mode);
 
-    let mut username = use_signal(String::new);
+    let mut login_email = use_signal(String::new);
+    let mut register_email = use_signal(String::new);
     let mut password = use_signal(String::new);
-    let mut reset_identity = use_signal(String::new);
-    let mut reset_token = use_signal(|| initial_reset_token.clone().unwrap_or_default());
+    let mut register_confirm_password = use_signal(String::new);
+    let mut reset_email = use_signal(String::new);
+    let mut reset_token = use_signal(|| initial_token.clone().unwrap_or_default());
+    let mut verification_token = use_signal(|| initial_token.clone().unwrap_or_default());
     let mut new_password = use_signal(String::new);
     let mut confirm_password = use_signal(String::new);
     let mut is_loading = use_signal(|| false);
     let mut error_message = use_signal(String::new);
 
     let show_login = mode() == LoginMode::Login;
+    let show_register = mode() == LoginMode::Register;
     let show_request_reset = mode() == LoginMode::RequestReset;
     let show_confirm_reset = mode() == LoginMode::ConfirmReset;
+    let show_confirm_email_verification = mode() == LoginMode::ConfirmEmailVerification;
 
     let auth_service_for_login = auth_service.clone();
     let toast_store_for_login = toast_store.clone();
@@ -87,11 +98,11 @@ pub fn LoginPage() -> Element {
         let auth_service_clone = auth_service_for_login.clone();
         let toast_store = toast_store_for_login.clone();
         spawn(async move {
-            let username_val = username();
+            let email_val = login_email();
             let password_val = password();
 
-            if username_val.trim().is_empty() || password_val.trim().is_empty() {
-                let message = "请输入用户名和密码".to_string();
+            if email_val.trim().is_empty() || password_val.trim().is_empty() {
+                let message = "请输入邮箱和密码".to_string();
                 error_message.set(message.clone());
                 toast_store.show_error(message);
                 return;
@@ -102,18 +113,70 @@ pub fn LoginPage() -> Element {
 
             match auth_service_clone
                 .login(LoginRequest {
-                    username: username_val.trim().to_string(),
+                    email: email_val.trim().to_string(),
                     password: password_val,
                 })
                 .await
             {
                 Ok(_) => {
-                    username.set(String::new());
+                    login_email.set(String::new());
                     password.set(String::new());
                     toast_store.show_success("登录成功".to_string());
                 }
                 Err(error) => {
                     let message = format!("登录失败: {}", error);
+                    error_message.set(message.clone());
+                    toast_store.show_error(message);
+                }
+            }
+
+            is_loading.set(false);
+        });
+    };
+
+    let auth_service_for_register = auth_service.clone();
+    let toast_store_for_register = toast_store.clone();
+    let handle_register = move |_| {
+        let auth_service = auth_service_for_register.clone();
+        let toast_store = toast_store_for_register.clone();
+        spawn(async move {
+            let email_val = register_email();
+            let password_val = password();
+            let confirm_val = register_confirm_password();
+
+            if email_val.trim().is_empty() || password_val.trim().is_empty() {
+                let message = "请填写邮箱和密码".to_string();
+                error_message.set(message.clone());
+                toast_store.show_error(message);
+                return;
+            }
+            if password_val != confirm_val {
+                let message = "两次输入的密码不一致".to_string();
+                error_message.set(message.clone());
+                toast_store.show_error(message);
+                return;
+            }
+
+            is_loading.set(true);
+            error_message.set(String::new());
+
+            match auth_service
+                .register(RegisterRequest {
+                    email: email_val.trim().to_string(),
+                    password: password_val,
+                })
+                .await
+            {
+                Ok(_) => {
+                    toast_store.show_success("注册成功，请查收邮箱完成验证".to_string());
+                    login_email.set(String::new());
+                    register_email.set(String::new());
+                    password.set(String::new());
+                    register_confirm_password.set(String::new());
+                    mode.set(LoginMode::Login);
+                }
+                Err(error) => {
+                    let message = format!("注册失败: {}", error);
                     error_message.set(message.clone());
                     toast_store.show_error(message);
                 }
@@ -129,9 +192,9 @@ pub fn LoginPage() -> Element {
         let auth_service = auth_service_for_request_reset.clone();
         let toast_store = toast_store_for_request_reset.clone();
         spawn(async move {
-            let identity = reset_identity();
-            if identity.trim().is_empty() {
-                let message = "请输入用户名或邮箱".to_string();
+            let email = reset_email();
+            if email.trim().is_empty() {
+                let message = "请输入邮箱".to_string();
                 error_message.set(message.clone());
                 toast_store.show_error(message);
                 return;
@@ -141,12 +204,12 @@ pub fn LoginPage() -> Element {
             error_message.set(String::new());
 
             match auth_service
-                .request_password_reset(identity.trim().to_string())
+                .request_password_reset(email.trim().to_string())
                 .await
             {
                 Ok(_) => {
                     toast_store.show_success("如果账号已配置找回邮箱，重置邮件已发送".to_string());
-                    reset_identity.set(String::new());
+                    reset_email.set(String::new());
                     mode.set(LoginMode::Login);
                 }
                 Err(error) => {
@@ -194,7 +257,7 @@ pub fn LoginPage() -> Element {
             {
                 Ok(_) => {
                     toast_store.show_success("密码已重置，请使用新密码登录".to_string());
-                    clear_reset_token_from_location();
+                    clear_auth_query_from_location();
                     reset_token.set(String::new());
                     new_password.set(String::new());
                     confirm_password.set(String::new());
@@ -211,9 +274,50 @@ pub fn LoginPage() -> Element {
         });
     };
 
+    let auth_service_for_confirm_verification = auth_service.clone();
+    let toast_store_for_confirm_verification = toast_store.clone();
+    let handle_confirm_verification = move |_| {
+        let auth_service = auth_service_for_confirm_verification.clone();
+        let toast_store = toast_store_for_confirm_verification.clone();
+        spawn(async move {
+            if verification_token().trim().is_empty() {
+                let message = "验证令牌不能为空".to_string();
+                error_message.set(message.clone());
+                toast_store.show_error(message);
+                return;
+            }
+
+            is_loading.set(true);
+            error_message.set(String::new());
+
+            match auth_service
+                .confirm_email_verification(verification_token().trim().to_string())
+                .await
+            {
+                Ok(_) => {
+                    toast_store.show_success("邮箱验证成功，请使用新账号登录".to_string());
+                    clear_auth_query_from_location();
+                    verification_token.set(String::new());
+                    mode.set(LoginMode::Login);
+                }
+                Err(error) => {
+                    let message = format!("邮箱验证失败: {}", error);
+                    error_message.set(message.clone());
+                    toast_store.show_error(message);
+                }
+            }
+
+            is_loading.set(false);
+        });
+    };
+
     let switch_to_login = move |_| {
         error_message.set(String::new());
         mode.set(LoginMode::Login);
+    };
+    let switch_to_register = move |_| {
+        error_message.set(String::new());
+        mode.set(LoginMode::Register);
     };
     let switch_to_request_reset = move |_| {
         error_message.set(String::new());
@@ -227,6 +331,10 @@ pub fn LoginPage() -> Element {
                     h1 { class: "login-title",
                         if show_request_reset {
                             "重置密码"
+                        } else if show_confirm_email_verification {
+                            "验证邮箱"
+                        } else if show_register {
+                            "创建账号"
                         } else if show_confirm_reset {
                             "设置新密码"
                         } else {
@@ -235,7 +343,11 @@ pub fn LoginPage() -> Element {
                     }
                     p { class: "login-subtitle",
                         if show_request_reset {
-                            "输入用户名或邮箱，我们会向已配置的地址发送重置链接"
+                            "输入邮箱，我们会向已配置的地址发送重置链接"
+                        } else if show_confirm_email_verification {
+                            "验证邮箱后即可使用新账号登录"
+                        } else if show_register {
+                            "公开注册已开启，注册后需要完成邮箱验证"
                         } else if show_confirm_reset {
                             "输入新密码以完成重置"
                         } else {
@@ -249,13 +361,13 @@ pub fn LoginPage() -> Element {
 
                     if show_login {
                         div { class: "login-form",
-                            label { for: "username", "用户名" }
+                            label { for: "login-email", "邮箱" }
                             input {
-                                r#type: "text",
-                                id: "username",
-                                placeholder: "请输入用户名",
-                                value: "{username}",
-                                oninput: move |e| username.set(e.value()),
+                                r#type: "email",
+                                id: "login-email",
+                                placeholder: "请输入邮箱地址",
+                                value: "{login_email}",
+                                oninput: move |e| login_email.set(e.value()),
                                 disabled: is_loading()
                             }
 
@@ -278,15 +390,56 @@ pub fn LoginPage() -> Element {
                         }
                     }
 
+                    if show_register {
+                        div { class: "login-form",
+                            label { for: "register-email", "邮箱" }
+                            input {
+                                r#type: "email",
+                                id: "register-email",
+                                placeholder: "请输入邮箱地址",
+                                value: "{register_email}",
+                                oninput: move |e| register_email.set(e.value()),
+                                disabled: is_loading()
+                            }
+
+                            label { for: "register-password", "密码" }
+                            input {
+                                r#type: "password",
+                                id: "register-password",
+                                placeholder: "请输入密码",
+                                value: "{password}",
+                                oninput: move |e| password.set(e.value()),
+                                disabled: is_loading()
+                            }
+
+                            label { for: "register-confirm-password", "确认密码" }
+                            input {
+                                r#type: "password",
+                                id: "register-confirm-password",
+                                placeholder: "请再次输入密码",
+                                value: "{register_confirm_password}",
+                                oninput: move |e| register_confirm_password.set(e.value()),
+                                disabled: is_loading()
+                            }
+
+                            button {
+                                class: "btn btn-primary btn-full",
+                                disabled: is_loading(),
+                                onclick: handle_register,
+                                if is_loading() { "注册中..." } else { "注册并发送验证邮件" }
+                            }
+                        }
+                    }
+
                     if show_request_reset {
                         div { class: "login-form",
-                            label { for: "reset-identity", "用户名或邮箱" }
+                            label { for: "reset-email", "邮箱" }
                             input {
-                                r#type: "text",
-                                id: "reset-identity",
-                                placeholder: "请输入用户名或邮箱",
-                                value: "{reset_identity}",
-                                oninput: move |e| reset_identity.set(e.value()),
+                                r#type: "email",
+                                id: "reset-email",
+                                placeholder: "请输入邮箱地址",
+                                value: "{reset_email}",
+                                oninput: move |e| reset_email.set(e.value()),
                                 disabled: is_loading()
                             }
 
@@ -340,14 +493,52 @@ pub fn LoginPage() -> Element {
                         }
                     }
 
-                    div { class: "login-footer",
-                        p { class: "login-tip", "请使用管理员预先配置的账户登录。" }
-                        if show_login {
+                    if show_confirm_email_verification {
+                        div { class: "login-form",
+                            label { for: "verification-token", "验证令牌" }
+                            input {
+                                r#type: "text",
+                                id: "verification-token",
+                                placeholder: "请输入邮件中的验证令牌",
+                                value: "{verification_token}",
+                                oninput: move |e| verification_token.set(e.value()),
+                                disabled: is_loading()
+                            }
+
                             button {
-                                class: "btn btn-ghost btn-full",
+                                class: "btn btn-primary btn-full",
                                 disabled: is_loading(),
-                                onclick: switch_to_request_reset,
-                                "忘记密码"
+                                onclick: handle_confirm_verification,
+                                if is_loading() { "验证中..." } else { "完成邮箱验证" }
+                            }
+                        }
+                    }
+
+                    div { class: "login-footer",
+                        p {
+                            class: "login-tip",
+                            if show_register {
+                                "注册后需要点击邮件中的验证链接激活账号。"
+                            } else if show_confirm_email_verification {
+                                "验证成功后即可返回登录。"
+                            } else {
+                                "如果你还没有账号，可以先完成公开注册。"
+                            }
+                        }
+                        if show_login {
+                            div { class: "login-form",
+                                button {
+                                    class: "btn btn-ghost btn-full",
+                                    disabled: is_loading(),
+                                    onclick: switch_to_register,
+                                    "注册新账号"
+                                }
+                                button {
+                                    class: "btn btn-ghost btn-full",
+                                    disabled: is_loading(),
+                                    onclick: switch_to_request_reset,
+                                    "忘记密码"
+                                }
                             }
                         } else {
                             button {

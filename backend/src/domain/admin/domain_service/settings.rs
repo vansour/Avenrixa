@@ -1,4 +1,5 @@
 use super::AdminDomainService;
+use crate::db::DatabasePool;
 use crate::error::AppError;
 use crate::models::Setting;
 use crate::runtime_settings::{admin_setting_policy, mask_admin_setting_value};
@@ -11,9 +12,18 @@ struct SettingRow {
 
 impl AdminDomainService {
     pub async fn get_settings(&self) -> Result<Vec<Setting>, AppError> {
-        let rows: Vec<SettingRow> = sqlx::query_as("SELECT key, value FROM settings ORDER BY key")
-            .fetch_all(&self.pool)
-            .await?;
+        let rows: Vec<SettingRow> = match &self.database {
+            DatabasePool::Postgres(pool) => {
+                sqlx::query_as("SELECT key, value FROM settings ORDER BY key")
+                    .fetch_all(pool)
+                    .await?
+            }
+            DatabasePool::Sqlite(pool) => {
+                sqlx::query_as("SELECT key, value FROM settings ORDER BY key")
+                    .fetch_all(pool)
+                    .await?
+            }
+        };
 
         Ok(rows
             .into_iter()

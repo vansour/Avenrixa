@@ -1,8 +1,8 @@
 use crate::services::api_client::ApiClient;
-use crate::store::images::ImageStore;
+use crate::store::images::{ImageCollectionKind, ImageStore};
 use crate::types::api::{
     DeleteRequest, Paginated, PaginationParams, RestoreRequest, SetExpiryRequest,
-    UpdateCategoryRequest,
+    UpdateImageRequest,
 };
 use crate::types::errors::Result;
 use crate::types::models::ImageItem;
@@ -35,13 +35,14 @@ impl ImageService {
             .api_client
             .get_json::<Paginated<ImageItem>>(&url)
             .await?;
-        self.image_store.set_images(result.data.clone());
-        self.image_store.set_pagination(
+        self.image_store.replace_page(
+            ImageCollectionKind::Active,
+            result.data.clone(),
             result.page.max(1) as u32,
+            params.page_size.unwrap_or(result.page_size).max(1) as u32,
             result.total.max(0) as u64,
             result.has_next,
         );
-        self.image_store.set_loading(false);
         Ok(result)
     }
 
@@ -63,8 +64,8 @@ impl ImageService {
         self.api_client.get_json(&url).await
     }
 
-    /// 更新图片（分类/标签）
-    pub async fn update_image(&self, image_key: &str, req: UpdateCategoryRequest) -> Result<()> {
+    /// 更新图片标签
+    pub async fn update_image(&self, image_key: &str, req: UpdateImageRequest) -> Result<()> {
         let url = format!("/api/v1/images/{}", image_key);
         self.api_client.put_json_no_response(&url, &req).await
     }
@@ -102,7 +103,19 @@ impl ImageService {
             format!("/api/v1/images/deleted?{}", query_params)
         };
 
-        self.api_client.get_json(&url).await
+        let result = self
+            .api_client
+            .get_json::<Paginated<ImageItem>>(&url)
+            .await?;
+        self.image_store.replace_page(
+            ImageCollectionKind::Deleted,
+            result.data.clone(),
+            result.page.max(1) as u32,
+            params.page_size.unwrap_or(result.page_size).max(1) as u32,
+            result.total.max(0) as u64,
+            result.has_next,
+        );
+        Ok(result)
     }
 
     /// 恢复图片
@@ -122,11 +135,6 @@ impl ImageService {
         if let Some(page_size) = params.page_size {
             query_parts.push(format!("page_size={}", page_size));
         }
-        push_query_param(
-            &mut query_parts,
-            "category_id",
-            params.category_id.as_deref(),
-        );
         push_query_param(&mut query_parts, "tag", params.tag.as_deref());
 
         query_parts.join("&")
@@ -149,7 +157,6 @@ mod tests {
         let params = PaginationParams {
             page: Some(2),
             page_size: Some(40),
-            category_id: Some("8ca4ac38-1b21-4064-86f2-34761d9cf5c0".to_string()),
             tag: Some("cover art".to_string()),
         };
 
@@ -157,7 +164,6 @@ mod tests {
 
         assert!(query.contains("page=2"));
         assert!(query.contains("page_size=40"));
-        assert!(query.contains("category_id=8ca4ac38-1b21-4064-86f2-34761d9cf5c0"));
         assert!(query.contains("tag=cover%20art"));
     }
 
@@ -166,7 +172,6 @@ mod tests {
         let params = PaginationParams {
             page: Some(1),
             page_size: Some(20),
-            category_id: Some("  ".to_string()),
             tag: Some("   ".to_string()),
         };
 

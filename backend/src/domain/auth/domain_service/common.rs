@@ -4,7 +4,13 @@ use crate::models::{User, UserResponse};
 #[derive(Debug, Clone)]
 pub struct PasswordResetDispatch {
     pub user_id: uuid::Uuid,
-    pub username: String,
+    pub email: String,
+    pub token: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct EmailVerificationDispatch {
+    pub user_id: uuid::Uuid,
     pub email: String,
     pub token: String,
 }
@@ -22,7 +28,7 @@ impl<R: AuthRepository> AuthDomainService<R> {
     pub(super) fn to_user_response(user: User) -> UserResponse {
         UserResponse {
             id: user.id,
-            username: user.username,
+            email: user.email,
             role: user.role,
             created_at: user.created_at,
         }

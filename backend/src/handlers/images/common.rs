@@ -1,13 +1,8 @@
 use crate::db::AppState;
-use crate::domain::image::{
-    ImageDomainService, PostgresCategoryRepository, PostgresImageRepository,
-};
+use crate::domain::image::DefaultImageDomainService;
 use crate::error::AppError;
 use crate::models::{Image, ImageResponse, Paginated};
 use std::sync::Arc;
-
-pub(super) type DefaultImageDomainService =
-    ImageDomainService<PostgresImageRepository, PostgresCategoryRepository>;
 
 pub(super) fn image_service(state: &AppState) -> Result<Arc<DefaultImageDomainService>, AppError> {
     state

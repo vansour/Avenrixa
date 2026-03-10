@@ -1,7 +1,7 @@
 use super::common::{
     REFRESH_TOKEN_COOKIE_NAME, append_cleared_session_cookies, auth_domain_service, read_cookie,
 };
-use crate::audit::log_audit;
+use crate::audit::log_audit_db;
 use crate::db::AppState;
 use crate::error::AppError;
 use crate::middleware::AuthUser;
@@ -23,7 +23,7 @@ pub async fn logout(
     State(state): State<AppState>,
     auth_user: AuthUser,
 ) -> Result<(HeaderMap, ()), AppError> {
-    info!("User logged out: {}", auth_user.username);
+    info!("User logged out: {}", auth_user.email);
 
     let ttl = state
         .auth
@@ -43,8 +43,8 @@ pub async fn logout(
         let _: () = redis.set_ex(refresh_revoked_key, "1", refresh_ttl).await?;
     }
 
-    log_audit(
-        &state.pool,
+    log_audit_db(
+        &state.database,
         Some(auth_user.id),
         "user.logout",
         "user",

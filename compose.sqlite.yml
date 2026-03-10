@@ -1,0 +1,35 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ghcr.io/vansour/vansour-image:latest
+    ports:
+      - "${APP_HOST_PORT:-8080}:8080"
+    depends_on:
+      dragonfly:
+        condition: service_healthy
+    environment:
+      - REDIS_URL=redis://dragonfly:6379
+      - JWT_SECRET=${JWT_SECRET:-your-secret-key-change-in-production}
+      - AUTH_COOKIE_SECURE=${AUTH_COOKIE_SECURE:-false}
+      - AUTH_COOKIE_SAME_SITE=${AUTH_COOKIE_SAME_SITE:-Strict}
+    volumes:
+      - "${DATA_DIR:-./data-sqlite}:/data"
+    restart: unless-stopped
+    healthcheck:
+      test: curl -f http://localhost:8080/health || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  dragonfly:
+    image: ghcr.io/dragonflydb/dragonfly:latest
+    command: --dir=/data
+    healthcheck:
+      test: redis-cli ping
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
