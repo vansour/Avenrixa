@@ -125,10 +125,12 @@ fn is_spa_route(request_path: &str) -> bool {
 }
 
 async fn serve_static_file(path: &Path, disable_cache: bool) -> Result<Response, StatusCode> {
-    let body = tokio::fs::read(path).await.map_err(|error| match error.kind() {
-        std::io::ErrorKind::NotFound => StatusCode::NOT_FOUND,
-        _ => StatusCode::INTERNAL_SERVER_ERROR,
-    })?;
+    let body = tokio::fs::read(path)
+        .await
+        .map_err(|error| match error.kind() {
+            std::io::ErrorKind::NotFound => StatusCode::NOT_FOUND,
+            _ => StatusCode::INTERNAL_SERVER_ERROR,
+        })?;
 
     let content_type = mime_guess::from_path(path)
         .first_or_octet_stream()
