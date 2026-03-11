@@ -63,6 +63,12 @@ impl AdminDomainService {
                     .await
                     .unwrap_or(0)
             }
+            DatabasePool::MySql(pool) => {
+                sqlx::query_scalar("SELECT COUNT(*) FROM images WHERE deleted_at IS NULL")
+                    .fetch_one(pool)
+                    .await
+                    .unwrap_or(0)
+            }
             DatabasePool::Sqlite(pool) => {
                 sqlx::query_scalar("SELECT COUNT(*) FROM images WHERE deleted_at IS NULL")
                     .fetch_one(pool)
@@ -73,6 +79,10 @@ impl AdminDomainService {
 
         let users_count: i64 = match &self.database {
             DatabasePool::Postgres(pool) => sqlx::query_scalar("SELECT COUNT(*) FROM users")
+                .fetch_one(pool)
+                .await
+                .unwrap_or(0),
+            DatabasePool::MySql(pool) => sqlx::query_scalar("SELECT COUNT(*) FROM users")
                 .fetch_one(pool)
                 .await
                 .unwrap_or(0),
@@ -98,6 +108,11 @@ impl AdminDomainService {
                     .fetch_one(pool)
                     .await?;
             }
+            DatabasePool::MySql(pool) => {
+                sqlx::query_scalar::<_, i32>("SELECT 1")
+                    .fetch_one(pool)
+                    .await?;
+            }
             DatabasePool::Sqlite(pool) => {
                 sqlx::query_scalar::<_, i32>("SELECT 1")
                     .fetch_one(pool)
@@ -111,6 +126,12 @@ impl AdminDomainService {
         let total_size = match &self.database {
             DatabasePool::Postgres(pool) => {
                 sqlx::query_scalar::<_, Option<i64>>("SELECT CAST(SUM(size) AS BIGINT) FROM images")
+                    .fetch_one(pool)
+                    .await
+                    .unwrap_or(None)
+            }
+            DatabasePool::MySql(pool) => {
+                sqlx::query_scalar::<_, Option<i64>>("SELECT SUM(size) FROM images")
                     .fetch_one(pool)
                     .await
                     .unwrap_or(None)

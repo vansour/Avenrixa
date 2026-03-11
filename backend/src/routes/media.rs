@@ -42,6 +42,21 @@ async fn find_active_filename_by_hash(
             .fetch_optional(pool)
             .await
         }
+        DatabasePool::MySql(pool) => {
+            sqlx::query_scalar::<_, String>(
+                "SELECT filename
+                 FROM images
+                 WHERE hash = ?
+                   AND user_id = ?
+                   AND deleted_at IS NULL
+                   AND status = 'active'
+                 LIMIT 1",
+            )
+            .bind(image_key)
+            .bind(user_id)
+            .fetch_optional(pool)
+            .await
+        }
         DatabasePool::Sqlite(pool) => {
             sqlx::query_scalar::<_, String>(
                 "SELECT filename
@@ -72,6 +87,21 @@ async fn active_image_exists_by_filename(
                  FROM images
                  WHERE filename = $1
                    AND user_id = $2
+                   AND deleted_at IS NULL
+                   AND status = 'active'
+                 LIMIT 1",
+            )
+            .bind(filename)
+            .bind(user_id)
+            .fetch_optional(pool)
+            .await?
+        }
+        DatabasePool::MySql(pool) => {
+            sqlx::query_scalar::<_, i32>(
+                "SELECT 1
+                 FROM images
+                 WHERE filename = ?
+                   AND user_id = ?
                    AND deleted_at IS NULL
                    AND status = 'active'
                  LIMIT 1",

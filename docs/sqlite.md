@@ -167,9 +167,6 @@ docker compose -f compose.sqlite.yml restart app
 仓库内还提供了一套更完整的 SQLite E2E 冒烟脚本，用于验证当前主链路是否真的可用：
 
 ```bash
-COMPOSE_PROJECT_NAME=vansour-image-sqlite-e2e \
-APP_HOST_PORT=18080 \
-MAILPIT_HTTP_PORT=18025 \
 ./scripts/sqlite-e2e-smoke.sh
 ```
 
@@ -188,9 +185,6 @@ MAILPIT_HTTP_PORT=18025 \
 
 ```bash
 PRESERVE_STACK_ON_FAILURE=1 \
-COMPOSE_PROJECT_NAME=vansour-image-sqlite-e2e \
-APP_HOST_PORT=18080 \
-MAILPIT_HTTP_PORT=18025 \
 ./scripts/sqlite-e2e-smoke.sh
 ```
 

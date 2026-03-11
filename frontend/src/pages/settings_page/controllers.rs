@@ -1,9 +1,9 @@
 use crate::app_context::{use_admin_service, use_auth_service, use_auth_store, use_toast_store};
 use crate::components::{ConfirmationModal, ConfirmationTone};
 use crate::types::api::{
-    AdminUserSummary, AuditLog, BackupFileSummary, BackupResponse, BackupRestorePrecheckResponse,
-    BackupRestoreStatusResponse, BackupRestoreStorageSummary, HealthStatus, PaginationParams,
-    Setting, SystemStats, UpdateProfileRequest,
+    AdminUserSummary, AuditLog, BackupFileSummary, BackupObjectRollbackAnchor, BackupResponse,
+    BackupRestorePrecheckResponse, BackupRestoreStatusResponse, BackupRestoreStorageSummary,
+    HealthStatus, PaginationParams, Setting, SystemStats, UpdateProfileRequest,
 };
 use dioxus::prelude::*;
 use std::collections::HashMap;
@@ -133,8 +133,8 @@ fn maintenance_confirmation_plan(action: MaintenanceAction) -> ConfirmationPlan 
     }
 }
 
-fn sqlite_backup_restore_supported(filename: &str) -> bool {
-    filename.ends_with(".sqlite3")
+fn backup_supports_restore(filename: &str) -> bool {
+    filename.ends_with(".sqlite3") || filename.ends_with(".mysql.sql")
 }
 
 fn format_restore_bytes(bytes: u64) -> String {
@@ -173,6 +173,49 @@ fn summarize_restore_storage(storage: &BackupRestoreStorageSummary) -> String {
     }
 }
 
+fn database_kind_label(kind: &str) -> &'static str {
+    if kind.eq_ignore_ascii_case("sqlite") {
+        "SQLite"
+    } else if kind.eq_ignore_ascii_case("mysql") {
+        "MySQL / MariaDB"
+    } else if kind.eq_ignore_ascii_case("postgresql") || kind.eq_ignore_ascii_case("postgres") {
+        "PostgreSQL"
+    } else {
+        "数据库"
+    }
+}
+
+fn summarize_object_rollback_anchor(anchor: &BackupObjectRollbackAnchor) -> String {
+    if anchor.strategy == "local-directory-snapshot" {
+        let path = anchor
+            .local_storage_path
+            .clone()
+            .unwrap_or_else(|| "未记录目录".to_string());
+        format!(
+            "文件回滚锚点：{} @ {}",
+            path,
+            format_restore_timestamp(anchor.checkpoint_at)
+        )
+    } else {
+        let bucket = anchor
+            .s3_bucket
+            .clone()
+            .unwrap_or_else(|| "未配置 bucket".to_string());
+        let prefix = anchor.s3_prefix.clone().unwrap_or_else(|| "/".to_string());
+        let status = anchor
+            .s3_bucket_versioning_status
+            .clone()
+            .unwrap_or_else(|| "unknown".to_string());
+        format!(
+            "对象回滚锚点：bucket {} · prefix {} · {} · versioning {}",
+            bucket,
+            prefix,
+            format_restore_timestamp(anchor.checkpoint_at),
+            status
+        )
+    }
+}
+
 fn restore_confirmation_plan(precheck: &BackupRestorePrecheckResponse) -> ConfirmationPlan {
     let mut consequences = vec![
         format!(
@@ -180,7 +223,12 @@ fn restore_confirmation_plan(precheck: &BackupRestorePrecheckResponse) -> Confir
             format_restore_timestamp(precheck.backup_created_at),
             format_restore_bytes(precheck.backup_size_bytes)
         ),
-        "恢复不是在线热切换；真正的数据文件替换会发生在下一次服务启动前。".to_string(),
+        format!(
+            "当前数据库后端：{}；目标备份类型：{}。",
+            database_kind_label(&precheck.current_database_kind),
+            database_kind_label(&precheck.backup_database_kind)
+        ),
+        "恢复不是在线热切换；真正的数据替换或 SQL 导入会发生在下一次服务启动前。".to_string(),
         format!(
             "当前存储配置：{}。",
             summarize_restore_storage(&precheck.current_storage)
@@ -190,13 +238,17 @@ fn restore_confirmation_plan(precheck: &BackupRestorePrecheckResponse) -> Confir
             summarize_restore_storage(&precheck.backup_storage)
         ),
     ];
+    if let Some(anchor) = precheck.object_rollback_anchor.as_ref() {
+        consequences.push(summarize_object_rollback_anchor(anchor));
+    }
     consequences.extend(precheck.warnings.iter().cloned());
 
+    let database_label = database_kind_label(&precheck.backup_database_kind);
     ConfirmationPlan {
-        title: "写入 SQLite 恢复计划".to_string(),
+        title: format!("写入 {database_label} 恢复计划"),
         summary: format!(
-            "你正在安排在下一次重启时，用备份 {} 覆盖当前 SQLite 数据库。执行后当前登录会话会全部失效，需要重新登录。",
-            precheck.filename
+            "你正在安排在下一次重启时，用备份 {} 恢复当前 {}。执行后当前登录会话会全部失效，需要重新登录。",
+            precheck.filename, database_label
         ),
         consequences,
         confirm_label: "写入恢复计划".to_string(),
@@ -869,8 +921,11 @@ pub fn MaintenanceSectionController() -> Element {
             return;
         }
 
-        if !sqlite_backup_restore_supported(&filename) {
-            let message = format!("当前恢复流程只支持 SQLite 备份文件：{}", filename);
+        if !backup_supports_restore(&filename) {
+            let message = format!(
+                "当前恢复流程只支持 SQLite 或 MySQL / MariaDB 备份文件：{}",
+                filename
+            );
             error_message.set(message.clone());
             toast_store_for_restore_precheck.show_error(message);
             return;

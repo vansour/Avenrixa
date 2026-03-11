@@ -1,0 +1,66 @@
+name: MySQL Family Ops Drill
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "30 2 * * 1"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  mysql-ops-drill:
+    name: MySQL Family Ops Drill (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: mysql
+            compose_project_name: vansour-image-mysql-ops-drill-ci
+            compose_file_paths: compose.mysql.yml
+            data_dir: data-mysql
+          - name: mariadb
+            compose_project_name: vansour-image-mariadb-ops-drill-ci
+            compose_file_paths: compose.mariadb.yml
+            data_dir: data-mariadb
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show Docker versions
+        run: |
+          docker --version
+          docker compose version
+
+      - name: Run MySQL ops drill
+        id: mysql_ops_drill
+        continue-on-error: true
+        env:
+          COMPOSE_PROJECT_NAME: ${{ matrix.compose_project_name }}
+          COMPOSE_FILE_PATHS: ${{ matrix.compose_file_paths }}
+          DOCKER_BUILDKIT: "1"
+          COMPOSE_DOCKER_CLI_BUILD: "1"
+          PRESERVE_STACK_ON_FAILURE: "1"
+        run: ./scripts/mysql-ops-drill.sh
+
+      - name: Dump compose state after failure
+        if: steps.mysql_ops_drill.outcome != 'success'
+        run: |
+          docker compose -p "${{ matrix.compose_project_name }}" -f "${{ matrix.compose_file_paths }}" ps
+          docker compose -p "${{ matrix.compose_project_name }}" -f "${{ matrix.compose_file_paths }}" logs --no-color --tail=300
+
+      - name: Cleanup MySQL ops drill stack
+        if: always()
+        run: |
+          docker compose -p "${{ matrix.compose_project_name }}" -f "${{ matrix.compose_file_paths }}" down -v --remove-orphans || true
+          rm -rf "${{ matrix.data_dir }}" || true
+
+      - name: Mark workflow failed when drill failed
+        if: steps.mysql_ops_drill.outcome != 'success'
+        run: exit 1

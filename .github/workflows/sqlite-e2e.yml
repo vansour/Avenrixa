@@ -30,8 +30,6 @@ jobs:
         id: sqlite_e2e
         continue-on-error: true
         env:
-          APP_HOST_PORT: "18080"
-          MAILPIT_HTTP_PORT: "18025"
           COMPOSE_PROJECT_NAME: vansour-image-sqlite-e2e-ci
           DOCKER_BUILDKIT: "1"
           COMPOSE_DOCKER_CLI_BUILD: "1"

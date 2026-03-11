@@ -1,5 +1,5 @@
 use chrono::Utc;
-use sqlx::{QueryBuilder, Sqlite};
+use sqlx::{MySql, QueryBuilder, Sqlite};
 use std::collections::{HashMap, HashSet};
 use tracing::{error, info};
 use uuid::Uuid;
@@ -49,6 +49,14 @@ impl AdminDomainService {
                 .fetch_all(pool)
                 .await
             }
+            DatabasePool::MySql(pool) => {
+                sqlx::query_as::<_, (Uuid, String)>(
+                    "SELECT id, filename FROM images WHERE deleted_at < ?",
+                )
+                .bind(days_ago)
+                .fetch_all(pool)
+                .await
+            }
             DatabasePool::Sqlite(pool) => {
                 sqlx::query_as::<_, (Uuid, String)>(
                     "SELECT id, filename FROM images WHERE deleted_at < ?1",
@@ -93,6 +101,33 @@ impl AdminDomainService {
                 .bind(&delete_ids)
                 .fetch_all(pool)
                 .await?
+            }
+            DatabasePool::MySql(pool) => {
+                if candidate_filenames.is_empty() {
+                    Vec::new()
+                } else {
+                    let mut builder = QueryBuilder::<MySql>::new(
+                        "SELECT DISTINCT filename FROM images WHERE filename IN (",
+                    );
+                    {
+                        let mut separated = builder.separated(", ");
+                        for filename in &candidate_filenames {
+                            separated.push_bind(filename);
+                        }
+                    }
+                    builder.push(")");
+                    if !delete_ids.is_empty() {
+                        builder.push(" AND id NOT IN (");
+                        {
+                            let mut separated = builder.separated(", ");
+                            for image_id in &delete_ids {
+                                separated.push_bind(image_id);
+                            }
+                        }
+                        builder.push(")");
+                    }
+                    builder.build_query_scalar().fetch_all(pool).await?
+                }
             }
             DatabasePool::Sqlite(pool) => {
                 if candidate_filenames.is_empty() {
@@ -156,6 +191,12 @@ impl AdminDomainService {
                             .execute(pool)
                             .await;
                     }
+                    DatabasePool::MySql(pool) => {
+                        let _ = sqlx::query("DELETE FROM images WHERE id = ?")
+                            .bind(id)
+                            .execute(pool)
+                            .await;
+                    }
                     DatabasePool::Sqlite(pool) => {
                         let _ = sqlx::query("DELETE FROM images WHERE id = ?1")
                             .bind(id)
@@ -200,6 +241,14 @@ impl AdminDomainService {
             DatabasePool::Postgres(pool) => sqlx::query(
                 "UPDATE images SET deleted_at = $1 WHERE expires_at < $1 AND deleted_at IS NULL",
             )
+            .bind(now)
+            .execute(pool)
+            .await
+            .map(|result| result.rows_affected() as i64),
+            DatabasePool::MySql(pool) => sqlx::query(
+                "UPDATE images SET deleted_at = ? WHERE expires_at < ? AND deleted_at IS NULL",
+            )
+            .bind(now)
             .bind(now)
             .execute(pool)
             .await

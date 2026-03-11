@@ -1,9 +1,14 @@
+# 长期运维模板：
+# 1. 复制为 compose.mysql.ops.yml
+# 2. 替换下面所有密码/密钥占位值
+# 3. 再执行 docker compose -f compose.mysql.ops.yml up --build -d
+
 volumes:
-  postgres_data:
+  mysql_data:
 
 services:
   app:
-    container_name: vansour-image-app
+    container_name: vansour-image-mysql-app
     build:
       context: .
       dockerfile: Dockerfile
@@ -11,17 +16,17 @@ services:
     ports:
       - "8080:8080"
     depends_on:
-      postgres:
+      mysql:
         condition: service_healthy
       dragonfly:
         condition: service_healthy
     environment:
       - REDIS_URL=redis://dragonfly:6379
-      - JWT_SECRET=your-secret-key-change-in-production
-      - AUTH_COOKIE_SECURE=false
+      - JWT_SECRET=replace-with-a-random-secret-at-least-32-characters
+      - AUTH_COOKIE_SECURE=true
       - AUTH_COOKIE_SAME_SITE=Strict
     volumes:
-      - "./data:/data"
+      - "./data-mysql:/data"
     restart: unless-stopped
     healthcheck:
       test: curl -f http://localhost:8080/health || exit 1
@@ -29,23 +34,26 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
-  postgres:
-    container_name: vansour-image-postgres
-    image: postgres:trixie
+
+  mysql:
+    container_name: vansour-image-mysql
+    image: mysql:8.4
     environment:
-      - POSTGRES_DB=image
-      - POSTGRES_USER=user
-      - POSTGRES_PASSWORD=pass
+      - MYSQL_DATABASE=image
+      - MYSQL_USER=vansour_image
+      - MYSQL_PASSWORD=replace-with-strong-app-password
+      - MYSQL_ROOT_PASSWORD=replace-with-strong-root-password
     volumes:
-      - "postgres_data:/var/lib/postgresql"
+      - "mysql_data:/var/lib/mysql"
     healthcheck:
-      test: pg_isready -U user -d image
+      test: mysqladmin ping -h 127.0.0.1 -uvansour_image -preplace-with-strong-app-password
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
     restart: unless-stopped
+
   dragonfly:
-    container_name: vansour-image-dragonfly
+    container_name: vansour-image-mysql-dragonfly
     image: ghcr.io/dragonflydb/dragonfly:latest
     command: --dir=/data
     healthcheck:

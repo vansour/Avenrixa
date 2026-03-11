@@ -6,18 +6,22 @@ use crate::audit::log_audit_db;
 use crate::config::DatabaseKind;
 use crate::db::{
     AppState, SITE_FAVICON_DATA_URL_SETTING_KEY, acquire_installation_lock,
-    create_admin_account_sqlite_tx, create_admin_account_tx, delete_setting_sqlite_tx,
-    delete_setting_tx, get_setting_value, has_admin_account, has_admin_account_sqlite_tx,
-    has_admin_account_tx, is_app_installed, is_app_installed_sqlite_tx, is_app_installed_tx,
-    mark_app_installed_sqlite_tx, mark_app_installed_tx, upsert_setting_sqlite_tx,
-    upsert_setting_tx, validate_admin_bootstrap_config,
+    create_admin_account_mysql_tx, create_admin_account_sqlite_tx, create_admin_account_tx,
+    delete_setting_mysql_tx, delete_setting_sqlite_tx, delete_setting_tx, get_setting_value,
+    has_admin_account, has_admin_account_mysql_tx, has_admin_account_sqlite_tx,
+    has_admin_account_tx, is_app_installed, is_app_installed_mysql_tx, is_app_installed_sqlite_tx,
+    is_app_installed_tx, mark_app_installed_mysql_tx, mark_app_installed_sqlite_tx,
+    mark_app_installed_tx, upsert_setting_mysql_tx, upsert_setting_sqlite_tx, upsert_setting_tx,
+    validate_admin_bootstrap_config,
 };
 use crate::domain::auth::user_token_version_key;
 use crate::error::AppError;
 use crate::handlers::auth::common::append_session_cookies;
 use crate::models::{InstallBootstrapRequest, InstallBootstrapResponse, InstallStatusResponse};
 use crate::runtime_settings::validate_and_merge;
-use crate::runtime_settings::{persist_settings_sqlite_tx, persist_settings_tx};
+use crate::runtime_settings::{
+    persist_settings_mysql_tx, persist_settings_sqlite_tx, persist_settings_tx,
+};
 
 const MAX_FAVICON_BYTES: usize = 256 * 1024;
 
@@ -84,10 +88,42 @@ pub async fn bootstrap_installation(
             tx.commit().await?;
             user
         }
+        DatabaseKind::MySql => {
+            let pool = match &state.database {
+                crate::db::DatabasePool::MySql(pool) => pool,
+                crate::db::DatabasePool::Postgres(_) | crate::db::DatabasePool::Sqlite(_) => {
+                    unreachable!()
+                }
+            };
+            let mut tx = pool.begin().await?;
+
+            if is_app_installed_mysql_tx(&mut tx).await?
+                || has_admin_account_mysql_tx(&mut tx).await?
+            {
+                return Err(AppError::AppAlreadyInstalled);
+            }
+
+            persist_settings_mysql_tx(&mut tx, &validated_settings).await?;
+            if let Some(value) = favicon_data_url.as_deref() {
+                upsert_setting_mysql_tx(&mut tx, SITE_FAVICON_DATA_URL_SETTING_KEY, value).await?;
+            } else {
+                delete_setting_mysql_tx(&mut tx, SITE_FAVICON_DATA_URL_SETTING_KEY).await?;
+            }
+
+            let user: crate::models::User =
+                create_admin_account_mysql_tx(&mut tx, &admin.email, &admin.password)
+                    .await
+                    .map_err(AppError::Internal)?;
+            mark_app_installed_mysql_tx(&mut tx).await?;
+            tx.commit().await?;
+            user
+        }
         DatabaseKind::Sqlite => {
             let pool = match &state.database {
                 crate::db::DatabasePool::Sqlite(pool) => pool,
-                crate::db::DatabasePool::Postgres(_) => unreachable!(),
+                crate::db::DatabasePool::Postgres(_) | crate::db::DatabasePool::MySql(_) => {
+                    unreachable!()
+                }
             };
             let mut tx = pool.begin().await?;
 
@@ -95,7 +131,7 @@ pub async fn bootstrap_installation(
                 || has_admin_account_sqlite_tx(&mut tx).await?
             {
                 return Err(AppError::AppAlreadyInstalled);
-            }
+            };
 
             persist_settings_sqlite_tx(&mut tx, &validated_settings).await?;
             if let Some(value) = favicon_data_url.as_deref() {

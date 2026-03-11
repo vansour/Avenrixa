@@ -1,5 +1,6 @@
 mod audit;
 mod auth;
+mod backup_manifest;
 mod bootstrap;
 mod cache;
 mod config;
@@ -102,7 +103,7 @@ async fn main() -> anyhow::Result<()> {
                         }
                         Err(rollback_start_error) => {
                             error!(
-                                "SQLite restore rollback succeeded but application startup still failed: {}",
+                                "Database restore rollback succeeded but application startup still failed: {}",
                                 rollback_start_error
                             );
                             let app = create_bootstrap_app(
@@ -110,7 +111,7 @@ async fn main() -> anyhow::Result<()> {
                                     config: base_config.clone(),
                                     store: std::sync::Arc::new(bootstrap_store),
                                     runtime_error: Some(format!(
-                                        "SQLite 恢复失败后已自动回滚，但应用仍无法启动。原始错误: {}; 回滚后错误: {}",
+                                        "数据库恢复失败后已自动回滚，但应用仍无法启动。原始错误: {}; 回滚后错误: {}",
                                         runtime_error, rollback_start_error
                                     )),
                                     started_at: std::time::Instant::now(),
@@ -123,13 +124,13 @@ async fn main() -> anyhow::Result<()> {
                         }
                     },
                     Err(rollback_error) => {
-                        error!("SQLite restore rollback failed: {}", rollback_error);
+                        error!("Database restore rollback failed: {}", rollback_error);
                         let app = create_bootstrap_app(
                             BootstrapAppState {
                                 config: base_config.clone(),
                                 store: std::sync::Arc::new(bootstrap_store),
                                 runtime_error: Some(format!(
-                                    "SQLite 恢复失败，且自动回滚也失败。原始错误: {}; 回滚错误: {}",
+                                    "数据库恢复失败，且自动回滚也失败。原始错误: {}; 回滚错误: {}",
                                     runtime_error, rollback_error
                                 )),
                                 started_at: std::time::Instant::now(),

@@ -1,4 +1,4 @@
-use super::types::{Config, ConfigError};
+use super::types::{Config, ConfigError, is_mysql_compatible_scheme};
 use lettre::Address;
 use reqwest::Url;
 
@@ -17,6 +17,11 @@ impl Config {
                     Some("postgresql") | Some("postgres")
                 ) {
                     return Err(ConfigError::InvalidPostgresDatabaseUrl);
+                }
+            }
+            super::types::DatabaseKind::MySql => {
+                if !is_mysql_compatible_scheme(&self.database.url) {
+                    return Err(ConfigError::InvalidMySqlDatabaseUrl);
                 }
             }
             super::types::DatabaseKind::Sqlite => {

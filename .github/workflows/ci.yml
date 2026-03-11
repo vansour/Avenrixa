@@ -44,9 +44,25 @@ jobs:
         run: cargo test --workspace
 
   compose-smoke:
-    name: Compose Smoke
+    name: Compose Smoke (${{ matrix.name }})
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: default
+            compose_project_name: vansour-image-ci
+            compose_file_paths: ""
+            smoke_flow: health
+          - name: mysql
+            compose_project_name: vansour-image-ci-mysql
+            compose_file_paths: "compose.mysql.yml"
+            smoke_flow: auto
+          - name: mariadb
+            compose_project_name: vansour-image-ci-mariadb
+            compose_file_paths: "compose.mariadb.yml"
+            smoke_flow: auto
 
     steps:
       - name: Checkout
@@ -57,10 +73,50 @@ jobs:
           docker --version
           docker compose version
 
-      - name: Compose /health smoke check
+      - name: Compose smoke check
         env:
-          APP_HOST_PORT: "18080"
-          COMPOSE_PROJECT_NAME: vansour-image-ci
+          COMPOSE_PROJECT_NAME: ${{ matrix.compose_project_name }}
+          COMPOSE_FILE_PATHS: ${{ matrix.compose_file_paths }}
+          SMOKE_FLOW: ${{ matrix.smoke_flow }}
           DOCKER_BUILDKIT: "1"
           COMPOSE_DOCKER_CLI_BUILD: "1"
         run: ./scripts/compose-smoke.sh
+
+  browser-click-regression:
+    name: Browser Click Regression (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: mysql
+            compose_project_name: vansour-image-ci-browser-mysql
+            compose_file_paths: "compose.mysql.yml"
+          - name: mariadb
+            compose_project_name: vansour-image-ci-browser-mariadb
+            compose_file_paths: "compose.mariadb.yml"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: scripts/browser-regression/package-lock.json
+
+      - name: Show Docker versions
+        run: |
+          docker --version
+          docker compose version
+
+      - name: Browser click regression
+        env:
+          COMPOSE_PROJECT_NAME: ${{ matrix.compose_project_name }}
+          COMPOSE_FILE_PATHS: ${{ matrix.compose_file_paths }}
+          DOCKER_BUILDKIT: "1"
+          COMPOSE_DOCKER_CLI_BUILD: "1"
+        run: ./scripts/browser-click-regression.sh

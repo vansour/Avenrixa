@@ -3,8 +3,10 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use super::database::test_sqlite_connection;
-use crate::config::{Config, ConfigError, DatabaseKind};
+use super::database::{test_mysql_connection, test_sqlite_connection};
+use crate::config::{
+    Config, ConfigError, DatabaseKind, is_mysql_compatible_scheme, normalize_mysql_compatible_url,
+};
 use crate::models::{
     BootstrapStatusResponse, UpdateBootstrapDatabaseConfigRequest,
     UpdateBootstrapDatabaseConfigResponse,
@@ -74,6 +76,7 @@ impl BootstrapConfigStore {
             DatabaseKind::Postgres => {
                 test_postgres_connection(&database_url, max_connections).await?
             }
+            DatabaseKind::MySql => test_mysql_connection(&database_url, max_connections).await?,
             DatabaseKind::Sqlite => test_sqlite_connection(&database_url).await?,
         }
 
@@ -183,6 +186,12 @@ fn normalize_database_target(
             }
             Ok(trimmed.to_string())
         }
+        DatabaseKind::MySql => {
+            if !is_mysql_compatible_scheme(trimmed) {
+                return Err(ConfigError::InvalidMySqlDatabaseUrl);
+            }
+            Ok(normalize_mysql_compatible_url(trimmed))
+        }
         DatabaseKind::Sqlite => {
             if trimmed.starts_with("sqlite:") || !trimmed.contains("://") {
                 Ok(trimmed.to_string())
@@ -196,6 +205,19 @@ fn normalize_database_target(
 pub fn mask_database_url(database_kind: DatabaseKind, database_url: &str) -> String {
     match database_kind {
         DatabaseKind::Postgres => match reqwest::Url::parse(database_url) {
+            Ok(mut url) => {
+                let username = url.username().to_string();
+                if !username.is_empty() {
+                    let _ = url.set_username(&username);
+                }
+                if url.password().is_some() {
+                    let _ = url.set_password(Some("******"));
+                }
+                url.to_string()
+            }
+            Err(_) => "******".to_string(),
+        },
+        DatabaseKind::MySql => match reqwest::Url::parse(database_url) {
             Ok(mut url) => {
                 let username = url.username().to_string();
                 if !username.is_empty() {

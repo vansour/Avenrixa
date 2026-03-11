@@ -23,6 +23,11 @@ pub(crate) async fn load_from_db(
                 .fetch_all(pool)
                 .await?
         }
+        DatabasePool::MySql(pool) => {
+            sqlx::query_as::<_, (String, String)>("SELECT `key`, `value` FROM settings")
+                .fetch_all(pool)
+                .await?
+        }
         DatabasePool::Sqlite(pool) => {
             sqlx::query_as::<_, (String, String)>("SELECT key, value FROM settings")
                 .fetch_all(pool)

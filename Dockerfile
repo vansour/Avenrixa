@@ -83,7 +83,7 @@ FROM debian:trixie-slim AS runtime
 
 # 安装运行时必需依赖（以 root 用户运行，避免卷权限问题）
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl postgresql-client \
+    ca-certificates curl default-mysql-client postgresql-client \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 

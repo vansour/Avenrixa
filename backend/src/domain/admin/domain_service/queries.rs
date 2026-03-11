@@ -30,6 +30,7 @@ impl AdminDomainService {
         let query = "SELECT id, email, role, created_at FROM users ORDER BY created_at DESC";
         let users = match &self.database {
             DatabasePool::Postgres(pool) => sqlx::query_as(query).fetch_all(pool).await?,
+            DatabasePool::MySql(pool) => sqlx::query_as(query).fetch_all(pool).await?,
             DatabasePool::Sqlite(pool) => sqlx::query_as(query).fetch_all(pool).await?,
         };
 
@@ -51,6 +52,14 @@ impl AdminDomainService {
             DatabasePool::Postgres(pool) => {
                 sqlx::query_as::<_, (String, String)>(
                     "SELECT email, role FROM users WHERE id = $1 LIMIT 1",
+                )
+                .bind(user_id)
+                .fetch_optional(pool)
+                .await?
+            }
+            DatabasePool::MySql(pool) => {
+                sqlx::query_as::<_, (String, String)>(
+                    "SELECT email, role FROM users WHERE id = ? LIMIT 1",
                 )
                 .bind(user_id)
                 .fetch_optional(pool)
@@ -82,6 +91,13 @@ impl AdminDomainService {
         match &self.database {
             DatabasePool::Postgres(pool) => {
                 sqlx::query("UPDATE users SET role = $1 WHERE id = $2")
+                    .bind(role)
+                    .bind(user_id)
+                    .execute(pool)
+                    .await?;
+            }
+            DatabasePool::MySql(pool) => {
+                sqlx::query("UPDATE users SET role = ? WHERE id = ?")
                     .bind(role)
                     .bind(user_id)
                     .execute(pool)
@@ -122,6 +138,18 @@ impl AdminDomainService {
                 .fetch_all(pool)
                 .await?
             }
+            DatabasePool::MySql(pool) => {
+                sqlx::query_as::<_, AuditLog>(
+                    "SELECT id, user_id, action, target_type, target_id, details, ip_address, created_at
+                     FROM audit_logs
+                     ORDER BY created_at DESC
+                     LIMIT ? OFFSET ?",
+                )
+                .bind(page_size)
+                .bind(offset)
+                .fetch_all(pool)
+                .await?
+            }
             DatabasePool::Sqlite(pool) => {
                 let rows = sqlx::query_as::<_, SqliteAuditLogRow>(
                     "SELECT id, user_id, action, target_type, target_id, details, ip_address, created_at
@@ -139,6 +167,11 @@ impl AdminDomainService {
 
         let total = match &self.database {
             DatabasePool::Postgres(pool) => {
+                sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM audit_logs")
+                    .fetch_one(pool)
+                    .await?
+            }
+            DatabasePool::MySql(pool) => {
                 sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM audit_logs")
                     .fetch_one(pool)
                     .await?
@@ -191,6 +224,38 @@ impl AdminDomainService {
                 .await?,
                 images_last_7d: sqlx::query_scalar(
                     "SELECT COUNT(*) FROM images WHERE created_at > $1 AND deleted_at IS NULL",
+                )
+                .bind(week_ago)
+                .fetch_one(pool)
+                .await?,
+            }),
+            DatabasePool::MySql(pool) => Ok(SystemStats {
+                total_users: sqlx::query_scalar("SELECT COUNT(*) FROM users")
+                    .fetch_one(pool)
+                    .await?,
+                total_images: sqlx::query_scalar(
+                    "SELECT COUNT(*) FROM images WHERE deleted_at IS NULL",
+                )
+                .fetch_one(pool)
+                .await?,
+                total_storage: sqlx::query_scalar(
+                    "SELECT COALESCE(SUM(size), 0) FROM images WHERE deleted_at IS NULL",
+                )
+                .fetch_one(pool)
+                .await?,
+                total_views: sqlx::query_scalar(
+                    "SELECT COALESCE(SUM(views), 0) FROM images WHERE deleted_at IS NULL",
+                )
+                .fetch_one(pool)
+                .await?,
+                images_last_24h: sqlx::query_scalar(
+                    "SELECT COUNT(*) FROM images WHERE created_at > ? AND deleted_at IS NULL",
+                )
+                .bind(day_ago)
+                .fetch_one(pool)
+                .await?,
+                images_last_7d: sqlx::query_scalar(
+                    "SELECT COUNT(*) FROM images WHERE created_at > ? AND deleted_at IS NULL",
                 )
                 .bind(week_ago)
                 .fetch_one(pool)

@@ -11,7 +11,9 @@ pub mod mock_repository;
 // 导出领域层类型
 pub use claims::Claims;
 use domain_service::AuthDomainService;
-pub use repository::{DatabaseAuthRepository, PostgresAuthRepository, SqliteAuthRepository};
+pub use repository::{
+    DatabaseAuthRepository, MySqlAuthRepository, PostgresAuthRepository, SqliteAuthRepository,
+};
 pub use service::AuthService;
 use uuid::Uuid;
 

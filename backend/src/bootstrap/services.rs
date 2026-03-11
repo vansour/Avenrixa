@@ -4,11 +4,12 @@ use crate::config::Config;
 use crate::db::DatabasePool;
 use crate::domain::admin::AdminDomainService;
 use crate::domain::auth::{
-    DatabaseAuthRepository, DefaultAuthDomainService, PostgresAuthRepository, SqliteAuthRepository,
+    DatabaseAuthRepository, DefaultAuthDomainService, MySqlAuthRepository, PostgresAuthRepository,
+    SqliteAuthRepository,
 };
 use crate::domain::image::{
     DatabaseImageRepository, DefaultImageDomainService, ImageDomainServiceDependencies,
-    PostgresImageRepository, SqliteImageRepository,
+    MySqlImageRepository, PostgresImageRepository, SqliteImageRepository,
 };
 use crate::image_processor::ImageProcessor;
 use crate::runtime_settings::{RuntimeSettings, RuntimeSettingsService, StorageBackend};
@@ -48,6 +49,9 @@ pub async fn build_services(
         DatabasePool::Postgres(pool) => {
             DatabaseAuthRepository::Postgres(PostgresAuthRepository::new(pool.clone()))
         }
+        DatabasePool::MySql(pool) => {
+            DatabaseAuthRepository::MySql(MySqlAuthRepository::new(pool.clone()))
+        }
         DatabasePool::Sqlite(pool) => {
             DatabaseAuthRepository::Sqlite(SqliteAuthRepository::new(pool.clone()))
         }
@@ -55,25 +59,53 @@ pub async fn build_services(
     let auth_domain_service = Some(Arc::new(DefaultAuthDomainService::new(auth_repository)));
     info!("Auth domain service initialized");
 
-    let image_repository = match database {
+    let image_domain_service = match database {
         DatabasePool::Postgres(pool) => {
-            DatabaseImageRepository::Postgres(PostgresImageRepository::new(pool.clone()))
+            let image_repository =
+                DatabaseImageRepository::Postgres(PostgresImageRepository::new(pool.clone()));
+            let image_dependencies = ImageDomainServiceDependencies::new(
+                database.clone(),
+                Some(redis_connections.app.clone()),
+                config.clone(),
+                image_processor.clone(),
+                storage_manager.clone(),
+            );
+            Some(Arc::new(DefaultImageDomainService::new(
+                image_dependencies,
+                image_repository,
+            )))
+        }
+        DatabasePool::MySql(pool) => {
+            let image_repository =
+                DatabaseImageRepository::MySql(MySqlImageRepository::new(pool.clone()));
+            let image_dependencies = ImageDomainServiceDependencies::new(
+                database.clone(),
+                Some(redis_connections.app.clone()),
+                config.clone(),
+                image_processor.clone(),
+                storage_manager.clone(),
+            );
+            Some(Arc::new(DefaultImageDomainService::new(
+                image_dependencies,
+                image_repository,
+            )))
         }
         DatabasePool::Sqlite(pool) => {
-            DatabaseImageRepository::Sqlite(SqliteImageRepository::new(pool.clone()))
+            let image_repository =
+                DatabaseImageRepository::Sqlite(SqliteImageRepository::new(pool.clone()));
+            let image_dependencies = ImageDomainServiceDependencies::new(
+                database.clone(),
+                Some(redis_connections.app.clone()),
+                config.clone(),
+                image_processor.clone(),
+                storage_manager.clone(),
+            );
+            Some(Arc::new(DefaultImageDomainService::new(
+                image_dependencies,
+                image_repository,
+            )))
         }
     };
-    let image_dependencies = ImageDomainServiceDependencies::new(
-        database.clone(),
-        Some(redis_connections.app.clone()),
-        config.clone(),
-        image_processor,
-        storage_manager.clone(),
-    );
-    let image_domain_service = Some(Arc::new(DefaultImageDomainService::new(
-        image_dependencies,
-        image_repository,
-    )));
     info!("Image domain service initialized");
 
     let admin_domain_service = Some(Arc::new(AdminDomainService::new(

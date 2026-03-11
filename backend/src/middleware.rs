@@ -138,7 +138,12 @@ mod tests {
 
     #[test]
     fn cutoff_rejects_older_token() {
-        assert!(token_issued_before_cutoff(&sample_claims(1), Some(1)));
+        assert!(token_issued_before_cutoff(&sample_claims(1), Some(2)));
+    }
+
+    #[test]
+    fn cutoff_allows_same_second_token() {
+        assert!(!token_issued_before_cutoff(&sample_claims(1), Some(1)));
     }
 }
 

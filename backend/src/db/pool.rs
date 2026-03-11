@@ -1,9 +1,10 @@
 use crate::config::DatabaseKind;
-use sqlx::{PgPool, SqlitePool};
+use sqlx::{MySqlPool, PgPool, SqlitePool};
 
 #[derive(Clone)]
 pub enum DatabasePool {
     Postgres(PgPool),
+    MySql(MySqlPool),
     #[allow(dead_code)]
     Sqlite(SqlitePool),
 }
@@ -12,6 +13,7 @@ impl DatabasePool {
     pub fn kind(&self) -> DatabaseKind {
         match self {
             Self::Postgres(_) => DatabaseKind::Postgres,
+            Self::MySql(_) => DatabaseKind::MySql,
             Self::Sqlite(_) => DatabaseKind::Sqlite,
         }
     }
@@ -19,7 +21,7 @@ impl DatabasePool {
     pub fn as_postgres(&self) -> Option<&PgPool> {
         match self {
             Self::Postgres(pool) => Some(pool),
-            Self::Sqlite(_) => None,
+            Self::MySql(_) | Self::Sqlite(_) => None,
         }
     }
 

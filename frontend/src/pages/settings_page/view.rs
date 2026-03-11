@@ -397,9 +397,9 @@ pub fn MaintenanceSettingsSection(
             }
 
             div { class: "settings-subcard",
-                h3 { "SQLite 恢复状态" }
+                h3 { "数据库恢复状态" }
                 p { class: "settings-section-copy",
-                    "第一版恢复是冷恢复流程：先写入恢复计划，再在下一次服务启动前替换 SQLite 数据库文件。"
+                    "当前恢复是冷恢复流程：先写入恢复计划，再在下一次服务启动前执行数据库文件替换或 SQL 导入。"
                 }
 
                 div { class: "settings-list-toolbar",
@@ -433,14 +433,14 @@ pub fn MaintenanceSettingsSection(
 
                     if let Some(pending) = pending_restore.clone() {
                         div { class: "settings-banner settings-banner-warning",
-                            "检测到待执行的 SQLite 恢复计划。请立即重启服务；真正的数据库替换会在下一次启动前完成。"
+                            "检测到待执行的数据库恢复计划。请立即重启服务；真正的数据库替换或导入会在下一次启动前完成。"
                         }
                         article { class: "settings-entity-card",
                             div { class: "settings-entity-main",
                                 div { class: "settings-entity-copy",
                                     div { class: "settings-entity-title",
                                         h3 { "{pending.filename}" }
-                                        span { class: "settings-kv-badge is-warning", "待执行" }
+                                        span { class: "settings-kv-badge is-warning", "{restore_database_kind_label(&pending.database_kind)} · 待执行" }
                                     }
                                     p { class: "settings-entity-meta",
                                         "计划写入于 {format_timestamp(pending.scheduled_at)} · 备份创建于 {format_timestamp(pending.backup_created_at)} · {format_storage_bytes_u64(pending.backup_size_bytes)}"
@@ -453,7 +453,7 @@ pub fn MaintenanceSettingsSection(
                         }
                     } else {
                         div { class: "settings-banner settings-banner-neutral",
-                            "当前没有待执行的 SQLite 恢复计划。选择某个 .sqlite3 备份后，系统会先做预检，再要求你输入文件名确认。"
+                            "当前没有待执行的数据库恢复计划。选择某个 SQLite 或 MySQL 备份后，系统会先做预检，再要求你输入文件名确认。"
                         }
                     }
 
@@ -472,7 +472,7 @@ pub fn MaintenanceSettingsSection(
                                         }
                                     }
                                     p { class: "settings-entity-meta",
-                                        "备份 {result.filename} · 完成于 {format_timestamp(result.finished_at)}"
+                                        "{restore_database_kind_label(&result.database_kind)} 备份 {result.filename} · 完成于 {format_timestamp(result.finished_at)}"
                                     }
                                     p { class: "settings-action-note", "{result.message}" }
                                     if let Some(rollback_filename) = result.rollback_filename.clone() {
@@ -488,7 +488,7 @@ pub fn MaintenanceSettingsSection(
             div { class: "settings-subcard",
                 h3 { "备份文件" }
                 p { class: "settings-section-copy",
-                    "这里展示当前备份目录中的数据库快照。SQLite 备份文件支持“恢复到此备份”；PostgreSQL 备份暂时只支持下载和删除。"
+                    "这里展示当前备份目录中的数据库快照。SQLite 与 MySQL 备份支持“恢复到此备份”；PostgreSQL 导出备份暂时仍只支持下载和删除。"
                 }
 
                 div { class: "settings-list-toolbar",
@@ -568,7 +568,7 @@ pub fn MaintenanceSettingsSection(
                                                 } else if is_pending_target {
                                                     "已计划恢复"
                                                 } else if !supports_restore {
-                                                    "仅 SQLite 恢复"
+                                                    "暂不支持恢复"
                                                 } else {
                                                     "恢复到此备份"
                                                 }
@@ -1379,12 +1379,15 @@ fn audit_summary(log: &AuditLog) -> String {
             })
         }
         "admin.maintenance.database_restore.prechecked" => {
+            let database_kind = audit_detail_str(log.details.as_ref(), "backup_database_kind")
+                .unwrap_or_else(|| "sqlite".to_string());
+            let database_label = restore_database_kind_label(&database_kind);
             let filename = audit_detail_str(log.details.as_ref(), "filename")
-                .unwrap_or_else(|| "SQLite 备份".to_string());
+                .unwrap_or_else(|| format!("{database_label} 备份"));
             let warnings = audit_detail_string_list(log.details.as_ref(), "warnings");
             if warnings.is_empty() {
                 format!(
-                    "备份 {} 已通过恢复预检，可以在下一次重启前执行文件级恢复。",
+                    "备份 {} 已通过恢复预检，可以在下一次重启前执行恢复。",
                     filename
                 )
             } else {
@@ -1396,8 +1399,11 @@ fn audit_summary(log: &AuditLog) -> String {
             }
         }
         "admin.maintenance.database_restore.precheck_failed" => {
+            let database_kind = audit_detail_str(log.details.as_ref(), "backup_database_kind")
+                .unwrap_or_else(|| "sqlite".to_string());
+            let database_label = restore_database_kind_label(&database_kind);
             let filename = audit_detail_str(log.details.as_ref(), "filename")
-                .unwrap_or_else(|| "SQLite 备份".to_string());
+                .unwrap_or_else(|| format!("{database_label} 备份"));
             let blockers = audit_detail_string_list(log.details.as_ref(), "blockers");
             if blockers.is_empty() {
                 format!("备份 {} 未通过恢复预检。", filename)
@@ -1410,16 +1416,22 @@ fn audit_summary(log: &AuditLog) -> String {
             }
         }
         "admin.maintenance.database_restore.scheduled" => {
+            let database_kind = audit_detail_str(log.details.as_ref(), "database_kind")
+                .unwrap_or_else(|| "sqlite".to_string());
+            let database_label = restore_database_kind_label(&database_kind);
             let filename = audit_detail_str(log.details.as_ref(), "filename")
-                .unwrap_or_else(|| "SQLite 备份".to_string());
+                .unwrap_or_else(|| format!("{database_label} 备份"));
             format!(
-                "备份 {} 的恢复计划已写入；需要尽快重启服务，真正恢复会在下一次启动前执行。",
+                "{} 的恢复计划已写入；需要尽快重启服务，真正恢复会在下一次启动前执行。",
                 filename
             )
         }
         "system.database_restore.completed" => {
+            let database_kind = audit_detail_str(log.details.as_ref(), "database_kind")
+                .unwrap_or_else(|| "sqlite".to_string());
+            let database_label = restore_database_kind_label(&database_kind);
             let filename = audit_detail_str(log.details.as_ref(), "filename")
-                .unwrap_or_else(|| "SQLite 备份".to_string());
+                .unwrap_or_else(|| format!("{database_label} 备份"));
             let rollback_filename = audit_detail_str(log.details.as_ref(), "rollback_filename");
             match rollback_filename {
                 Some(rollback) => format!(
@@ -1805,6 +1817,8 @@ fn format_storage_bytes_u64(bytes: u64) -> String {
 fn backup_database_kind_label(filename: &str) -> &'static str {
     if filename.ends_with(".sqlite3") {
         "SQLite"
+    } else if filename.ends_with(".mysql.sql") {
+        "MySQL / MariaDB"
     } else if filename.ends_with(".sql") {
         "PostgreSQL"
     } else {
@@ -1813,7 +1827,19 @@ fn backup_database_kind_label(filename: &str) -> &'static str {
 }
 
 fn backup_supports_restore(filename: &str) -> bool {
-    filename.ends_with(".sqlite3")
+    filename.ends_with(".sqlite3") || filename.ends_with(".mysql.sql")
+}
+
+fn restore_database_kind_label(kind: &str) -> &'static str {
+    if kind.eq_ignore_ascii_case("sqlite") {
+        "SQLite"
+    } else if kind.eq_ignore_ascii_case("mysql") {
+        "MySQL / MariaDB"
+    } else if kind.eq_ignore_ascii_case("postgresql") || kind.eq_ignore_ascii_case("postgres") {
+        "PostgreSQL"
+    } else {
+        "数据库"
+    }
 }
 
 fn restore_status_label(status: &str) -> &'static str {

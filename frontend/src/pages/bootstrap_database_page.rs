@@ -11,6 +11,8 @@ pub fn BootstrapDatabasePage(
     let toast_store = use_toast_store();
     let initial_database_kind = if status.database_kind.eq_ignore_ascii_case("sqlite") {
         "sqlite"
+    } else if status.database_kind.eq_ignore_ascii_case("mysql") {
+        "mysql"
     } else {
         "postgresql"
     };
@@ -29,6 +31,7 @@ pub fn BootstrapDatabasePage(
     let mut success_message = use_signal(String::new);
     let selected_database_kind = database_kind();
     let is_sqlite = selected_database_kind == "sqlite";
+    let is_mysql = selected_database_kind == "mysql";
     let database_target_label = if is_sqlite {
         "数据库文件"
     } else {
@@ -36,16 +39,22 @@ pub fn BootstrapDatabasePage(
     };
     let database_target_placeholder = if is_sqlite {
         "/data/sqlite/app.db 或 sqlite:///data/sqlite/app.db"
+    } else if is_mysql {
+        "mysql://user:pass@host:3306/dbname 或 mariadb://user:pass@host:3306/dbname"
     } else {
         "postgresql://user:pass@host:5432/dbname"
     };
     let page_title = if is_sqlite {
         "当前实例尚未连接数据库。先写入 SQLite 数据库文件位置，重启服务后会自动执行迁移并进入安装向导。"
+    } else if is_mysql {
+        "当前实例尚未连接数据库。先写入 MySQL / MariaDB 连接信息，重启服务后会自动执行迁移并进入安装向导。"
     } else {
         "当前实例尚未连接数据库。先写入 PostgreSQL 连接信息，重启服务后再继续管理员安装。"
     };
     let save_button_label = if is_sqlite {
         "保存 SQLite 配置"
+    } else if is_mysql {
+        "保存 MySQL 配置"
     } else {
         "保存数据库配置"
     };
@@ -60,6 +69,8 @@ pub fn BootstrapDatabasePage(
         if url.is_empty() {
             let message = if current_database_kind == "sqlite" {
                 "请填写 SQLite 数据库文件路径或 sqlite:// 连接".to_string()
+            } else if current_database_kind == "mysql" {
+                "请填写 MySQL / MariaDB 数据库连接 URL".to_string()
             } else {
                 "请填写 PostgreSQL 数据库连接 URL".to_string()
             };
@@ -97,6 +108,8 @@ pub fn BootstrapDatabasePage(
                 Ok(response) => {
                     let message = if current_database_kind == "sqlite" {
                         "SQLite 配置已保存，请重启服务后继续安装".to_string()
+                    } else if current_database_kind == "mysql" {
+                        "MySQL / MariaDB 配置已保存，请重启服务后继续安装".to_string()
                     } else {
                         "数据库配置已保存，请重启服务后继续安装".to_string()
                     };
@@ -144,6 +157,7 @@ pub fn BootstrapDatabasePage(
                             onchange: move |event| database_kind.set(event.value()),
                             disabled: is_saving(),
                             option { value: "postgresql", "PostgreSQL" }
+                            option { value: "mysql", "MySQL / MariaDB" }
                             option { value: "sqlite", "SQLite" }
                         }
                     }
@@ -180,6 +194,10 @@ pub fn BootstrapDatabasePage(
                     p { class: "install-file-meta",
                         "SQLite 模式会在保存时校验数据库文件可创建、可打开，并在服务启动时自动执行 SQLite migrations。"
                     }
+                } else if is_mysql {
+                    p { class: "install-file-meta",
+                        "MySQL 模式会接受 mysql:// 或 mariadb://，保存时校验连接与基础查询，并在服务重启后按 MySQL migrations 继续安装。"
+                    }
                 } else {
                     p { class: "install-file-meta",
                         "PostgreSQL 模式会在保存时校验连接，并在服务重启后继续安装流程。"
@@ -209,6 +227,16 @@ pub fn BootstrapDatabasePage(
                         }
                         p { class: "login-subtitle",
                             "3. 重启应用服务，系统会自动执行 SQLite migrations 并进入安装向导。"
+                        }
+                    } else if is_mysql {
+                        p { class: "login-subtitle",
+                            "1. 选择 MySQL 并填写连接信息。"
+                        }
+                        p { class: "login-subtitle",
+                            "2. 保存配置，确认数据库连接可建立并通过基础查询校验。"
+                        }
+                        p { class: "login-subtitle",
+                            "3. 重启应用服务，系统会自动执行 MySQL migrations 并进入安装向导。"
                         }
                     } else {
                         p { class: "login-subtitle",

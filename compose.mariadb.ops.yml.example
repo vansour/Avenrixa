@@ -1,0 +1,70 @@
+# 长期运维模板：
+# 1. 复制为 compose.mariadb.ops.yml
+# 2. 替换下面所有密码/密钥占位值
+# 3. 再执行 docker compose -f compose.mariadb.ops.yml up --build -d
+
+volumes:
+  mariadb_data:
+
+services:
+  app:
+    container_name: vansour-image-mariadb-app
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ghcr.io/vansour/vansour-image:latest
+    ports:
+      - "8080:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      dragonfly:
+        condition: service_healthy
+    environment:
+      - REDIS_URL=redis://dragonfly:6379
+      - JWT_SECRET=replace-with-a-random-secret-at-least-32-characters
+      - AUTH_COOKIE_SECURE=true
+      - AUTH_COOKIE_SAME_SITE=Strict
+    volumes:
+      - "./data-mariadb:/data"
+    restart: unless-stopped
+    healthcheck:
+      test: curl -f http://localhost:8080/health || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  mysql:
+    container_name: vansour-image-mariadb
+    image: mariadb:12
+    environment:
+      - MARIADB_DATABASE=image
+      - MARIADB_USER=vansour_image
+      - MARIADB_PASSWORD=replace-with-strong-app-password
+      - MARIADB_ROOT_PASSWORD=replace-with-strong-root-password
+      - MYSQL_DATABASE=image
+      - MYSQL_USER=vansour_image
+      - MYSQL_PASSWORD=replace-with-strong-app-password
+      - MYSQL_ROOT_PASSWORD=replace-with-strong-root-password
+    volumes:
+      - "mariadb_data:/var/lib/mysql"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - mariadb-admin ping -h 127.0.0.1 -uvansour_image -preplace-with-strong-app-password || mysqladmin ping -h 127.0.0.1 -uvansour_image -preplace-with-strong-app-password
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  dragonfly:
+    container_name: vansour-image-mariadb-dragonfly
+    image: ghcr.io/dragonflydb/dragonfly:latest
+    command: --dir=/data
+    healthcheck:
+      test: redis-cli ping
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped

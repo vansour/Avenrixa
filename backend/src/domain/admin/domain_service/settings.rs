@@ -18,6 +18,11 @@ impl AdminDomainService {
                     .fetch_all(pool)
                     .await?
             }
+            DatabasePool::MySql(pool) => {
+                sqlx::query_as("SELECT `key`, `value` FROM settings ORDER BY `key`")
+                    .fetch_all(pool)
+                    .await?
+            }
             DatabasePool::Sqlite(pool) => {
                 sqlx::query_as("SELECT key, value FROM settings ORDER BY key")
                     .fetch_all(pool)

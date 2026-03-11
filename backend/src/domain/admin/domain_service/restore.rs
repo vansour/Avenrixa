@@ -41,6 +41,8 @@ impl AdminDomainService {
                 "admin_email": admin_email,
                 "filename": response.filename,
                 "eligible": response.eligible,
+                "current_database_kind": response.current_database_kind,
+                "backup_database_kind": response.backup_database_kind,
                 "blockers": response.blockers,
                 "warnings": response.warnings,
                 "risk_level": "danger",
@@ -77,6 +79,7 @@ impl AdminDomainService {
             Some(serde_json::json!({
                 "admin_email": admin_email,
                 "filename": response.pending.filename,
+                "database_kind": response.pending.database_kind,
                 "scheduled_at": response.pending.scheduled_at,
                 "backup_created_at": response.pending.backup_created_at,
                 "backup_size_bytes": response.pending.backup_size_bytes,

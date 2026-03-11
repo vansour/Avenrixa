@@ -1,16 +1,28 @@
 use chrono::{DateTime, Utc};
+use reqwest::Url;
 use std::path::{Path, PathBuf};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use super::AdminDomainService;
 use crate::audit::log_audit_db;
+use crate::backup_manifest::{capture_backup_manifest, write_backup_manifest};
+use crate::config::{DatabaseKind, normalize_mysql_compatible_url};
 use crate::db::DatabasePool;
 use crate::error::AppError;
 use crate::models::{BackupFileSummary, BackupResponse};
+use crate::runtime_settings::StorageSettingsSnapshot;
 
 const BACKUP_DIR: &str = "/data/backup";
+
+struct MySqlDumpTarget {
+    host: String,
+    port: u16,
+    username: String,
+    password: Option<String>,
+    database: String,
+}
 
 fn spawn_backup_audit(
     database: DatabasePool,
@@ -84,6 +96,7 @@ impl AdminDomainService {
         admin_email: &str,
     ) -> Result<BackupResponse, AppError> {
         tokio::fs::create_dir_all(BACKUP_DIR).await?;
+        let storage_settings = self.storage_manager.active_settings().storage_settings();
 
         match &self.database {
             DatabasePool::Postgres(_) => {
@@ -176,6 +189,53 @@ impl AdminDomainService {
                     }
                 }
 
+                let backup_size_bytes = match ensure_nonempty_backup_file(&backup_path).await {
+                    Ok(size) => size,
+                    Err(error) => {
+                        let _ = tokio::fs::remove_file(&backup_path).await;
+                        spawn_backup_audit(
+                            self.database.clone(),
+                            admin_user_id,
+                            "admin.maintenance.database_backup.failed",
+                            serde_json::json!({
+                                "admin_email": admin_email,
+                                "filename": filename,
+                                "error": error.to_string(),
+                                "result": "failed",
+                                "risk_level": "info",
+                                "database_kind": "postgresql",
+                            }),
+                        );
+                        return Err(AppError::Internal(error));
+                    }
+                };
+
+                let created_at = Utc::now();
+                if let Err(error) = persist_backup_manifest(
+                    &filename,
+                    DatabaseKind::Postgres,
+                    created_at,
+                    &storage_settings,
+                )
+                .await
+                {
+                    let _ = tokio::fs::remove_file(&backup_path).await;
+                    spawn_backup_audit(
+                        self.database.clone(),
+                        admin_user_id,
+                        "admin.maintenance.database_backup.failed",
+                        serde_json::json!({
+                            "admin_email": admin_email,
+                            "filename": filename,
+                            "error": error.to_string(),
+                            "result": "failed",
+                            "risk_level": "info",
+                            "database_kind": "postgresql",
+                        }),
+                    );
+                    return Err(AppError::Internal(error));
+                }
+
                 info!("Database backup created: {} by {}", filename, admin_email);
                 spawn_backup_audit(
                     self.database.clone(),
@@ -187,12 +247,196 @@ impl AdminDomainService {
                         "result": "completed",
                         "risk_level": "info",
                         "database_kind": "postgresql",
+                        "backup_size_bytes": backup_size_bytes,
                     }),
                 );
 
                 Ok(BackupResponse {
                     filename,
-                    created_at: Utc::now(),
+                    created_at,
+                })
+            }
+            DatabasePool::MySql(_) => {
+                let filename = format!("backup_{}.mysql.sql", Uuid::new_v4());
+                let backup_path = backup_path(&filename)?;
+                let database = self.database.clone();
+                let dump_target = parse_mysql_dump_target(&self.config.database.url)
+                    .map_err(AppError::Internal)?;
+                let dump_bin = mysql_dump_binary().map_err(AppError::Internal)?;
+
+                if tokio::fs::try_exists(&backup_path).await.unwrap_or(false) {
+                    let _ = tokio::fs::remove_file(&backup_path).await;
+                }
+
+                let mut command = tokio::process::Command::new(&dump_bin);
+                command
+                    .arg("--protocol=TCP")
+                    .arg(format!("--host={}", dump_target.host))
+                    .arg(format!("--port={}", dump_target.port))
+                    .arg(format!("--user={}", dump_target.username))
+                    .args(mysql_local_ssl_disable_args(&dump_target))
+                    .arg("--single-transaction")
+                    .arg("--skip-lock-tables")
+                    .arg("--no-tablespaces")
+                    .arg("--default-character-set=utf8mb4")
+                    .arg("--routines")
+                    .arg("--triggers")
+                    .arg("--events")
+                    .arg(format!("--result-file={}", backup_path.display()))
+                    .arg(&dump_target.database)
+                    .stderr(std::process::Stdio::piped());
+                if let Some(password) = dump_target.password.as_ref() {
+                    command.env("MYSQL_PWD", password);
+                }
+
+                let child = command.spawn();
+                let child = match child {
+                    Ok(child) => child,
+                    Err(error) => {
+                        error!("Failed to spawn mysqldump process: {}", error);
+                        spawn_backup_audit(
+                            database,
+                            admin_user_id,
+                            "admin.maintenance.database_backup.failed",
+                            serde_json::json!({
+                                "admin_email": admin_email,
+                                "error": error.to_string(),
+                                "result": "failed",
+                                "risk_level": "info",
+                                "database_kind": "mysql",
+                            }),
+                        );
+                        return Err(AppError::Internal(anyhow::anyhow!(
+                            "Failed to execute mysqldump: {}",
+                            error
+                        )));
+                    }
+                };
+
+                let output = child.wait_with_output().await;
+                let warning_excerpt = match output {
+                    Ok(output) => {
+                        let stderr_excerpt = process_output_excerpt(&output.stderr);
+                        if !output.status.success() {
+                            error!("mysqldump failed with status: {}", output.status);
+                            let _ = tokio::fs::remove_file(&backup_path).await;
+                            spawn_backup_audit(
+                                self.database.clone(),
+                                admin_user_id,
+                                "admin.maintenance.database_backup.failed",
+                                serde_json::json!({
+                                    "admin_email": admin_email,
+                                    "error": stderr_excerpt
+                                        .clone()
+                                        .unwrap_or_else(|| output.status.to_string()),
+                                    "result": "failed",
+                                    "risk_level": "info",
+                                    "database_kind": "mysql",
+                                }),
+                            );
+                            return Err(AppError::Internal(anyhow::anyhow!(
+                                "mysqldump failed: {}",
+                                stderr_excerpt
+                                    .clone()
+                                    .unwrap_or_else(|| output.status.to_string())
+                            )));
+                        }
+                        if let Some(stderr_excerpt) = stderr_excerpt.as_ref() {
+                            warn!("mysqldump completed with warnings: {}", stderr_excerpt);
+                        }
+                        stderr_excerpt
+                    }
+                    Err(error) => {
+                        error!("Failed to wait for mysqldump: {}", error);
+                        let _ = tokio::fs::remove_file(&backup_path).await;
+                        spawn_backup_audit(
+                            self.database.clone(),
+                            admin_user_id,
+                            "admin.maintenance.database_backup.failed",
+                            serde_json::json!({
+                                "admin_email": admin_email,
+                                "error": error.to_string(),
+                                "result": "failed",
+                                "risk_level": "info",
+                                "database_kind": "mysql",
+                            }),
+                        );
+                        return Err(AppError::Internal(anyhow::anyhow!(
+                            "mysqldump wait error: {}",
+                            error
+                        )));
+                    }
+                };
+
+                let backup_size_bytes = match ensure_nonempty_backup_file(&backup_path).await {
+                    Ok(size) => size,
+                    Err(error) => {
+                        let _ = tokio::fs::remove_file(&backup_path).await;
+                        spawn_backup_audit(
+                            self.database.clone(),
+                            admin_user_id,
+                            "admin.maintenance.database_backup.failed",
+                            serde_json::json!({
+                                "admin_email": admin_email,
+                                "filename": filename,
+                                "error": error.to_string(),
+                                "result": "failed",
+                                "risk_level": "info",
+                                "database_kind": "mysql",
+                            }),
+                        );
+                        return Err(AppError::Internal(error));
+                    }
+                };
+
+                let created_at = Utc::now();
+                if let Err(error) = persist_backup_manifest(
+                    &filename,
+                    DatabaseKind::MySql,
+                    created_at,
+                    &storage_settings,
+                )
+                .await
+                {
+                    let _ = tokio::fs::remove_file(&backup_path).await;
+                    spawn_backup_audit(
+                        self.database.clone(),
+                        admin_user_id,
+                        "admin.maintenance.database_backup.failed",
+                        serde_json::json!({
+                            "admin_email": admin_email,
+                            "filename": filename,
+                            "error": error.to_string(),
+                            "result": "failed",
+                            "risk_level": "info",
+                            "database_kind": "mysql",
+                        }),
+                    );
+                    return Err(AppError::Internal(error));
+                }
+
+                info!(
+                    "MySQL/MariaDB backup created: {} by {}",
+                    filename, admin_email
+                );
+                spawn_backup_audit(
+                    self.database.clone(),
+                    admin_user_id,
+                    "admin.maintenance.database_backup.created",
+                    serde_json::json!({
+                        "admin_email": admin_email,
+                        "filename": filename,
+                        "result": "completed",
+                        "risk_level": "info",
+                        "database_kind": "mysql",
+                        "backup_size_bytes": backup_size_bytes,
+                        "warning_excerpt": warning_excerpt,
+                    }),
+                );
+
+                Ok(BackupResponse {
+                    filename,
+                    created_at,
                 })
             }
             DatabasePool::Sqlite(pool) => {
@@ -234,10 +478,52 @@ impl AdminDomainService {
                     )));
                 }
 
-                let backup_size_bytes = tokio::fs::metadata(&backup_path)
-                    .await
-                    .map(|meta| meta.len())
-                    .unwrap_or(0);
+                let backup_size_bytes = match ensure_nonempty_backup_file(&backup_path).await {
+                    Ok(size) => size,
+                    Err(error) => {
+                        let _ = tokio::fs::remove_file(&backup_path).await;
+                        spawn_backup_audit(
+                            self.database.clone(),
+                            admin_user_id,
+                            "admin.maintenance.database_backup.failed",
+                            serde_json::json!({
+                                "admin_email": admin_email,
+                                "filename": filename,
+                                "error": error.to_string(),
+                                "result": "failed",
+                                "risk_level": "info",
+                                "database_kind": "sqlite",
+                            }),
+                        );
+                        return Err(AppError::Internal(error));
+                    }
+                };
+
+                let created_at = Utc::now();
+                if let Err(error) = persist_backup_manifest(
+                    &filename,
+                    DatabaseKind::Sqlite,
+                    created_at,
+                    &storage_settings,
+                )
+                .await
+                {
+                    let _ = tokio::fs::remove_file(&backup_path).await;
+                    spawn_backup_audit(
+                        self.database.clone(),
+                        admin_user_id,
+                        "admin.maintenance.database_backup.failed",
+                        serde_json::json!({
+                            "admin_email": admin_email,
+                            "filename": filename,
+                            "error": error.to_string(),
+                            "result": "failed",
+                            "risk_level": "info",
+                            "database_kind": "sqlite",
+                        }),
+                    );
+                    return Err(AppError::Internal(error));
+                }
 
                 info!("SQLite backup created: {} by {}", filename, admin_email);
                 spawn_backup_audit(
@@ -256,7 +542,7 @@ impl AdminDomainService {
 
                 Ok(BackupResponse {
                     filename,
-                    created_at: Utc::now(),
+                    created_at,
                 })
             }
         }
@@ -388,13 +674,94 @@ fn is_valid_backup_filename(filename: &str) -> bool {
     !filename.is_empty()
         && filename.len() <= 255
         && filename.starts_with("backup_")
-        && (filename.ends_with(".sql") || filename.ends_with(".sqlite3"))
+        && (filename.ends_with(".sql")
+            || filename.ends_with(".mysql.sql")
+            || filename.ends_with(".sqlite3"))
         && filename.bytes().all(|byte| {
             matches!(
                 byte,
                 b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'.' | b'_' | b'-'
             )
         })
+}
+
+async fn persist_backup_manifest(
+    filename: &str,
+    database_kind: DatabaseKind,
+    created_at: DateTime<Utc>,
+    storage_settings: &StorageSettingsSnapshot,
+) -> anyhow::Result<()> {
+    let manifest = capture_backup_manifest(
+        filename,
+        database_kind,
+        created_at,
+        storage_settings,
+        true,
+        true,
+    )
+    .await;
+    write_backup_manifest(&manifest).await
+}
+
+fn mysql_dump_binary() -> anyhow::Result<String> {
+    find_first_binary(&["mysqldump", "mariadb-dump"])
+        .ok_or_else(|| anyhow::anyhow!("未找到 mysqldump 或 mariadb-dump"))
+}
+
+fn find_first_binary(candidates: &[&str]) -> Option<String> {
+    let path = std::env::var_os("PATH")?;
+    for directory in std::env::split_paths(&path) {
+        for candidate in candidates {
+            let full_path = directory.join(candidate);
+            if full_path.is_file() {
+                return Some(full_path.to_string_lossy().into_owned());
+            }
+        }
+    }
+    None
+}
+
+fn parse_mysql_dump_target(database_url: &str) -> anyhow::Result<MySqlDumpTarget> {
+    let normalized = normalize_mysql_compatible_url(database_url);
+    let url = Url::parse(&normalized)
+        .map_err(|error| anyhow::anyhow!("MySQL/MariaDB 连接地址解析失败: {}", error))?;
+    if url.scheme() != "mysql" {
+        anyhow::bail!("MySQL / MariaDB 备份只支持 mysql:// 或 mariadb:// 连接地址");
+    }
+
+    let host = url
+        .host_str()
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| anyhow::anyhow!("MySQL/MariaDB 连接缺少主机地址"))?
+        .to_string();
+    let username = url.username().trim().to_string();
+    if username.is_empty() {
+        anyhow::bail!("MySQL/MariaDB 连接缺少用户名");
+    }
+
+    let database = url.path().trim_start_matches('/').trim().to_string();
+    if database.is_empty() {
+        anyhow::bail!("MySQL/MariaDB 连接缺少数据库名");
+    }
+
+    Ok(MySqlDumpTarget {
+        host,
+        port: url.port().unwrap_or(3306),
+        username,
+        password: url.password().map(|value| value.to_string()),
+        database,
+    })
+}
+
+fn mysql_local_ssl_disable_args(target: &MySqlDumpTarget) -> &'static [&'static str] {
+    if matches!(
+        target.host.as_str(),
+        "mysql" | "localhost" | "127.0.0.1" | "::1"
+    ) {
+        &["--skip-ssl"]
+    } else {
+        &[]
+    }
 }
 
 fn backup_path(filename: &str) -> Result<PathBuf, AppError> {
@@ -411,4 +778,27 @@ fn file_timestamp(metadata: &std::fs::Metadata) -> Option<DateTime<Utc>> {
         .or_else(|_| metadata.created())
         .ok()
         .map(DateTime::<Utc>::from)
+}
+
+async fn ensure_nonempty_backup_file(path: &Path) -> anyhow::Result<u64> {
+    let metadata = tokio::fs::metadata(path).await?;
+    if metadata.len() == 0 {
+        anyhow::bail!("备份文件为空，已拒绝保留");
+    }
+    Ok(metadata.len())
+}
+
+fn process_output_excerpt(bytes: &[u8]) -> Option<String> {
+    let text = String::from_utf8_lossy(bytes);
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let excerpt: String = trimmed.chars().take(1000).collect();
+    if trimmed.chars().count() > 1000 {
+        Some(format!("{}...(truncated)", excerpt))
+    } else {
+        Some(excerpt)
+    }
 }

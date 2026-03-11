@@ -2,9 +2,10 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::time::Duration;
 
-use crate::config::{Config, DatabaseKind};
+use crate::config::{Config, DatabaseKind, normalize_mysql_compatible_url};
 use crate::db;
 use crate::db::DatabasePool;
+use sqlx::mysql::{MySqlPoolOptions, MySqlSslMode};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use tracing::info;
@@ -24,6 +25,19 @@ pub async fn initialize_database(config: &Config) -> anyhow::Result<DatabasePool
 
             Ok(database)
         }
+        DatabaseKind::MySql => {
+            info!("Connecting to MySQL database...");
+            let database_url = normalize_mysql_compatible_url(&config.database.url);
+            let pool = mysql_pool_options(config.database.max_connections)
+                .connect(&database_url)
+                .await?;
+
+            info!("Running MySQL database migrations...");
+            let database = DatabasePool::MySql(pool);
+            db::run_migrations(&database).await?;
+
+            Ok(database)
+        }
         DatabaseKind::Sqlite => {
             info!("Connecting to SQLite database...");
             let pool = SqlitePoolOptions::new()
@@ -38,6 +52,33 @@ pub async fn initialize_database(config: &Config) -> anyhow::Result<DatabasePool
             Ok(database)
         }
     }
+}
+
+pub fn mysql_pool_options(max_connections: u32) -> MySqlPoolOptions {
+    MySqlPoolOptions::new()
+        .max_connections(max_connections.max(1))
+        .after_connect(|conn, _meta| {
+            Box::pin(async move {
+                sqlx::query("SET time_zone = '+00:00'")
+                    .execute(conn)
+                    .await?;
+                Ok(())
+            })
+        })
+}
+
+pub async fn test_mysql_connection(database_url: &str, max_connections: u32) -> anyhow::Result<()> {
+    let options =
+        sqlx::mysql::MySqlConnectOptions::from_str(&normalize_mysql_compatible_url(database_url))?
+            .ssl_mode(MySqlSslMode::Preferred);
+    let pool = mysql_pool_options(max_connections)
+        .connect_with(options)
+        .await?;
+    sqlx::query_scalar::<_, i32>("SELECT 1")
+        .fetch_one(&pool)
+        .await?;
+    pool.close().await;
+    Ok(())
 }
 
 pub async fn test_sqlite_connection(database_url: &str) -> anyhow::Result<()> {

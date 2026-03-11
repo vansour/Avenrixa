@@ -190,25 +190,59 @@ pub struct BackupRestoreStorageSummary {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackupObjectRollbackAnchor {
+    pub strategy: String,
+    pub checkpoint_at: DateTime<Utc>,
+    pub local_storage_path: Option<String>,
+    pub s3_endpoint: Option<String>,
+    pub s3_region: Option<String>,
+    pub s3_bucket: Option<String>,
+    pub s3_prefix: Option<String>,
+    pub s3_force_path_style: bool,
+    pub s3_bucket_versioning_status: Option<String>,
+    pub capture_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackupMetadataManifest {
+    pub filename: String,
+    pub created_at: DateTime<Utc>,
+    pub database_kind: String,
+    pub app_installed: bool,
+    pub has_admin: bool,
+    pub storage_signature: String,
+    pub storage: BackupRestoreStorageSummary,
+    pub object_rollback_anchor: BackupObjectRollbackAnchor,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BackupRestorePrecheckResponse {
     pub eligible: bool,
     pub filename: String,
     pub backup_created_at: DateTime<Utc>,
     pub backup_size_bytes: u64,
     pub current_database_kind: String,
+    pub backup_database_kind: String,
     pub integrity_check_passed: bool,
     pub app_installed: bool,
     pub has_admin: bool,
     pub storage_compatible: bool,
     pub current_storage: BackupRestoreStorageSummary,
     pub backup_storage: BackupRestoreStorageSummary,
+    pub object_rollback_anchor: Option<BackupObjectRollbackAnchor>,
     pub warnings: Vec<String>,
     pub blockers: Vec<String>,
+}
+
+fn default_restore_database_kind() -> String {
+    "sqlite".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PendingBackupRestore {
     pub filename: String,
+    #[serde(default = "default_restore_database_kind")]
+    pub database_kind: String,
     pub requested_by_user_id: Uuid,
     pub requested_by_email: String,
     pub scheduled_at: DateTime<Utc>,
@@ -220,6 +254,8 @@ pub struct PendingBackupRestore {
 pub struct BackupRestoreResult {
     pub status: String,
     pub filename: String,
+    #[serde(default = "default_restore_database_kind")]
+    pub database_kind: String,
     pub message: String,
     pub scheduled_at: Option<DateTime<Utc>>,
     pub started_at: Option<DateTime<Utc>>,

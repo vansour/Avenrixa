@@ -1,5 +1,5 @@
 use super::*;
-use sqlx::{Postgres, QueryBuilder, Sqlite};
+use sqlx::{MySql, Postgres, QueryBuilder, Sqlite};
 
 impl<I: ImageRepository> ImageDomainService<I> {
     /// 设置图片过期时间
@@ -64,6 +64,41 @@ impl<I: ImageRepository> ImageDomainService<I> {
                         let mut builder = QueryBuilder::<Postgres>::new(
                             "INSERT INTO image_tags (image_id, tag) ",
                         );
+                        builder.push_values(tag_values.iter(), |mut values, tag| {
+                            values.push_bind(id).push_bind(tag);
+                        });
+
+                        builder.build().execute(&mut *tx).await?;
+                    }
+                }
+
+                tx.commit().await?;
+                Ok(())
+            }
+            crate::db::DatabasePool::MySql(pool) => {
+                let mut tx = pool.begin().await?;
+
+                let updated = sqlx::query_scalar::<_, i32>(
+                    "SELECT 1 FROM images WHERE id = ? AND user_id = ?",
+                )
+                .bind(id)
+                .bind(user_id)
+                .fetch_optional(&mut *tx)
+                .await?;
+
+                if updated.is_none() {
+                    return Err(AppError::ImageNotFound);
+                }
+
+                if let Some(tag_values) = normalized_tags.as_deref() {
+                    sqlx::query("DELETE FROM image_tags WHERE image_id = ?")
+                        .bind(id)
+                        .execute(&mut *tx)
+                        .await?;
+
+                    if !tag_values.is_empty() {
+                        let mut builder =
+                            QueryBuilder::<MySql>::new("INSERT INTO image_tags (image_id, tag) ");
                         builder.push_values(tag_values.iter(), |mut values, tag| {
                             values.push_bind(id).push_bind(tag);
                         });

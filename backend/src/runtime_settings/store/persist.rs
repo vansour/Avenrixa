@@ -20,6 +20,11 @@ pub(crate) async fn persist_settings(
             persist_settings_tx(&mut tx, validated).await?;
             tx.commit().await?;
         }
+        DatabasePool::MySql(pool) => {
+            let mut tx = pool.begin().await?;
+            persist_settings_mysql_tx(&mut tx, validated).await?;
+            tx.commit().await?;
+        }
         DatabasePool::Sqlite(pool) => {
             let mut tx = pool.begin().await?;
             persist_settings_sqlite_tx(&mut tx, validated).await?;
@@ -139,6 +144,125 @@ async fn upsert_setting_opt(
         Some(value) if !value.trim().is_empty() => upsert_setting(tx, key, value).await?,
         _ => {
             sqlx::query("DELETE FROM settings WHERE key = $1")
+                .bind(key)
+                .execute(&mut **tx)
+                .await?;
+        }
+    }
+    Ok(())
+}
+
+pub(crate) async fn persist_settings_mysql_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::MySql>,
+    validated: &RuntimeSettings,
+) -> Result<(), AppError> {
+    upsert_setting_mysql(tx, SETTING_SITE_NAME, &validated.site_name).await?;
+    upsert_setting_mysql(
+        tx,
+        SETTING_STORAGE_BACKEND,
+        validated.storage_backend.as_str(),
+    )
+    .await?;
+    upsert_setting_mysql(
+        tx,
+        SETTING_LOCAL_STORAGE_PATH,
+        &validated.local_storage_path,
+    )
+    .await?;
+    upsert_setting_mysql(
+        tx,
+        SETTING_MAIL_ENABLED,
+        if validated.mail_enabled {
+            "true"
+        } else {
+            "false"
+        },
+    )
+    .await?;
+    upsert_setting_mysql(tx, SETTING_MAIL_SMTP_HOST, &validated.mail_smtp_host).await?;
+    upsert_setting_mysql(
+        tx,
+        SETTING_MAIL_SMTP_PORT,
+        &validated.mail_smtp_port.to_string(),
+    )
+    .await?;
+    upsert_setting_mysql_opt(
+        tx,
+        SETTING_MAIL_SMTP_USER,
+        validated.mail_smtp_user.as_deref(),
+    )
+    .await?;
+    upsert_setting_mysql_opt(
+        tx,
+        SETTING_MAIL_SMTP_PASSWORD,
+        validated.mail_smtp_password.as_deref(),
+    )
+    .await?;
+    upsert_setting_mysql(tx, SETTING_MAIL_FROM_EMAIL, &validated.mail_from_email).await?;
+    upsert_setting_mysql(tx, SETTING_MAIL_FROM_NAME, &validated.mail_from_name).await?;
+    upsert_setting_mysql(
+        tx,
+        SETTING_MAIL_LINK_BASE_URL,
+        &validated.mail_link_base_url,
+    )
+    .await?;
+    upsert_setting_mysql_opt(tx, SETTING_S3_ENDPOINT, validated.s3_endpoint.as_deref()).await?;
+    upsert_setting_mysql_opt(tx, SETTING_S3_REGION, validated.s3_region.as_deref()).await?;
+    upsert_setting_mysql_opt(tx, SETTING_S3_BUCKET, validated.s3_bucket.as_deref()).await?;
+    upsert_setting_mysql_opt(tx, SETTING_S3_PREFIX, validated.s3_prefix.as_deref()).await?;
+    upsert_setting_mysql_opt(
+        tx,
+        SETTING_S3_ACCESS_KEY,
+        validated.s3_access_key.as_deref(),
+    )
+    .await?;
+    upsert_setting_mysql_opt(
+        tx,
+        SETTING_S3_SECRET_KEY,
+        validated.s3_secret_key.as_deref(),
+    )
+    .await?;
+    upsert_setting_mysql(
+        tx,
+        SETTING_S3_FORCE_PATH_STYLE,
+        if validated.s3_force_path_style {
+            "true"
+        } else {
+            "false"
+        },
+    )
+    .await?;
+    Ok(())
+}
+
+async fn upsert_setting_mysql(
+    tx: &mut sqlx::Transaction<'_, sqlx::MySql>,
+    key: &str,
+    value: &str,
+) -> Result<(), AppError> {
+    sqlx::query(
+        "INSERT INTO settings (`key`, `value`, updated_at)
+         VALUES (?, ?, CURRENT_TIMESTAMP(6))
+         ON DUPLICATE KEY UPDATE
+             `value` = VALUES(`value`),
+             updated_at = CURRENT_TIMESTAMP(6)",
+    )
+    .bind(key)
+    .bind(value)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+async fn upsert_setting_mysql_opt(
+    tx: &mut sqlx::Transaction<'_, sqlx::MySql>,
+    key: &str,
+    value: Option<&str>,
+) -> Result<(), AppError> {
+    match value {
+        Some(value) if !value.trim().is_empty() => upsert_setting_mysql(tx, key, value).await?,
+        _ => {
+            sqlx::query("DELETE FROM settings WHERE `key` = ?")
                 .bind(key)
                 .execute(&mut **tx)
                 .await?;

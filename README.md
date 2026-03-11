@@ -23,6 +23,38 @@ docker compose -f compose.sqlite.yml up --build -d
 
 SQLite Compose 默认把宿主机 `./data-sqlite` 挂载到容器内 `/data`。
 
+如果你要直接走 MySQL 8.4 的开发 / 联调入口，使用：
+
+```bash
+docker compose -f compose.mysql.yml up --build -d
+```
+
+如果你要直接走 MariaDB 12 的开发 / 联调入口，使用：
+
+```bash
+docker compose -f compose.mariadb.yml up --build -d
+```
+
+这两个文件都保留了固定演示口令，适合本地开发、CI 和烟测。
+
+如果你要准备长期运维入口，先复制模板再改密钥：
+
+```bash
+cp compose.mysql.ops.yml.example compose.mysql.ops.yml
+cp compose.mariadb.ops.yml.example compose.mariadb.ops.yml
+```
+
+然后把对应模板里的密钥和数据库密码替换成你自己的正式值，再执行：
+
+```bash
+docker compose -f compose.mysql.ops.yml up --build -d
+docker compose -f compose.mariadb.ops.yml up --build -d
+```
+
+MySQL 8.4 Compose 默认把宿主机 `./data-mysql` 挂载到应用容器 `/data`，并使用 Docker named volume 保存 MySQL 数据。
+
+MariaDB 12 Compose 默认把宿主机 `./data-mariadb` 挂载到应用容器 `/data`，并使用 Docker named volume 保存 MariaDB 数据。
+
 ## 首次启动安装
 
 首次启动时只需要准备基础环境变量：
@@ -32,6 +64,7 @@ SQLite Compose 默认把宿主机 `./data-sqlite` 挂载到容器内 `/data`。
 容器启动后，首次打开网页会先进入“数据库引导”页面。可以选择：
 
 - `PostgreSQL`：填写连接信息并保存，然后重启服务
+- `MySQL`：填写 `mysql://` 或 `mariadb://` 连接信息并保存，然后重启服务
 - `SQLite`：填写数据库文件路径或 `sqlite://` 连接并保存，然后重启服务
 
 数据库引导完成后，在安装向导里继续完成：
@@ -55,7 +88,48 @@ docker compose restart app
 sqlite:///data/sqlite/app.db
 ```
 
+如果使用 MySQL / MariaDB Compose，数据库引导页常见写法例如：
+
+```text
+mysql://user:pass@mysql:3306/image
+mariadb://user:pass@mysql:3306/image
+```
+
+如果使用长期运维模板，常见写法则应与模板中的应用账户保持一致，例如：
+
+```text
+mysql://vansour_image:replace-with-strong-app-password@mysql:3306/image
+```
+
 更完整的 SQLite 安装、备份、恢复、停机与回滚说明见 [`docs/sqlite.md`](docs/sqlite.md)。
+
+MySQL / MariaDB 的部署、后台恢复与备份说明见 [`docs/mysql.md`](docs/mysql.md)。
+
+如果你要执行 MySQL / MariaDB 的运维级备份 / 恢复脚本，分别使用：
+
+```bash
+./scripts/mysql-ops-backup.sh
+MYSQL_RESTORE_SQL_PATH=ops-backups/mysql/example.mysql.sql \
+MYSQL_RESTORE_DATA_ARCHIVE=ops-backups/mysql/example.data.tar.gz \
+./scripts/mysql-ops-restore.sh
+```
+
+恢复脚本会先停应用、生成回滚快照，再执行导入；结果会写入当前数据库家族对应的数据目录：
+
+- MySQL 8.4：`./data-mysql/backup/mysql_last_restore_result.json`
+- MariaDB 12：`./data-mariadb/backup/mysql_last_restore_result.json`
+
+如果你要按 manifest 做校验恢复或跑整套演练，使用：
+
+```bash
+MYSQL_RESTORE_MANIFEST_PATH=data-mysql/backup/mysql_last_backup_manifest.json \
+./scripts/mysql-ops-restore.sh
+
+MYSQL_RESTORE_MANIFEST_PATH=data-mariadb/backup/mysql_last_backup_manifest.json \
+./scripts/mysql-ops-restore.sh
+
+./scripts/mysql-ops-drill.sh
+```
 
 ## 邮件验证与密码重置配置
 
@@ -112,40 +186,76 @@ cargo test --workspace
 
 ```bash
 COMPOSE_FILE_PATHS="compose.sqlite.yml" \
-APP_HOST_PORT=18080 \
-DATA_DIR="$(mktemp -d)" \
 ./scripts/compose-smoke.sh
 ```
 
-如果本机 `8080` 已被占用，可以覆盖端口和应用数据目录，避免碰到现有运行实例或本地持久化数据：
+如果要校验 MySQL 8.4 Compose 入口：
 
 ```bash
-APP_HOST_PORT=18080 \
-DATA_DIR="$(mktemp -d)" \
+COMPOSE_FILE_PATHS="compose.mysql.yml" \
 ./scripts/compose-smoke.sh
 ```
 
-默认 `compose.yml` 会把 PostgreSQL 数据放到仓库内 `./pg_data`。
+如果要校验 MariaDB 12 Compose 入口：
 
-为避免 `postgres:trixie` 因宿主目录权限不匹配而启动失败，Compose 会先运行一次性 `postgres-init` 服务，把 `./pg_data` 或 `POSTGRES_DATA_DIR` 指向的目录修正为容器内 PostgreSQL 可写。
+```bash
+COMPOSE_FILE_PATHS="compose.mariadb.yml" \
+./scripts/compose-smoke.sh
+```
 
-如果你显式传入 `POSTGRES_DATA_DIR`，也会复用这套自动修权限逻辑。
+这条命令现在不只是等 `/health`，还会自动串行执行 MySQL / MariaDB 的数据库引导、安装向导、管理员登录、图片上传/删除、备份创建/下载、恢复预检、写入恢复计划、重启执行恢复、旧会话失效校验、重新登录、恢复结果与审计日志校验。
+
+默认情况下，这条脚本会重建当前 Compose 入口对应的数据目录；MySQL 8.4 对应 `./data-mysql`，MariaDB 12 对应 `./data-mariadb`。如果你确实要复用现有目录，可以显式传入 `MYSQL_SMOKE_RESET_DATA_DIR=0`。
+
+## 浏览器点击回归
+
+如果你要对 MySQL / MariaDB 页面链路跑一遍真实浏览器点击回归，使用：
+
+```bash
+./scripts/browser-click-regression.sh
+```
+
+默认跑 MySQL 8.4；如果要切到 MariaDB 12：
+
+```bash
+COMPOSE_FILE_PATHS="compose.mariadb.yml" \
+./scripts/browser-click-regression.sh
+```
+
+这条脚本会自动完成：
+
+- MySQL 数据库引导页保存连接
+- 重启后进入安装向导并完成管理员安装
+- 首次进入引导的 4 个按钮逐个点击校对
+- 设置页“维护工具”里生成 MySQL 备份并写入恢复计划
+- 再次重启后校验旧登录态失效、重新登录、审计页与恢复结果卡片文案
+
+如果当前机器没有可直接使用的 Chrome / Chromium，脚本会自动安装 Playwright Chromium。
+
+默认情况下，这条脚本也会重建当前 Compose 入口对应的数据目录；如需复用当前目录，显式传入 `MYSQL_SMOKE_RESET_DATA_DIR=0`。
+
+注意：
+
+- `compose.mysql.yml` / `compose.mariadb.yml` 是开发 / 烟测入口，不是长期运维入口。
+- `compose.mysql.yml`、`compose.mysql.ops.yml`、`compose.mariadb.yml`、`compose.mariadb.ops.yml` 都写了固定 `container_name`，同一台机器一次只能运行一套同名数据库家族栈。
+
+默认 `compose.yml` 会把 PostgreSQL 数据放到 Docker named volume，不再依赖仓库内 `./pg_data` 的宿主目录权限。
+
+如果你确实要把 PostgreSQL 数据绑定到宿主目录，需要自行修改 Compose 配置并确保目录对容器内 PostgreSQL 进程可写。
 
 GitHub Actions 会自动执行两类校验：
 
 - `cargo fmt --all --check`
 - `cargo check --workspace`
 - `cargo test --workspace`
-- 基于 `docker compose` 的 `/health` 冒烟校验
+- 基于 `docker compose` 的 MySQL 8.4 / MariaDB 12 Compose smoke
+- 基于 Playwright 的 MySQL 8.4 / MariaDB 12 浏览器点击回归
 
 ## SQLite E2E 冒烟
 
 如果要把 SQLite 的安装、邮件、注册、密码重置、上传和管理员查询链路一起跑通，可以使用：
 
 ```bash
-COMPOSE_PROJECT_NAME=vansour-image-sqlite-e2e \
-APP_HOST_PORT=18080 \
-MAILPIT_HTTP_PORT=18025 \
 ./scripts/sqlite-e2e-smoke.sh
 ```
 

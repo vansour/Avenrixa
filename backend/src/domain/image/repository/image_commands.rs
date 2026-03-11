@@ -1,8 +1,8 @@
 use chrono::Utc;
-use sqlx::{QueryBuilder, Sqlite};
+use sqlx::{MySql, QueryBuilder, Sqlite};
 use uuid::Uuid;
 
-use super::{PostgresImageRepository, SqliteImageRepository};
+use super::{MySqlImageRepository, PostgresImageRepository, SqliteImageRepository};
 use crate::models::Image;
 
 impl PostgresImageRepository {
@@ -112,6 +112,142 @@ impl PostgresImageRepository {
             .execute(&self.pool)
             .await?;
 
+        Ok(result.rows_affected())
+    }
+}
+
+impl MySqlImageRepository {
+    pub(super) async fn create_image_impl(&self, image: &Image) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "INSERT INTO images (id, user_id, category_id, filename, thumbnail, original_filename, size, hash, format, views, status, expires_at, deleted_at, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(image.id)
+        .bind(image.user_id)
+        .bind(image.category_id)
+        .bind(&image.filename)
+        .bind(&image.thumbnail)
+        .bind(&image.original_filename)
+        .bind(image.size)
+        .bind(&image.hash)
+        .bind(&image.format)
+        .bind(image.views)
+        .bind(&image.status)
+        .bind(image.expires_at)
+        .bind(image.deleted_at)
+        .bind(image.created_at)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    pub(super) async fn update_image_impl(&self, image: &Image) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "UPDATE images
+             SET filename = ?,
+                 thumbnail = ?,
+                 original_filename = ?,
+                 category_id = ?,
+                 size = ?,
+                 hash = ?,
+                 format = ?,
+                 views = ?,
+                 status = ?,
+                 expires_at = ?,
+                 deleted_at = ?
+             WHERE id = ?",
+        )
+        .bind(&image.filename)
+        .bind(&image.thumbnail)
+        .bind(&image.original_filename)
+        .bind(image.category_id)
+        .bind(image.size)
+        .bind(&image.hash)
+        .bind(&image.format)
+        .bind(image.views)
+        .bind(&image.status)
+        .bind(image.expires_at)
+        .bind(image.deleted_at)
+        .bind(image.id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    pub(super) async fn soft_delete_images_by_user_impl(
+        &self,
+        user_id: Uuid,
+        image_ids: &[Uuid],
+    ) -> Result<u64, sqlx::Error> {
+        if image_ids.is_empty() {
+            return Ok(0);
+        }
+
+        let mut builder = QueryBuilder::<MySql>::new("UPDATE images SET deleted_at = ");
+        builder.push_bind(Utc::now());
+        builder.push(" WHERE user_id = ");
+        builder.push_bind(user_id);
+        builder.push(" AND id IN (");
+        {
+            let mut separated = builder.separated(", ");
+            for image_id in image_ids {
+                separated.push_bind(image_id);
+            }
+        }
+        builder.push(") AND deleted_at IS NULL");
+
+        let result = builder.build().execute(&self.pool).await?;
+        Ok(result.rows_affected())
+    }
+
+    pub(super) async fn restore_images_by_user_impl(
+        &self,
+        user_id: Uuid,
+        image_ids: &[Uuid],
+    ) -> Result<u64, sqlx::Error> {
+        if image_ids.is_empty() {
+            return Ok(0);
+        }
+
+        let mut builder =
+            QueryBuilder::<MySql>::new("UPDATE images SET deleted_at = NULL WHERE user_id = ");
+        builder.push_bind(user_id);
+        builder.push(" AND id IN (");
+        {
+            let mut separated = builder.separated(", ");
+            for image_id in image_ids {
+                separated.push_bind(image_id);
+            }
+        }
+        builder.push(") AND deleted_at IS NOT NULL");
+
+        let result = builder.build().execute(&self.pool).await?;
+        Ok(result.rows_affected())
+    }
+
+    pub(super) async fn hard_delete_images_by_user_impl(
+        &self,
+        user_id: Uuid,
+        image_ids: &[Uuid],
+    ) -> Result<u64, sqlx::Error> {
+        if image_ids.is_empty() {
+            return Ok(0);
+        }
+
+        let mut builder = QueryBuilder::<MySql>::new("DELETE FROM images WHERE user_id = ");
+        builder.push_bind(user_id);
+        builder.push(" AND id IN (");
+        {
+            let mut separated = builder.separated(", ");
+            for image_id in image_ids {
+                separated.push_bind(image_id);
+            }
+        }
+        builder.push(")");
+
+        let result = builder.build().execute(&self.pool).await?;
         Ok(result.rows_affected())
     }
 }

@@ -1,9 +1,12 @@
+# 开发 / 联调 / 烟测入口。
+# 这里保留的是固定演示口令，不要直接作为长期运维配置使用。
+
 volumes:
-  postgres_data:
+  mariadb_data:
 
 services:
   app:
-    container_name: vansour-image-app
+    container_name: vansour-image-mariadb-app
     build:
       context: .
       dockerfile: Dockerfile
@@ -11,7 +14,7 @@ services:
     ports:
       - "8080:8080"
     depends_on:
-      postgres:
+      mysql:
         condition: service_healthy
       dragonfly:
         condition: service_healthy
@@ -21,7 +24,7 @@ services:
       - AUTH_COOKIE_SECURE=false
       - AUTH_COOKIE_SAME_SITE=Strict
     volumes:
-      - "./data:/data"
+      - "./data-mariadb:/data"
     restart: unless-stopped
     healthcheck:
       test: curl -f http://localhost:8080/health || exit 1
@@ -29,23 +32,32 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
-  postgres:
-    container_name: vansour-image-postgres
-    image: postgres:trixie
+
+  mysql:
+    container_name: vansour-image-mariadb
+    image: mariadb:12
     environment:
-      - POSTGRES_DB=image
-      - POSTGRES_USER=user
-      - POSTGRES_PASSWORD=pass
+      - MARIADB_DATABASE=image
+      - MARIADB_USER=user
+      - MARIADB_PASSWORD=pass
+      - MARIADB_ROOT_PASSWORD=rootpass
+      - MYSQL_DATABASE=image
+      - MYSQL_USER=user
+      - MYSQL_PASSWORD=pass
+      - MYSQL_ROOT_PASSWORD=rootpass
     volumes:
-      - "postgres_data:/var/lib/postgresql"
+      - "mariadb_data:/var/lib/mysql"
     healthcheck:
-      test: pg_isready -U user -d image
+      test:
+        - CMD-SHELL
+        - mariadb-admin ping -h 127.0.0.1 -uuser -ppass || mysqladmin ping -h 127.0.0.1 -uuser -ppass
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
     restart: unless-stopped
+
   dragonfly:
-    container_name: vansour-image-dragonfly
+    container_name: vansour-image-mariadb-dragonfly
     image: ghcr.io/dragonflydb/dragonfly:latest
     command: --dir=/data
     healthcheck:

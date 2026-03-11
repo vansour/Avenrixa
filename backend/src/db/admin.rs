@@ -2,7 +2,7 @@ use crate::auth::AuthService;
 use crate::models::User;
 use chrono::Utc;
 use lettre::Address;
-use sqlx::{Postgres, Sqlite, Transaction};
+use sqlx::{MySql, Postgres, Sqlite, Transaction};
 use uuid::Uuid;
 
 use super::DatabasePool;
@@ -76,11 +76,32 @@ pub async fn is_app_installed_tx(tx: &mut Transaction<'_, Postgres>) -> Result<b
     ))
 }
 
+pub async fn is_app_installed_mysql_tx(
+    tx: &mut Transaction<'_, MySql>,
+) -> Result<bool, sqlx::Error> {
+    let value = sqlx::query_scalar::<_, String>("SELECT `value` FROM settings WHERE `key` = ?")
+        .bind(INSTALL_STATE_SETTING_KEY)
+        .fetch_optional(&mut **tx)
+        .await?;
+    Ok(matches!(
+        value.as_deref().map(str::trim),
+        Some("true" | "TRUE" | "True" | "1")
+    ))
+}
+
 pub async fn has_admin_account(pool: &DatabasePool) -> Result<bool, sqlx::Error> {
     let exists = match pool {
         DatabasePool::Postgres(pool) => {
             sqlx::query_scalar::<_, i32>(
                 "SELECT 1 FROM users WHERE id = $1 AND role = 'admin' LIMIT 1",
+            )
+            .bind(ADMIN_USER_ID)
+            .fetch_optional(pool)
+            .await?
+        }
+        DatabasePool::MySql(pool) => {
+            sqlx::query_scalar::<_, i32>(
+                "SELECT 1 FROM users WHERE id = ? AND role = 'admin' LIMIT 1",
             )
             .bind(ADMIN_USER_ID)
             .fetch_optional(pool)
@@ -105,6 +126,17 @@ pub async fn has_admin_account_tx(tx: &mut Transaction<'_, Postgres>) -> Result<
     .bind(ADMIN_USER_ID)
     .fetch_optional(&mut **tx)
     .await?;
+    Ok(exists.is_some())
+}
+
+pub async fn has_admin_account_mysql_tx(
+    tx: &mut Transaction<'_, MySql>,
+) -> Result<bool, sqlx::Error> {
+    let exists =
+        sqlx::query_scalar::<_, i32>("SELECT 1 FROM users WHERE id = ? AND role = 'admin' LIMIT 1")
+            .bind(ADMIN_USER_ID)
+            .fetch_optional(&mut **tx)
+            .await?;
     Ok(exists.is_some())
 }
 
@@ -143,6 +175,37 @@ pub async fn create_admin_account_tx(
     Ok(user)
 }
 
+pub async fn create_admin_account_mysql_tx(
+    tx: &mut Transaction<'_, MySql>,
+    email: &str,
+    password: &str,
+) -> Result<User, anyhow::Error> {
+    let password_hash = AuthService::hash_password(password)?;
+    let created_at = Utc::now();
+    let verified_at = Utc::now();
+
+    sqlx::query(
+        "INSERT INTO users (id, email, email_verified_at, password_hash, role, created_at)
+         VALUES (?, ?, ?, ?, 'admin', ?)",
+    )
+    .bind(ADMIN_USER_ID)
+    .bind(email)
+    .bind(verified_at)
+    .bind(&password_hash)
+    .bind(created_at)
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(User {
+        id: ADMIN_USER_ID,
+        email: email.to_string(),
+        email_verified_at: Some(verified_at),
+        password_hash,
+        role: "admin".to_string(),
+        created_at,
+    })
+}
+
 pub async fn create_admin_account_sqlite_tx(
     tx: &mut Transaction<'_, Sqlite>,
     email: &str,
@@ -178,6 +241,12 @@ pub async fn mark_app_installed_tx(tx: &mut Transaction<'_, Postgres>) -> Result
     upsert_setting_tx(tx, INSTALL_STATE_SETTING_KEY, "true").await
 }
 
+pub async fn mark_app_installed_mysql_tx(
+    tx: &mut Transaction<'_, MySql>,
+) -> Result<(), sqlx::Error> {
+    upsert_setting_mysql_tx(tx, INSTALL_STATE_SETTING_KEY, "true").await
+}
+
 pub async fn mark_app_installed_sqlite_tx(
     tx: &mut Transaction<'_, Sqlite>,
 ) -> Result<(), sqlx::Error> {
@@ -191,6 +260,12 @@ pub async fn get_setting_value(
     match pool {
         DatabasePool::Postgres(pool) => {
             sqlx::query_scalar::<_, String>("SELECT value FROM settings WHERE key = $1")
+                .bind(key)
+                .fetch_optional(pool)
+                .await
+        }
+        DatabasePool::MySql(pool) => {
+            sqlx::query_scalar::<_, String>("SELECT `value` FROM settings WHERE `key` = ?")
                 .bind(key)
                 .fetch_optional(pool)
                 .await
@@ -214,6 +289,25 @@ pub async fn upsert_setting_tx(
          VALUES ($1, $2, NOW())
          ON CONFLICT (key)
          DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()",
+    )
+    .bind(key)
+    .bind(value)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+pub async fn upsert_setting_mysql_tx(
+    tx: &mut Transaction<'_, MySql>,
+    key: &str,
+    value: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO settings (`key`, `value`, updated_at)
+         VALUES (?, ?, CURRENT_TIMESTAMP(6))
+         ON DUPLICATE KEY UPDATE
+             `value` = VALUES(`value`),
+             updated_at = CURRENT_TIMESTAMP(6)",
     )
     .bind(key)
     .bind(value)
@@ -252,6 +346,17 @@ pub async fn delete_setting_tx(
     Ok(())
 }
 
+pub async fn delete_setting_mysql_tx(
+    tx: &mut Transaction<'_, MySql>,
+    key: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM settings WHERE `key` = ?")
+        .bind(key)
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}
+
 pub async fn delete_setting_sqlite_tx(
     tx: &mut Transaction<'_, Sqlite>,
     key: &str,
@@ -275,6 +380,7 @@ pub async fn is_app_installed_sqlite_tx(
         Some("true" | "TRUE" | "True" | "1")
     ))
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;

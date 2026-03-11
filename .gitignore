@@ -1,5 +1,6 @@
 /target
 frontend/node_modules
+scripts/browser-regression/node_modules
 frontend/dist
 frontend/frontend-*.js
 frontend/frontend-*_bg.wasm
@@ -10,6 +11,11 @@ frontend/snippets/
 .DS_Store
 data
 data-sqlite
+data-mysql
+data-mariadb
+ops-backups/
 pg_data
 cookie.txt
 test-results/
+compose.mysql.ops.yml
+compose.mariadb.ops.yml
