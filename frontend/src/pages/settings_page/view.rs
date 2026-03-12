@@ -1,12 +1,18 @@
+use crate::app_context::{use_auth_store, use_settings_service, use_toast_store};
+use crate::components::Modal;
+use crate::services::SettingsService;
 use crate::types::api::{
     AdminUserSummary, AuditLog, BackupFileSummary, BackupResponse, BackupRestoreStatusResponse,
-    ComponentStatus, HealthStatus, Setting, SystemStats,
+    BackupSemantics, ComponentStatus, HealthStatus, Setting, StorageDirectoryEntry, SystemStats,
 };
 use chrono::{DateTime, Utc};
 use dioxus::prelude::*;
 use std::collections::HashMap;
 
 use super::state::SettingsFormState;
+use super::{handle_settings_auth_error, settings_auth_expired_message};
+
+const DEFAULT_SETTINGS_STORAGE_BROWSER_PATH: &str = "/data/images";
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum SettingsSection {
@@ -225,7 +231,7 @@ pub fn SystemStatusSection(
 
                 div { class: "settings-status-grid",
                     {render_component_status_card("数据库", &health.database)}
-                    {render_component_status_card("缓存服务", &health.redis)}
+                    {render_component_status_card("缓存服务", &health.cache)}
                     {render_component_status_card("存储后端", &health.storage)}
                 }
 
@@ -278,7 +284,7 @@ pub fn MaintenanceSettingsSection(
     #[props(default)] on_refresh_backups: EventHandler<MouseEvent>,
     #[props(default)] on_refresh_restore_status: EventHandler<MouseEvent>,
     #[props(default)] on_delete_backup: EventHandler<String>,
-    #[props(default)] on_restore_backup: EventHandler<String>,
+    #[props(default)] on_restore_backup: EventHandler<BackupFileSummary>,
 ) -> Element {
     let last_backup_name = last_backup
         .as_ref()
@@ -385,7 +391,7 @@ pub fn MaintenanceSettingsSection(
                             span { class: "settings-risk-badge is-safe", "Safe" }
                         }
                         h3 { "数据库备份" }
-                        p { class: "settings-action-note", "生成当前数据库快照，建议在执行高风险维护前先备份。" }
+                        p { class: "settings-action-note", "生成当前数据库级备份；SQLite 会导出数据库快照，MySQL / MariaDB 与 PostgreSQL 会导出逻辑备份。" }
                     }
                     button {
                         class: "btn btn-primary",
@@ -399,7 +405,7 @@ pub fn MaintenanceSettingsSection(
             div { class: "settings-subcard",
                 h3 { "数据库恢复状态" }
                 p { class: "settings-section-copy",
-                    "当前恢复是冷恢复流程：先写入恢复计划，再在下一次服务启动前执行数据库文件替换或 SQL 导入。"
+                    "当前恢复是冷恢复流程：写入计划后会在下一次启动前执行。按 1.0 范围，当前页面内的 SQLite 数据库快照恢复仅作为 Experimental 能力保留；PostgreSQL 是默认 GA 主路径，但恢复统一走运维脚本。"
                 }
 
                 div { class: "settings-list-toolbar",
@@ -453,7 +459,7 @@ pub fn MaintenanceSettingsSection(
                         }
                     } else {
                         div { class: "settings-banner settings-banner-neutral",
-                            "当前没有待执行的数据库恢复计划。选择某个 SQLite 或 MySQL 备份后，系统会先做预检，再要求你输入文件名确认。"
+                            "当前没有待执行的数据库恢复计划。当前页面内只有 SQLite 数据库快照可写入恢复计划，且这条能力在 1.0 范围内按 Experimental 保留；其他备份类型仅支持下载或运维侧恢复。"
                         }
                     }
 
@@ -488,7 +494,7 @@ pub fn MaintenanceSettingsSection(
             div { class: "settings-subcard",
                 h3 { "备份文件" }
                 p { class: "settings-section-copy",
-                    "这里展示当前备份目录中的数据库快照。SQLite 与 MySQL 备份支持“恢复到此备份”；PostgreSQL 导出备份暂时仍只支持下载和删除。"
+                    "这里展示后台生成的数据库级备份。SQLite 数据库快照仍可从当前页面写入恢复计划，但这条能力在 1.0 范围内按 Experimental 保留；MySQL / MariaDB 逻辑导出与 PostgreSQL 导出当前仅支持下载或运维侧恢复。"
                 }
 
                 div { class: "settings-list-toolbar",
@@ -521,8 +527,8 @@ pub fn MaintenanceSettingsSection(
                         {backup_files.into_iter().map(|(backup, download_url)| {
                             let filename_for_download = backup.filename.clone();
                             let filename_for_delete = backup.filename.clone();
-                            let filename_for_restore = backup.filename.clone();
-                            let kind_label = backup_database_kind_label(&backup.filename);
+                            let backup_for_restore = backup.clone();
+                            let kind_label = backup_kind_label(&backup.semantics);
                             let backup_meta = format!(
                                 "{} · {}",
                                 format_timestamp(backup.created_at),
@@ -537,18 +543,29 @@ pub fn MaintenanceSettingsSection(
                             let is_pending_target = pending_restore_filename
                                 .as_deref()
                                 .is_some_and(|value| value == backup.filename.as_str());
-                            let supports_restore = backup_supports_restore(&backup.filename);
+                            let supports_restore = backup_supports_restore(&backup.semantics);
+                            let is_experimental_page_restore =
+                                backup.semantics.backup_kind == "sqlite-database-snapshot";
                             rsx! {
                                 article { class: "settings-entity-card",
                                     div { class: "settings-entity-main",
                                         div { class: "settings-entity-copy",
                                             div { class: "settings-entity-title",
                                                 h3 { "{backup.filename}" }
-                                                span { class: "settings-kv-badge", "{kind_label}" }
+                                                div { class: "settings-kv-badges",
+                                                    span { class: "settings-kv-badge", "{kind_label}" }
+                                                    if is_experimental_page_restore {
+                                                        span { class: "settings-kv-badge is-warning", "Experimental" }
+                                                    }
+                                                }
                                             }
                                             p { class: "settings-entity-meta", "{backup_meta}" }
-                                            if !supports_restore {
-                                                p { class: "settings-action-note", "当前这类备份暂不支持页面内恢复。" }
+                                            if is_experimental_page_restore {
+                                                p { class: "settings-action-note",
+                                                    "当前页面内的 SQLite 恢复在 1.0 范围内按 Experimental 保留，适合受控环境验证，不属于默认 GA 发布承诺。"
+                                                }
+                                            } else if !supports_restore {
+                                                p { class: "settings-action-note", "当前这类备份仅支持下载或运维侧恢复，不支持当前页面恢复。" }
                                             }
                                         }
 
@@ -562,13 +579,13 @@ pub fn MaintenanceSettingsSection(
                                             button {
                                                 class: "btn btn-danger",
                                                 disabled: !supports_restore || maintenance_busy || is_loading_restore_status || has_pending_restore,
-                                                onclick: move |_| on_restore_backup.call(filename_for_restore.clone()),
+                                                onclick: move |_| on_restore_backup.call(backup_for_restore.clone()),
                                                 if is_row_restoring {
                                                     "处理中..."
                                                 } else if is_pending_target {
                                                     "已计划恢复"
                                                 } else if !supports_restore {
-                                                    "暂不支持恢复"
+                                                    "不支持页面恢复"
                                                 } else {
                                                     "恢复到此备份"
                                                 }
@@ -910,14 +927,18 @@ pub fn render_general_fields(form: SettingsFormState, disabled: bool) -> Element
     let mut mail_from_name = form.mail_from_name;
     let mut mail_link_base_url = form.mail_link_base_url;
     let mail_is_enabled = mail_enabled();
-    let mail_jump_target = summary_value(mail_link_base_url());
+    let mail_jump_target = if mail_is_enabled {
+        summary_value(mail_link_base_url())
+    } else {
+        "未启用".to_string()
+    };
 
     rsx! {
         div { class: "settings-stack",
             div { class: "settings-status-summary",
                 {render_metric_card("站点名称", summary_value(site_name()))}
                 {render_metric_card("邮件服务", if mail_is_enabled { "已启用".to_string() } else { "未启用".to_string() })}
-                {render_metric_card("验证/重置跳转", mail_jump_target)}
+                {render_metric_card("站点访问地址", mail_jump_target)}
             }
 
             if mail_is_enabled {
@@ -932,9 +953,6 @@ pub fn render_general_fields(form: SettingsFormState, disabled: bool) -> Element
 
             div { class: "settings-subcard",
                 h3 { "站点识别" }
-                p { class: "settings-section-copy",
-                    "这些信息直接影响用户看到的站点名称、邮件署名以及验证后的返回地址。"
-                }
                 div { class: "settings-grid",
                     label { class: "settings-field settings-field-full",
                         span { "网站名称" }
@@ -946,43 +964,11 @@ pub fn render_general_fields(form: SettingsFormState, disabled: bool) -> Element
                         }
                     }
 
-                    label { class: "settings-field",
-                        span { "发件邮箱" }
-                        input {
-                            r#type: "email",
-                            value: "{mail_from_email()}",
-                            oninput: move |event| mail_from_email.set(event.value()),
-                            disabled,
-                        }
-                    }
-
-                    label { class: "settings-field",
-                        span { "发件人名称" }
-                        input {
-                            r#type: "text",
-                            value: "{mail_from_name()}",
-                            oninput: move |event| mail_from_name.set(event.value()),
-                            disabled,
-                        }
-                    }
-
-                    label { class: "settings-field settings-field-full",
-                        span { "邮件跳转地址（用于密码重置和邮箱验证）" }
-                        input {
-                            r#type: "url",
-                            value: "{mail_link_base_url()}",
-                            oninput: move |event| mail_link_base_url.set(event.value()),
-                            disabled,
-                        }
-                    }
                 }
             }
 
             div { class: "settings-subcard",
                 h3 { "邮件投递" }
-                p { class: "settings-section-copy",
-                    "如果 SMTP 用户名和密码留空，系统将尝试匿名投递；一旦填写用户名，密码也必须同时提供。"
-                }
                 div { class: "settings-grid",
                     label { class: "settings-check settings-field-full",
                         input {
@@ -994,50 +980,217 @@ pub fn render_general_fields(form: SettingsFormState, disabled: bool) -> Element
                         span { "启用邮件服务" }
                     }
 
-                    label { class: "settings-field",
-                        span { "SMTP 主机" }
-                        input {
-                            r#type: "text",
-                            value: "{mail_smtp_host()}",
-                            oninput: move |event| mail_smtp_host.set(event.value()),
-                            disabled,
-                        }
-                    }
-
-                    label { class: "settings-field",
-                        span { "SMTP 端口" }
-                        input {
-                            r#type: "number",
-                            min: "1",
-                            value: "{mail_smtp_port()}",
-                            oninput: move |event| mail_smtp_port.set(event.value()),
-                            disabled,
-                        }
-                    }
-
-                    label { class: "settings-field",
-                        span { "SMTP 用户名（可选）" }
-                        input {
-                            r#type: "text",
-                            value: "{mail_smtp_user()}",
-                            oninput: move |event| mail_smtp_user.set(event.value()),
-                            disabled,
-                        }
-                    }
-
-                    label { class: "settings-field",
-                        span {
-                            if mail_smtp_password_set() {
-                                "SMTP 密码（留空表示不修改）"
-                            } else {
-                                "SMTP 密码（可选）"
+                    if mail_is_enabled {
+                        label { class: "settings-field",
+                            span { "发件邮箱" }
+                            input {
+                                r#type: "email",
+                                value: "{mail_from_email()}",
+                                oninput: move |event| mail_from_email.set(event.value()),
+                                disabled,
                             }
                         }
+
+                        label { class: "settings-field",
+                            span { "发件人名称" }
+                            input {
+                                r#type: "text",
+                                value: "{mail_from_name()}",
+                                oninput: move |event| mail_from_name.set(event.value()),
+                                disabled,
+                            }
+                        }
+
+                        label { class: "settings-field settings-field-full",
+                            span { "站点访问地址（用于邮件链接）" }
+                            input {
+                                r#type: "url",
+                                value: "{mail_link_base_url()}",
+                                oninput: move |event| mail_link_base_url.set(event.value()),
+                                placeholder: "https://img.example.com",
+                                disabled,
+                            }
+                            small { class: "settings-field-hint",
+                                "用户点击邮件里的验证或重置链接后，会回到这里。"
+                            }
+                        }
+
+                        label { class: "settings-field",
+                            span { "SMTP 主机" }
+                            input {
+                                r#type: "text",
+                                value: "{mail_smtp_host()}",
+                                oninput: move |event| mail_smtp_host.set(event.value()),
+                                disabled,
+                            }
+                        }
+
+                        label { class: "settings-field",
+                            span { "SMTP 端口" }
+                            input {
+                                r#type: "number",
+                                min: "1",
+                                value: "{mail_smtp_port()}",
+                                oninput: move |event| mail_smtp_port.set(event.value()),
+                                disabled,
+                            }
+                        }
+
+                        label { class: "settings-field",
+                            span { "SMTP 用户名" }
+                            input {
+                                r#type: "text",
+                                value: "{mail_smtp_user()}",
+                                oninput: move |event| mail_smtp_user.set(event.value()),
+                                disabled,
+                            }
+                        }
+
+                        label { class: "settings-field",
+                            span {
+                                if mail_smtp_password_set() {
+                                    "SMTP 密码（留空不修改）"
+                                } else {
+                                    "SMTP 密码"
+                                }
+                            }
+                            input {
+                                r#type: "password",
+                                value: "{mail_smtp_password()}",
+                                oninput: move |event| mail_smtp_password.set(event.value()),
+                                disabled,
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+pub fn render_general_fields_compact(form: SettingsFormState, disabled: bool) -> Element {
+    let mut site_name = form.site_name;
+    let mut mail_enabled = form.mail_enabled;
+    let mut mail_smtp_host = form.mail_smtp_host;
+    let mut mail_smtp_port = form.mail_smtp_port;
+    let mut mail_smtp_user = form.mail_smtp_user;
+    let mut mail_smtp_password = form.mail_smtp_password;
+    let mail_smtp_password_set = form.mail_smtp_password_set;
+    let mut mail_from_email = form.mail_from_email;
+    let mut mail_from_name = form.mail_from_name;
+    let mut mail_link_base_url = form.mail_link_base_url;
+    let mail_is_enabled = mail_enabled();
+
+    rsx! {
+        div { class: "settings-stack",
+            div { class: "settings-subcard install-compact-subcard",
+                h3 { "站点信息" }
+                div { class: "settings-grid",
+                    label { class: "settings-field settings-field-full",
+                        span { "网站名称" }
                         input {
-                            r#type: "password",
-                            value: "{mail_smtp_password()}",
-                            oninput: move |event| mail_smtp_password.set(event.value()),
+                            r#type: "text",
+                            value: "{site_name()}",
+                            oninput: move |event| site_name.set(event.value()),
                             disabled,
+                        }
+                    }
+                }
+            }
+
+            div { class: "settings-subcard install-compact-subcard",
+                h3 { "邮件服务" }
+                div { class: "settings-grid",
+                    label { class: "settings-check settings-field-full",
+                        input {
+                            r#type: "checkbox",
+                            checked: mail_enabled(),
+                            onchange: move |event| mail_enabled.set(event.checked()),
+                            disabled,
+                        }
+                        span { "启用邮件服务" }
+                    }
+
+                    if mail_is_enabled {
+                        label { class: "settings-field",
+                            span { "发件邮箱" }
+                            input {
+                                r#type: "email",
+                                value: "{mail_from_email()}",
+                                oninput: move |event| mail_from_email.set(event.value()),
+                                disabled,
+                            }
+                        }
+
+                        label { class: "settings-field",
+                            span { "发件人名称" }
+                            input {
+                                r#type: "text",
+                                value: "{mail_from_name()}",
+                                oninput: move |event| mail_from_name.set(event.value()),
+                                disabled,
+                            }
+                        }
+
+                        label { class: "settings-field settings-field-full",
+                            span { "站点访问地址（用于邮件链接）" }
+                            input {
+                                r#type: "url",
+                                value: "{mail_link_base_url()}",
+                                oninput: move |event| mail_link_base_url.set(event.value()),
+                                placeholder: "https://img.example.com",
+                                disabled,
+                            }
+                            small { class: "settings-field-hint",
+                                "用户点击邮件里的验证或重置链接后，会回到这里。"
+                            }
+                        }
+
+                        label { class: "settings-field",
+                            span { "SMTP 主机" }
+                            input {
+                                r#type: "text",
+                                value: "{mail_smtp_host()}",
+                                oninput: move |event| mail_smtp_host.set(event.value()),
+                                disabled,
+                            }
+                        }
+
+                        label { class: "settings-field",
+                            span { "SMTP 端口" }
+                            input {
+                                r#type: "number",
+                                min: "1",
+                                value: "{mail_smtp_port()}",
+                                oninput: move |event| mail_smtp_port.set(event.value()),
+                                disabled,
+                            }
+                        }
+
+                        label { class: "settings-field",
+                            span { "SMTP 用户名" }
+                            input {
+                                r#type: "text",
+                                value: "{mail_smtp_user()}",
+                                oninput: move |event| mail_smtp_user.set(event.value()),
+                                disabled,
+                            }
+                        }
+
+                        label { class: "settings-field",
+                            span {
+                                if mail_smtp_password_set() {
+                                    "SMTP 密码（留空不修改）"
+                                } else {
+                                    "SMTP 密码"
+                                }
+                            }
+                            input {
+                                r#type: "password",
+                                value: "{mail_smtp_password()}",
+                                oninput: move |event| mail_smtp_password.set(event.value()),
+                                disabled,
+                            }
                         }
                     }
                 }
@@ -1048,7 +1201,7 @@ pub fn render_general_fields(form: SettingsFormState, disabled: bool) -> Element
 
 pub fn render_storage_fields(form: SettingsFormState, disabled: bool) -> Element {
     let mut storage_backend = form.storage_backend;
-    let mut local_storage_path = form.local_storage_path;
+    let local_storage_path = form.local_storage_path;
     let show_s3_fields = form.is_s3_backend();
     let backend_label = if show_s3_fields {
         "对象存储".to_string()
@@ -1066,7 +1219,7 @@ pub fn render_storage_fields(form: SettingsFormState, disabled: bool) -> Element
             div { class: "settings-status-summary",
                 {render_metric_card("当前后端", backend_label)}
                 {render_metric_card("本地目录", summary_value(local_storage_path()))}
-                {render_metric_card("S3 Bucket", bucket_summary)}
+                {render_metric_card("对象存储桶", bucket_summary)}
             }
 
             div { class: "settings-banner settings-banner-neutral",
@@ -1085,19 +1238,12 @@ pub fn render_storage_fields(form: SettingsFormState, disabled: bool) -> Element
                             value: "{storage_backend()}",
                             onchange: move |event| storage_backend.set(event.value()),
                             disabled,
-                            option { value: "local", "local" }
-                            option { value: "s3", "s3" }
+                            option { value: "local", "本地存储" }
+                            option { value: "s3", "对象存储（S3）" }
                         }
                     }
-
-                    label { class: "settings-field settings-field-full",
-                        span { "本地存储路径" }
-                        input {
-                            r#type: "text",
-                            value: "{local_storage_path()}",
-                            oninput: move |event| local_storage_path.set(event.value()),
-                            disabled,
-                        }
+                    if !show_s3_fields {
+                        LocalStoragePathPicker { form, disabled }
                     }
                 }
             }
@@ -1117,7 +1263,268 @@ pub fn render_storage_fields(form: SettingsFormState, disabled: bool) -> Element
     }
 }
 
-fn render_s3_fields(form: SettingsFormState, disabled: bool) -> Element {
+pub fn render_storage_fields_compact(form: SettingsFormState, disabled: bool) -> Element {
+    let mut storage_backend = form.storage_backend;
+    let show_s3_fields = form.is_s3_backend();
+
+    rsx! {
+        div { class: "settings-stack",
+            div { class: "settings-subcard install-compact-subcard",
+                h3 { "存储后端" }
+                div { class: "settings-grid",
+                    label { class: "settings-field",
+                        span { "存储后端" }
+                        select {
+                            value: "{storage_backend()}",
+                            onchange: move |event| storage_backend.set(event.value()),
+                            disabled,
+                            option { value: "local", "本地存储" }
+                            option { value: "s3", "对象存储（S3）" }
+                        }
+                    }
+                    if !show_s3_fields {
+                        LocalStoragePathPicker { form, disabled }
+                    }
+                }
+            }
+
+            if show_s3_fields {
+                div { class: "settings-subcard install-compact-subcard",
+                    h3 { "对象存储" }
+                    div { class: "settings-grid",
+                        {render_s3_fields(form, disabled)}
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn LocalStoragePathPicker(form: SettingsFormState, disabled: bool) -> Element {
+    let settings_service = use_settings_service();
+    let auth_store = use_auth_store();
+    let toast_store = use_toast_store();
+
+    let mut local_storage_path = form.local_storage_path;
+    let current_local_storage_path = local_storage_path();
+    let requested_path = if current_local_storage_path.trim().is_empty() {
+        DEFAULT_SETTINGS_STORAGE_BROWSER_PATH.to_string()
+    } else {
+        current_local_storage_path.clone()
+    };
+
+    let mut browser_open = use_signal(|| false);
+    let browser_loading = use_signal(|| false);
+    let browser_error = use_signal(String::new);
+    let browser_current_path = use_signal(|| DEFAULT_SETTINGS_STORAGE_BROWSER_PATH.to_string());
+    let browser_parent_path = use_signal(|| None::<String>);
+    let browser_directories = use_signal(Vec::<StorageDirectoryEntry>::new);
+
+    let open_browser_service = settings_service.clone();
+    let browse_parent_service = settings_service.clone();
+    let open_browser_auth_store = auth_store.clone();
+    let browse_parent_auth_store = auth_store.clone();
+    let open_browser_toast_store = toast_store.clone();
+    let browse_parent_toast_store = toast_store.clone();
+    let directory_entries = browser_directories();
+
+    rsx! {
+        div { class: "settings-field settings-field-full",
+            span { "本地存储路径" }
+            div { class: "install-path-picker",
+                input {
+                    class: "install-path-input",
+                    r#type: "text",
+                    value: "{current_local_storage_path}",
+                    readonly: true,
+                    disabled: true,
+                }
+                button {
+                    class: "btn btn-ghost",
+                    r#type: "button",
+                    disabled: disabled || browser_loading(),
+                    onclick: move |_| {
+                        browser_open.set(true);
+                        load_settings_storage_directories(
+                            open_browser_service.clone(),
+                            open_browser_auth_store.clone(),
+                            open_browser_toast_store.clone(),
+                            StorageBrowserSignals {
+                                loading: browser_loading,
+                                error: browser_error,
+                                current_path: browser_current_path,
+                                parent_path: browser_parent_path,
+                                directories: browser_directories,
+                            },
+                            requested_path.clone(),
+                        );
+                    },
+                    if browser_loading() { "读取中..." } else { "选择文件夹" }
+                }
+            }
+            if browser_open() {
+                Modal {
+                    title: "选择本地存储目录".to_string(),
+                    content_class: "storage-browser-modal-shell".to_string(),
+                    on_close: move |_| browser_open.set(false),
+                        div { class: "install-path-browser",
+                            div { class: "install-path-browser-summary",
+                                div {
+                                    p { class: "install-path-browser-label", "当前目录" }
+                                    code { class: "install-path-browser-current", "{browser_current_path()}" }
+                                }
+                                p { class: "install-path-browser-meta",
+                                    if browser_loading() {
+                                        "正在读取目录..."
+                                    } else {
+                                        "{directory_entries.len()} 个子目录"
+                                    }
+                                }
+                            }
+                            div { class: "install-path-browser-toolbar",
+                                button {
+                                    class: "btn btn-ghost",
+                                    r#type: "button",
+                                    disabled: disabled || browser_loading() || browser_parent_path().is_none(),
+                                    onclick: move |_| {
+                                        if let Some(parent_path) = browser_parent_path() {
+                                        load_settings_storage_directories(
+                                            browse_parent_service.clone(),
+                                            browse_parent_auth_store.clone(),
+                                            browse_parent_toast_store.clone(),
+                                            StorageBrowserSignals {
+                                                loading: browser_loading,
+                                                error: browser_error,
+                                                current_path: browser_current_path,
+                                                parent_path: browser_parent_path,
+                                                directories: browser_directories,
+                                            },
+                                            parent_path,
+                                        );
+                                        }
+                                    },
+                                    "上一级"
+                                }
+                                button {
+                                    class: "btn btn-primary",
+                                    r#type: "button",
+                                    disabled: disabled,
+                                    onclick: move |_| {
+                                        local_storage_path.set(browser_current_path());
+                                        browser_open.set(false);
+                                    },
+                                    "选择当前文件夹"
+                                }
+                            }
+                            div { class: "install-path-browser-panel",
+                                if !browser_error().is_empty() {
+                                    p { class: "install-path-browser-error", "{browser_error()}" }
+                                } else if browser_loading() {
+                                    p { class: "install-path-browser-empty", "正在读取目录..." }
+                                } else if directory_entries.is_empty() {
+                                    p { class: "install-path-browser-empty", "当前目录下没有可继续展开的子目录。" }
+                                } else {
+                                    div { class: "install-path-browser-list",
+                                        {directory_entries.iter().map(|entry| {
+                                            let browse_entry_service = settings_service.clone();
+                                            let browse_entry_auth_store = auth_store.clone();
+                                            let browse_entry_toast_store = toast_store.clone();
+                                            let entry_path = entry.path.clone();
+                                            let entry_name = entry.name.clone();
+                                            rsx! {
+                                                button {
+                                                    key: "{entry_path}",
+                                                    class: "install-path-browser-item",
+                                                    r#type: "button",
+                                                    disabled: disabled || browser_loading(),
+                                                    onclick: move |_| {
+                                                        load_settings_storage_directories(
+                                                            browse_entry_service.clone(),
+                                                            browse_entry_auth_store.clone(),
+                                                            browse_entry_toast_store.clone(),
+                                                            StorageBrowserSignals {
+                                                                loading: browser_loading,
+                                                                error: browser_error,
+                                                                current_path: browser_current_path,
+                                                                parent_path: browser_parent_path,
+                                                                directories: browser_directories,
+                                                            },
+                                                            entry_path.clone(),
+                                                        );
+                                                    },
+                                                    span { class: "install-path-browser-folder" }
+                                                    span { class: "install-path-browser-name", "{entry_name}" }
+                                                }
+                                            }
+                                        })}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+        }
+    }
+}
+
+fn load_settings_storage_directories(
+    settings_service: SettingsService,
+    auth_store: crate::store::AuthStore,
+    toast_store: crate::store::ToastStore,
+    browser_signals: StorageBrowserSignals,
+    requested_path: String,
+) {
+    let requested_path = if requested_path.trim().is_empty() {
+        DEFAULT_SETTINGS_STORAGE_BROWSER_PATH.to_string()
+    } else {
+        requested_path
+    };
+
+    spawn(async move {
+        let StorageBrowserSignals {
+            mut loading,
+            error: mut error_signal,
+            mut current_path,
+            mut parent_path,
+            mut directories,
+        } = browser_signals;
+
+        loading.set(true);
+        error_signal.set(String::new());
+
+        match settings_service
+            .browse_storage_directories(Some(requested_path.as_str()))
+            .await
+        {
+            Ok(response) => {
+                current_path.set(response.current_path);
+                parent_path.set(response.parent_path);
+                directories.set(response.directories);
+            }
+            Err(err) => {
+                if handle_settings_auth_error(&auth_store, &toast_store, &err) {
+                    error_signal.set(settings_auth_expired_message());
+                } else {
+                    error_signal.set(format!("读取目录失败：{}", err));
+                }
+            }
+        }
+
+        loading.set(false);
+    });
+}
+
+#[derive(Clone, Copy)]
+struct StorageBrowserSignals {
+    loading: Signal<bool>,
+    error: Signal<String>,
+    current_path: Signal<String>,
+    parent_path: Signal<Option<String>>,
+    directories: Signal<Vec<StorageDirectoryEntry>>,
+}
+
+pub fn render_s3_fields(form: SettingsFormState, disabled: bool) -> Element {
     let mut s3_endpoint = form.s3_endpoint;
     let mut s3_region = form.s3_region;
     let mut s3_bucket = form.s3_bucket;
@@ -1129,7 +1536,7 @@ fn render_s3_fields(form: SettingsFormState, disabled: bool) -> Element {
 
     rsx! {
         label { class: "settings-field",
-            span { "S3 Endpoint" }
+            span { "服务地址" }
             input {
                 r#type: "text",
                 value: "{s3_endpoint()}",
@@ -1138,7 +1545,7 @@ fn render_s3_fields(form: SettingsFormState, disabled: bool) -> Element {
             }
         }
         label { class: "settings-field",
-            span { "S3 Region" }
+            span { "存储区域" }
             input {
                 r#type: "text",
                 value: "{s3_region()}",
@@ -1147,7 +1554,7 @@ fn render_s3_fields(form: SettingsFormState, disabled: bool) -> Element {
             }
         }
         label { class: "settings-field",
-            span { "S3 Bucket" }
+            span { "存储桶" }
             input {
                 r#type: "text",
                 value: "{s3_bucket()}",
@@ -1156,7 +1563,7 @@ fn render_s3_fields(form: SettingsFormState, disabled: bool) -> Element {
             }
         }
         label { class: "settings-field",
-            span { "S3 Prefix（可选）" }
+            span { "目录前缀（可选）" }
             input {
                 r#type: "text",
                 value: "{s3_prefix()}",
@@ -1165,7 +1572,7 @@ fn render_s3_fields(form: SettingsFormState, disabled: bool) -> Element {
             }
         }
         label { class: "settings-field",
-            span { "S3 Access Key" }
+            span { "访问密钥" }
             input {
                 r#type: "text",
                 value: "{s3_access_key()}",
@@ -1176,9 +1583,9 @@ fn render_s3_fields(form: SettingsFormState, disabled: bool) -> Element {
         label { class: "settings-field",
             span {
                 if s3_secret_key_set() {
-                    "S3 Secret Key（留空表示不修改）"
+                    "私有密钥（留空不修改）"
                 } else {
-                    "S3 Secret Key"
+                    "私有密钥"
                 }
             }
             input {
@@ -1195,7 +1602,7 @@ fn render_s3_fields(form: SettingsFormState, disabled: bool) -> Element {
                 onchange: move |event| s3_force_path_style.set(event.checked()),
                 disabled,
             }
-            span { "S3 Force Path Style（MinIO 通常需要开启）" }
+            span { "使用路径风格（MinIO 通常需要开启）" }
         }
     }
 }
@@ -1234,13 +1641,17 @@ fn render_metric_card(title: &str, value: String) -> Element {
 fn status_label(status: &str) -> &'static str {
     if status.eq_ignore_ascii_case("healthy") {
         "健康"
+    } else if status.eq_ignore_ascii_case("degraded") {
+        "降级"
+    } else if status.eq_ignore_ascii_case("disabled") {
+        "已禁用"
     } else {
         "异常"
     }
 }
 
 fn status_surface_class(status: &str) -> &'static str {
-    if status.eq_ignore_ascii_case("healthy") {
+    if status.eq_ignore_ascii_case("healthy") || status.eq_ignore_ascii_case("disabled") {
         "is-healthy"
     } else {
         "is-unhealthy"
@@ -1265,7 +1676,7 @@ fn role_surface_class(role: &str) -> &'static str {
 
 fn humanize_action(action: &str) -> String {
     action
-        .split(|ch| ch == '_' || ch == '.')
+        .split(['_', '.'])
         .filter(|segment| !segment.trim().is_empty())
         .map(|segment| {
             let mut chars = segment.chars();
@@ -1496,7 +1907,7 @@ fn audit_summary(log: &AuditLog) -> String {
             let storage_backend = audit_detail_str(log.details.as_ref(), "storage_backend")
                 .unwrap_or_else(|| "local".to_string());
             let storage_label = if storage_backend.eq_ignore_ascii_case("s3") {
-                "S3 / MinIO"
+                "对象存储"
             } else {
                 "本地目录"
             };
@@ -1737,14 +2148,14 @@ fn setting_key_label(key: &str) -> String {
         "mail_smtp_password" => "SMTP 密码".to_string(),
         "mail_from_email" => "发件邮箱".to_string(),
         "mail_from_name" => "发件人名称".to_string(),
-        "mail_link_base_url" => "邮件跳转地址".to_string(),
-        "s3_endpoint" => "S3 Endpoint".to_string(),
-        "s3_region" => "S3 Region".to_string(),
-        "s3_bucket" => "S3 Bucket".to_string(),
-        "s3_prefix" => "S3 Prefix".to_string(),
-        "s3_access_key" => "S3 Access Key".to_string(),
-        "s3_secret_key" => "S3 Secret Key".to_string(),
-        "s3_force_path_style" => "S3 Path Style".to_string(),
+        "mail_link_base_url" => "站点访问地址（邮件链接）".to_string(),
+        "s3_endpoint" => "对象存储服务地址".to_string(),
+        "s3_region" => "对象存储区域".to_string(),
+        "s3_bucket" => "对象存储桶".to_string(),
+        "s3_prefix" => "对象存储目录前缀".to_string(),
+        "s3_access_key" => "对象存储访问密钥".to_string(),
+        "s3_secret_key" => "对象存储私有密钥".to_string(),
+        "s3_force_path_style" => "对象存储路径风格".to_string(),
         _ => key.to_string(),
     }
 }
@@ -1814,20 +2225,17 @@ fn format_storage_bytes_u64(bytes: u64) -> String {
     }
 }
 
-fn backup_database_kind_label(filename: &str) -> &'static str {
-    if filename.ends_with(".sqlite3") {
-        "SQLite"
-    } else if filename.ends_with(".mysql.sql") {
-        "MySQL / MariaDB"
-    } else if filename.ends_with(".sql") {
-        "PostgreSQL"
-    } else {
-        "Backup"
+fn backup_kind_label(semantics: &BackupSemantics) -> &'static str {
+    match semantics.backup_kind.as_str() {
+        "sqlite-database-snapshot" => "SQLite 数据库快照",
+        "mysql-logical-dump" => "MySQL / MariaDB 逻辑导出",
+        "postgresql-logical-dump" => "PostgreSQL 逻辑导出",
+        _ => restore_database_kind_label(&semantics.database_family),
     }
 }
 
-fn backup_supports_restore(filename: &str) -> bool {
-    filename.ends_with(".sqlite3") || filename.ends_with(".mysql.sql")
+fn backup_supports_restore(semantics: &BackupSemantics) -> bool {
+    semantics.ui_restore_supported
 }
 
 fn restore_database_kind_label(kind: &str) -> &'static str {

@@ -14,8 +14,6 @@ pub enum ConfigError {
     InvalidMySqlDatabaseUrl,
     #[error("SQLite 数据库地址必须是 sqlite: 前缀或文件路径")]
     InvalidSqliteDatabaseUrl,
-    #[error("Redis URL 不能为空")]
-    RedisUrlEmpty,
     #[error("存储路径不能为空")]
     StoragePathEmpty,
     #[error("允许的扩展名列表不能为空")]
@@ -61,20 +59,18 @@ pub enum ConfigError {
 }
 
 pub(crate) fn default_max_connections() -> u32 {
-    std::env::var("DATABASE_MAX_CONNECTIONS")
-        .ok()
-        .and_then(|val| val.parse::<u32>().ok())
-        .map(|num| num.max(1))
-        .unwrap_or_else(|| std::cmp::max(num_cpus::get_physical() * 4, 10) as u32)
+    std::cmp::max(num_cpus::get_physical() * 4, 10) as u32
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub server: ServerConfig,
     pub database: DatabaseConfig,
-    pub redis: RedisConfig,
+    #[serde(alias = "redis")]
+    pub cache_backend: CacheBackendConfig,
     pub storage: StorageConfig,
-    pub cache: CacheConfig,
+    #[serde(alias = "cache")]
+    pub cache_policy: CachePolicyConfig,
     pub rate_limit: RateLimitConfig,
     pub cleanup: CleanupConfig,
     pub cookie: CookieConfig,
@@ -106,20 +102,15 @@ pub struct DatabaseConfig {
     pub max_connections: u32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum DatabaseKind {
     #[serde(rename = "postgresql")]
+    #[default]
     Postgres,
     #[serde(rename = "mysql")]
     MySql,
     #[serde(rename = "sqlite")]
     Sqlite,
-}
-
-impl Default for DatabaseKind {
-    fn default() -> Self {
-        Self::Postgres
-    }
 }
 
 impl DatabaseKind {
@@ -176,8 +167,8 @@ pub fn normalize_mysql_compatible_url(value: &str) -> String {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RedisConfig {
-    pub url: String,
+pub struct CacheBackendConfig {
+    pub url: Option<String>,
     pub key_prefix: String,
     pub ttl: u64,
 }
@@ -201,7 +192,7 @@ pub(crate) fn default_file_check_concurrent_threshold() -> usize {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CacheConfig {
+pub struct CachePolicyConfig {
     pub list_ttl: u64,
     pub detail_ttl: u64,
     pub categories_ttl: u64,
@@ -254,4 +245,33 @@ pub struct MailConfig {
     pub from_email: String,
     pub from_name: String,
     pub reset_link_base_url: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::{Value, to_value};
+
+    #[test]
+    fn config_deserializes_legacy_cache_field_names() {
+        let mut value = to_value(Config::default()).expect("default config should serialize");
+        let object = value
+            .as_object_mut()
+            .expect("default config should serialize to object");
+
+        let cache_backend = object
+            .remove("cache_backend")
+            .expect("cache_backend should exist");
+        let cache_policy = object
+            .remove("cache_policy")
+            .expect("cache_policy should exist");
+        object.insert("redis".to_string(), cache_backend);
+        object.insert("cache".to_string(), cache_policy);
+
+        let parsed: Config =
+            serde_json::from_value(Value::Object(object.clone())).expect("legacy aliases work");
+
+        assert_eq!(parsed.cache_backend.key_prefix, "img:");
+        assert_eq!(parsed.cache_policy.list_ttl, 300);
+    }
 }

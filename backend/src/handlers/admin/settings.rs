@@ -3,6 +3,7 @@ use crate::audit::log_audit_db;
 use crate::db::AppState;
 use crate::db::get_setting_value;
 use crate::error::AppError;
+use crate::handlers::storage_browser::{BrowseStorageDirectoriesQuery, browse_storage_directories};
 use crate::middleware::AdminUser;
 use crate::models::{
     AdminSettingsConfig, Setting, UpdateAdminSettingsConfigRequest, UpdateSettingRequest,
@@ -17,7 +18,7 @@ use crate::runtime_settings::{
 };
 use axum::{
     Json,
-    extract::{Path, State},
+    extract::{Path, Query, State},
 };
 
 pub async fn get_settings_admin(
@@ -37,6 +38,15 @@ pub async fn get_admin_settings_config(
     Ok(Json(settings.to_admin_config(
         state.storage_manager.restart_required(&settings),
     )))
+}
+
+pub async fn browse_admin_storage_directories(
+    Query(query): Query<BrowseStorageDirectoriesQuery>,
+    _admin_user: AdminUser,
+) -> Result<Json<crate::models::StorageDirectoryBrowseResponse>, AppError> {
+    Ok(Json(
+        browse_storage_directories(query.path.as_deref()).await?,
+    ))
 }
 
 pub async fn update_admin_settings_config(

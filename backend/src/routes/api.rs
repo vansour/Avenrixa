@@ -2,25 +2,46 @@ use crate::db::AppState;
 use crate::handlers::{admin, auth, bootstrap, images, install};
 use axum::{Router, routing};
 
+#[cfg(test)]
 pub fn create_api_routes() -> Router<AppState> {
     Router::new()
-        .merge(public_routes())
+        .merge(boot_public_routes())
+        .merge(throttled_public_routes())
         .merge(protected_routes())
         .merge(admin_routes())
 }
 
-fn public_routes() -> Router<AppState> {
+pub fn create_boot_public_routes() -> Router<AppState> {
+    boot_public_routes()
+}
+
+pub fn create_throttled_api_routes() -> Router<AppState> {
+    Router::new()
+        .merge(throttled_public_routes())
+        .merge(protected_routes())
+        .merge(admin_routes())
+}
+
+fn boot_public_routes() -> Router<AppState> {
     Router::new()
         .route("/health", routing::get(admin::health_check))
         .route(
             "/bootstrap/status",
             routing::get(bootstrap::get_runtime_bootstrap_status),
         )
+        .route("/install/status", routing::get(install::get_install_status))
+}
+
+fn throttled_public_routes() -> Router<AppState> {
+    Router::new()
         .route(
             "/bootstrap/database-config",
             routing::put(bootstrap::reject_runtime_database_config_update),
         )
-        .route("/install/status", routing::get(install::get_install_status))
+        .route(
+            "/install/storage-directories",
+            routing::get(install::browse_install_storage_directories),
+        )
         .route(
             "/install/bootstrap",
             routing::post(install::bootstrap_installation),
@@ -78,6 +99,10 @@ fn admin_routes() -> Router<AppState> {
         .route(
             "/settings/config",
             routing::put(admin::update_admin_settings_config),
+        )
+        .route(
+            "/settings/storage-directories",
+            routing::get(admin::browse_admin_storage_directories),
         )
         .route("/settings", routing::get(admin::get_settings_admin))
         .route("/settings/{key}", routing::put(admin::update_setting))

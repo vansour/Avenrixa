@@ -50,13 +50,28 @@ pub fn NavBar(site_name: String) -> Element {
                 if is_authenticated {
                     div { class: "{nav_panel_class}",
                         div { class: "navbar-tabs",
-                            for page in AUTH_NAV_PAGES {
-                                NavTabItem {
-                                    page,
-                                    current_page,
-                                    close_menu: is_mobile_menu_open,
+                            {AUTH_NAV_PAGES.iter().copied().map(|page| {
+                                let navigation_store = navigation_store.clone();
+                                let mut close_menu = is_mobile_menu_open;
+                                let class_name = if current_page == page {
+                                    "nav-tab active"
+                                } else {
+                                    "nav-tab"
+                                };
+
+                                rsx! {
+                                    button {
+                                        key: "{page.label()}",
+                                        r#type: "button",
+                                        class: "{class_name}",
+                                        onclick: move |_| {
+                                            close_menu.set(false);
+                                            navigation_store.navigate(page);
+                                        },
+                                        strong { class: "nav-tab-title", "{page.label()}" }
+                                    }
                                 }
-                            }
+                            })}
                         }
                     }
 
@@ -79,32 +94,6 @@ pub fn NavBar(site_name: String) -> Element {
                     }
                 }
             }
-        }
-    }
-}
-
-#[component]
-fn NavTabItem(
-    page: DashboardPage,
-    current_page: DashboardPage,
-    close_menu: Signal<bool>,
-) -> Element {
-    let navigation_store = use_navigation_store();
-    let class_name = if current_page == page {
-        "nav-tab active"
-    } else {
-        "nav-tab"
-    };
-
-    rsx! {
-        button {
-            r#type: "button",
-            class: "{class_name}",
-            onclick: move |_| {
-                close_menu.set(false);
-                navigation_store.navigate(page);
-            },
-            strong { class: "nav-tab-title", "{page.label()}" }
         }
     }
 }

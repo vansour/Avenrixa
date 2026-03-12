@@ -1,16 +1,16 @@
 use crate::db::AppState;
 use crate::domain::auth::Claims;
-use crate::domain::auth::{auth_valid_after_key, user_token_version_key};
+use crate::domain::auth::state_repository::{AuthStateRepository, hash_token};
 use axum::http::StatusCode;
-use redis::AsyncCommands;
+use axum_extra::extract::cookie::CookieJar;
 use uuid::Uuid;
 
-fn token_version_is_revoked(claims: &Claims, current_version: Option<u64>) -> bool {
-    current_version.is_some_and(|version| claims.token_version < version)
+fn token_version_mismatched(claims: &Claims, current_version: u64) -> bool {
+    claims.token_version != current_version
 }
 
-fn token_issued_before_cutoff(claims: &Claims, valid_after: Option<i64>) -> bool {
-    crate::sqlite_restore::token_issued_before_cutoff(claims.iat, valid_after)
+fn session_epoch_mismatched(claims: &Claims, current_epoch: u64) -> bool {
+    claims.session_epoch != current_epoch
 }
 
 /// 认证用户信息提取器（只有一个管理员）
@@ -37,24 +37,20 @@ impl axum::extract::FromRequestParts<AppState> for AuthUser {
             return Err(StatusCode::SERVICE_UNAVAILABLE);
         }
 
-        // 优先从 Cookie 获取 token
-        let token = if let Some(cookie_header) = parts.headers.get("cookie") {
-            // 解析 Cookie header 查找 auth_token
-            cookie_header
-                .to_str()
-                .map_err(|_| StatusCode::UNAUTHORIZED)?
-                .split(';')
-                .find_map(|cookie| cookie.trim().strip_prefix("auth_token="))
-                .ok_or(StatusCode::UNAUTHORIZED)?
-        } else {
-            // Cookie 中未找到，尝试从 Authorization header 获取
-            parts
-                .headers
-                .get("authorization")
-                .and_then(|h| h.to_str().ok())
-                .and_then(|auth| auth.strip_prefix("Bearer "))
-                .ok_or(StatusCode::UNAUTHORIZED)?
-        };
+        let cookie_jar = CookieJar::from_headers(&parts.headers);
+
+        // 优先从 Cookie 获取 token，缺失时再回退到 Authorization header
+        let token = cookie_jar
+            .get("auth_token")
+            .map(|cookie| cookie.value())
+            .or_else(|| {
+                parts
+                    .headers
+                    .get("authorization")
+                    .and_then(|header| header.to_str().ok())
+                    .and_then(|auth| auth.strip_prefix("Bearer "))
+            })
+            .ok_or(StatusCode::UNAUTHORIZED)?;
 
         // 验证 JWT 令牌
         let claims = state
@@ -68,10 +64,9 @@ impl axum::extract::FromRequestParts<AppState> for AuthUser {
         }
 
         // 检查令牌是否已被撤销
-        let mut redis = state.redis.clone();
-        let revoked_key = format!("token_revoked:{}", token);
-        let is_revoked: bool = redis
-            .exists(&revoked_key)
+        let is_revoked = state
+            .auth_state_repository
+            .is_token_hash_revoked(&hash_token(token))
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -79,21 +74,18 @@ impl axum::extract::FromRequestParts<AppState> for AuthUser {
             return Err(StatusCode::UNAUTHORIZED);
         }
 
-        // 版本化会话控制: 改密后提升版本，所有旧 token 自动失效
-        let current_token_version: Option<u64> = redis
-            .get(user_token_version_key(claims.sub))
+        let snapshot = state
+            .auth_state_repository
+            .load_auth_snapshot(claims.sub)
             .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+            .ok_or(StatusCode::UNAUTHORIZED)?;
 
-        if token_version_is_revoked(&claims, current_token_version) {
+        if token_version_mismatched(&claims, snapshot.user_token_version) {
             return Err(StatusCode::UNAUTHORIZED);
         }
 
-        let auth_valid_after: Option<i64> = redis
-            .get(auth_valid_after_key())
-            .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        if token_issued_before_cutoff(&claims, auth_valid_after) {
+        if session_epoch_mismatched(&claims, snapshot.session_epoch) {
             return Err(StatusCode::UNAUTHORIZED);
         }
 
@@ -110,12 +102,13 @@ impl axum::extract::FromRequestParts<AppState> for AuthUser {
 mod tests {
     use super::*;
 
-    fn sample_claims(token_version: u64) -> Claims {
+    fn sample_claims(token_version: u64, session_epoch: u64) -> Claims {
         Claims {
             sub: Uuid::new_v4(),
             email: "tester@example.com".to_string(),
             role: "user".to_string(),
             token_version,
+            session_epoch,
             exp: 0,
             iat: 0,
         }
@@ -123,27 +116,27 @@ mod tests {
 
     #[test]
     fn token_version_matches_when_no_server_version() {
-        assert!(!token_version_is_revoked(&sample_claims(0), None));
+        assert!(!token_version_mismatched(&sample_claims(0, 0), 0));
     }
 
     #[test]
     fn token_version_matches_current_server_version() {
-        assert!(!token_version_is_revoked(&sample_claims(2), Some(2)));
+        assert!(!token_version_mismatched(&sample_claims(2, 0), 2));
     }
 
     #[test]
     fn token_version_rejects_outdated_token() {
-        assert!(token_version_is_revoked(&sample_claims(1), Some(2)));
+        assert!(token_version_mismatched(&sample_claims(1, 0), 2));
     }
 
     #[test]
-    fn cutoff_rejects_older_token() {
-        assert!(token_issued_before_cutoff(&sample_claims(1), Some(2)));
+    fn session_epoch_matches_current_value() {
+        assert!(!session_epoch_mismatched(&sample_claims(0, 2), 2));
     }
 
     #[test]
-    fn cutoff_allows_same_second_token() {
-        assert!(!token_issued_before_cutoff(&sample_claims(1), Some(1)));
+    fn session_epoch_rejects_mismatched_token() {
+        assert!(session_epoch_mismatched(&sample_claims(0, 1), 2));
     }
 }
 

@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT_DIR}"
 
 COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-vansour-image-mysql-ops-drill}"
-COMPOSE_FILE_PATHS="${COMPOSE_FILE_PATHS:-compose.mysql.yml}"
+COMPOSE_VARIANT="${COMPOSE_VARIANT:-mysql}"
 APP_HOST_PORT="${APP_HOST_PORT:-8080}"
 PRESERVE_STACK_ON_FAILURE="${PRESERVE_STACK_ON_FAILURE:-0}"
 DRILL_ADMIN_EMAIL="${DRILL_ADMIN_EMAIL:-admin@example.com}"
@@ -17,32 +17,14 @@ MYSQL_DATABASE_URL="${MYSQL_DATABASE_URL:-}"
 DRILL_MARKER_PATH="${DRILL_MARKER_PATH:-}"
 ARTIFACT_DIR="${ARTIFACT_DIR:-}"
 
-compose_args=()
-read -r -a compose_files <<< "${COMPOSE_FILE_PATHS}"
-for compose_file in "${compose_files[@]}"; do
-  compose_args+=("-f" "${compose_file}")
-done
+source "${ROOT_DIR}/scripts/compose-runtime.sh"
 
 uses_mariadb_compose_file() {
-  local compose_file
-
-  for compose_file in "${compose_files[@]}"; do
-    case "$(basename "${compose_file}")" in
-      compose.mariadb.yml|compose.mariadb.ops.yml)
-        return 0
-        ;;
-    esac
-  done
-
-  return 1
+  compose_variant_uses_mariadb
 }
 
 default_mysql_database_url() {
-  if uses_mariadb_compose_file; then
-    printf 'mariadb://user:pass@mysql:3306/image'
-  else
-    printf 'mysql://user:pass@mysql:3306/image'
-  fi
+  compose_variant_default_database_url
 }
 
 default_data_dir() {
@@ -71,10 +53,6 @@ fi
 if [[ -z "${ARTIFACT_DIR}" ]]; then
   ARTIFACT_DIR="$(default_artifact_dir)"
 fi
-
-compose() {
-  docker compose -p "${COMPOSE_PROJECT_NAME}" "${compose_args[@]}" "$@"
-}
 
 api_base="http://127.0.0.1:${APP_HOST_PORT}/api/v1"
 health_url="http://127.0.0.1:${APP_HOST_PORT}/health"
@@ -178,14 +156,14 @@ configure_mysql_runtime() {
       exit 1
     fi
 
-    log_step "Writing MySQL/MariaDB bootstrap config"
+    log_step "No DATABASE_URL preset detected, writing MySQL/MariaDB bootstrap fallback config"
     curl -fsS \
       -X PUT "${api_base}/bootstrap/database-config" \
       -H 'Content-Type: application/json' \
       -d "$(jq -n \
         --arg database_kind "mysql" \
         --arg database_url "${MYSQL_DATABASE_URL}" \
-        '{database_kind: $database_kind, database_url: $database_url, database_max_connections: 5}')" \
+        '{database_kind: $database_kind, database_url: $database_url}')" \
       >/dev/null
 
     log_step "Restarting app to enter runtime mode"
@@ -253,7 +231,7 @@ install_mysql_app() {
 }
 
 mysql_site_name() {
-  docker compose -p "${COMPOSE_PROJECT_NAME}" "${compose_args[@]}" exec -T mysql sh -lc \
+  compose exec -T mysql sh -lc \
     '
 set -eu
 client_bin="$(command -v mysql || command -v mariadb || true)"
@@ -265,14 +243,14 @@ user="${MYSQL_USER:-${MARIADB_USER:-}}"
 password="${MYSQL_PASSWORD:-${MARIADB_PASSWORD:-}}"
 database="${MYSQL_DATABASE:-${MARIADB_DATABASE:-}}"
 export MYSQL_PWD="${password}"
-exec "${client_bin}" --skip-ssl -h127.0.0.1 -u"${user}" "${database}" --batch --skip-column-names \
+exec "${client_bin}" -h127.0.0.1 -u"${user}" "${database}" --batch --skip-column-names \
   -e "SELECT value FROM settings WHERE settings.\`key\` = '\''site_name'\'';"
 '
 }
 
 set_mysql_site_name() {
   local next_value="$1"
-  docker compose -p "${COMPOSE_PROJECT_NAME}" "${compose_args[@]}" exec -T mysql sh -lc \
+  compose exec -T mysql sh -lc \
     "
 set -eu
 client_bin=\"\$(command -v mysql || command -v mariadb || true)\"
@@ -284,13 +262,15 @@ user=\"\${MYSQL_USER:-\${MARIADB_USER:-}}\"
 password=\"\${MYSQL_PASSWORD:-\${MARIADB_PASSWORD:-}}\"
 database=\"\${MYSQL_DATABASE:-\${MARIADB_DATABASE:-}}\"
 export MYSQL_PWD=\"\${password}\"
-exec \"\${client_bin}\" --skip-ssl -h127.0.0.1 -u\"\${user}\" \"\${database}\" --batch --skip-column-names \
+exec \"\${client_bin}\" -h127.0.0.1 -u\"\${user}\" \"\${database}\" --batch --skip-column-names \
   -e \"UPDATE settings SET value = '${next_value}' WHERE settings.\\\`key\\\` = 'site_name';\"
 "
 }
 
 run_drill() {
-  local manifest_path
+  local physical_manifest_path
+  local expected_physical_tool
+  local physical_backup_dir
 
   prepare_fixture
 
@@ -308,15 +288,35 @@ run_drill() {
   printf 'baseline-marker\n' > "${DRILL_MARKER_PATH}"
   expect_eq "$(mysql_site_name)" "${DRILL_SITE_NAME_BASELINE}" "baseline site name should be installed value"
 
-  log_step "Creating MySQL/MariaDB ops backup"
+  log_step "Creating MySQL/MariaDB physical backup base"
   COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME}" \
-  COMPOSE_FILE_PATHS="${COMPOSE_FILE_PATHS}" \
+  COMPOSE_VARIANT="${COMPOSE_VARIANT}" \
   ARTIFACT_DIR="${ARTIFACT_DIR}" \
+  MYSQL_BACKUP_MODE=physical \
   ./scripts/mysql-ops-backup.sh
 
-  manifest_path="${DATA_DIR}/backup/mysql_last_backup_manifest.json"
-  if [[ ! -f "${manifest_path}" ]]; then
-    echo "Drill manifest not found: ${manifest_path}" >&2
+  physical_manifest_path="${DATA_DIR}/backup/mysql_last_physical_backup_manifest.json"
+  if [[ ! -f "${physical_manifest_path}" ]]; then
+    echo "Physical backup manifest not found: ${physical_manifest_path}" >&2
+    exit 1
+  fi
+  if uses_mariadb_compose_file; then
+    expected_physical_tool="mariadb-backup"
+  else
+    expected_physical_tool="xtrabackup"
+  fi
+  expect_eq "$(jq -r '.backup_method' "${physical_manifest_path}")" "physical" "physical manifest should report physical backup method"
+  expect_eq "$(jq -r '.physical_backup.prepared' "${physical_manifest_path}")" "true" "physical manifest should report prepared backup"
+  expect_eq "$(jq -r '.physical_backup.tool_family' "${physical_manifest_path}")" "${expected_physical_tool}" "physical manifest should report the expected backup tool"
+
+  physical_backup_dir="$(jq -r '.physical_backup.path' "${physical_manifest_path}")"
+  if [[ ! -d "${physical_backup_dir}" ]]; then
+    echo "Physical backup directory not found: ${physical_backup_dir}" >&2
+    exit 1
+  fi
+
+  if [[ "$(jq -r '.physical_backup.metadata.xtrabackup_binlog_info_raw // empty' "${physical_manifest_path}")" == "" ]]; then
+    echo "Physical backup manifest is missing xtrabackup_binlog_info_raw metadata" >&2
     exit 1
   fi
 
@@ -326,17 +326,18 @@ run_drill() {
   expect_eq "$(mysql_site_name)" "${DRILL_SITE_NAME_MUTATED}" "mutated site name should be visible before restore"
   expect_eq "$(cat "${DRILL_MARKER_PATH}")" "mutated-marker" "marker should be mutated before restore"
 
-  log_step "Restoring from manifest"
+  log_step "Restoring from physical manifest"
   COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME}" \
-  COMPOSE_FILE_PATHS="${COMPOSE_FILE_PATHS}" \
+  COMPOSE_VARIANT="${COMPOSE_VARIANT}" \
   ARTIFACT_DIR="${ARTIFACT_DIR}" \
-  MYSQL_RESTORE_MANIFEST_PATH="${manifest_path}" \
+  MYSQL_RESTORE_MANIFEST_PATH="${physical_manifest_path}" \
   ./scripts/mysql-ops-restore.sh
 
   log_step "Validating restored state"
   expect_eq "$(mysql_site_name)" "${DRILL_SITE_NAME_BASELINE}" "site name should return to baseline after restore"
   expect_eq "$(cat "${DRILL_MARKER_PATH}")" "baseline-marker" "marker file should return to baseline after restore"
   expect_eq "$(jq -r '.status' "${DATA_DIR}/backup/mysql_last_restore_result.json")" "completed" "restore result should be completed"
+  expect_eq "$(jq -r '.restore_method' "${DATA_DIR}/backup/mysql_last_restore_result.json")" "physical" "restore result should report physical restore method"
   wait_for_url "${health_url}" 180
 
   echo "MySQL/MariaDB ops drill passed"

@@ -1,4 +1,5 @@
 mod admin;
+mod migrations;
 mod pool;
 mod schema;
 mod state;

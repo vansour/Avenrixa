@@ -13,8 +13,12 @@ done
 
 APP_HOST_PORT="8080"
 MAILPIT_HTTP_PORT="18025"
+MAILPIT_SMTP_PORT="11025"
 COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-vansour-image-sqlite-e2e}"
+COMPOSE_VARIANT="${COMPOSE_VARIANT:-sqlite}"
+COMPOSE_ENABLE_MAILPIT="${COMPOSE_ENABLE_MAILPIT:-1}"
 PRESERVE_STACK_ON_FAILURE="${PRESERVE_STACK_ON_FAILURE:-0}"
+CACHE_MODE="${CACHE_MODE:-redis8}"
 ADMIN_EMAIL="${ADMIN_EMAIL:-admin@example.com}"
 ADMIN_PASSWORD="${ADMIN_PASSWORD:-Password123456!}"
 USER_EMAIL="${USER_EMAIL:-user@example.com}"
@@ -33,6 +37,8 @@ if [[ -z "${DATA_DIR:-}" ]]; then
 fi
 export DATA_DIR
 
+source "${ROOT_DIR}/scripts/compose-runtime.sh"
+
 TMP_ROOT="$(mktemp -d /tmp/vansour-sqlite-e2e-work-XXXXXX)"
 ADMIN_COOKIE_JAR="${TMP_ROOT}/admin.cookies.txt"
 USER_COOKIE_JAR="${TMP_ROOT}/user.cookies.txt"
@@ -40,12 +46,37 @@ USER_COOKIE_JAR_NEW="${TMP_ROOT}/user-new.cookies.txt"
 TINY_PNG_PATH="${TMP_ROOT}/tiny.png"
 SCRIPT_FAILED=0
 
-compose() {
-  docker compose \
-    -p "${COMPOSE_PROJECT_NAME}" \
-    -f compose.sqlite.yml \
-    -f compose.sqlite.mailpit.yml \
-    "$@"
+start_stack() {
+  compose up -d --build
+}
+
+expected_cache_component_status() {
+  case "${CACHE_MODE}" in
+    redis8|dragonfly)
+      printf 'healthy'
+      ;;
+    none)
+      printf 'disabled'
+      ;;
+  esac
+}
+
+assert_cache_health_component() {
+  local health_payload
+  local expected_cache_status
+  local actual_cache_status
+  local overall_status
+
+  health_payload="$(curl -fsS "${health_url}")"
+  expected_cache_status="$(expected_cache_component_status)"
+  actual_cache_status="$(printf '%s' "${health_payload}" | jq -r '.cache.status')"
+  overall_status="$(printf '%s' "${health_payload}" | jq -r '.status')"
+
+  expect_eq "${overall_status}" "healthy" "overall health status should remain healthy"
+  expect_eq \
+    "${actual_cache_status}" \
+    "${expected_cache_status}" \
+    "cache component status should match CACHE_MODE=${CACHE_MODE}"
 }
 
 on_error() {
@@ -169,30 +200,35 @@ printf '%s' 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAAACklEQVR4nGNgAAAAAgA
   | base64 -d > "${TINY_PNG_PATH}"
 
 log_step "Starting SQLite + Mailpit stack"
-compose up -d --build
+echo "Cache mode: ${CACHE_MODE}"
+start_stack
 wait_for_url "${health_url}" 180
+assert_cache_health_component
 wait_for_url "${mailpit_url}/info" 120
 
-log_step "Writing SQLite bootstrap config"
 BOOTSTRAP_STATUS="$(
   curl -fsS "${api_base}/bootstrap/status"
 )"
-expect_eq \
-  "$(printf '%s' "${BOOTSTRAP_STATUS}" | jq -r '.database_configured')" \
-  "false" \
-  "bootstrap should start without configured database"
+BOOTSTRAP_MODE="$(printf '%s' "${BOOTSTRAP_STATUS}" | jq -r '.mode')"
 
-curl -fsS \
-  -X PUT "${api_base}/bootstrap/database-config" \
-  -H 'Content-Type: application/json' \
-  -d "$(jq -n \
-    --arg database_kind "sqlite" \
-    --arg database_url "${SQLITE_DATABASE_URL}" \
-    '{database_kind: $database_kind, database_url: $database_url, database_max_connections: 5}')" \
-  >/dev/null
+if [[ "${BOOTSTRAP_MODE}" == "bootstrap" ]]; then
+  log_step "No DATABASE_URL preset detected, writing SQLite bootstrap fallback config"
+  curl -fsS \
+    -X PUT "${api_base}/bootstrap/database-config" \
+    -H 'Content-Type: application/json' \
+    -d "$(jq -n \
+      --arg database_kind "sqlite" \
+      --arg database_url "${SQLITE_DATABASE_URL}" \
+      '{database_kind: $database_kind, database_url: $database_url}')" \
+    >/dev/null
 
-compose restart app >/dev/null
+  compose restart app >/dev/null
+else
+  log_step "SQLite runtime already preconfigured by compose"
+fi
+
 wait_for_url "${api_base}/install/status" 180
+assert_cache_health_component
 
 log_step "Completing installation wizard with runtime mail config"
 INSTALL_PAYLOAD="$(

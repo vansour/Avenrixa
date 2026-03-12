@@ -12,6 +12,7 @@ impl AuthService {
         email: &str,
         role: &str,
         token_version: u64,
+        session_epoch: u64,
     ) -> anyhow::Result<String> {
         self.encode_claims(build_claims(
             user_id,
@@ -19,6 +20,7 @@ impl AuthService {
             role,
             self.session_ttl_seconds,
             token_version,
+            session_epoch,
         ))
     }
 
@@ -44,6 +46,7 @@ impl AuthService {
         email: &str,
         role: &str,
         token_version: u64,
+        session_epoch: u64,
     ) -> anyhow::Result<String> {
         self.encode_claims(build_claims(
             user_id,
@@ -51,6 +54,7 @@ impl AuthService {
             role,
             Self::ACCESS_TOKEN_TTL_SECONDS,
             token_version,
+            session_epoch,
         ))
     }
 
@@ -58,6 +62,7 @@ impl AuthService {
         &self,
         user_id: Uuid,
         token_version: u64,
+        session_epoch: u64,
     ) -> anyhow::Result<String> {
         self.encode_claims(build_claims(
             user_id,
@@ -65,6 +70,7 @@ impl AuthService {
             "refresh",
             self.session_ttl_seconds,
             token_version,
+            session_epoch,
         ))
     }
 
@@ -97,6 +103,7 @@ fn build_claims(
     role: &str,
     ttl_seconds: u64,
     token_version: u64,
+    session_epoch: u64,
 ) -> Claims {
     let now = Utc::now();
     let ttl = Duration::seconds(ttl_seconds.min(i64::MAX as u64) as i64);
@@ -107,6 +114,7 @@ fn build_claims(
         email: email.to_string(),
         role: role.to_string(),
         token_version,
+        session_epoch,
         exp: exp.timestamp(),
         iat: now.timestamp(),
     }

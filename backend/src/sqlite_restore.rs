@@ -4,7 +4,6 @@ use std::time::Duration;
 
 use anyhow::Context;
 use chrono::Utc;
-use redis::AsyncCommands;
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
@@ -22,7 +21,7 @@ use crate::db::{ADMIN_USER_ID, DatabasePool, INSTALL_STATE_SETTING_KEY};
 use crate::models::{
     BackupFileSummary, BackupObjectRollbackAnchor, BackupRestorePrecheckResponse,
     BackupRestoreResult, BackupRestoreScheduleResponse, BackupRestoreStatusResponse,
-    BackupRestoreStorageSummary, PendingBackupRestore,
+    BackupRestoreStorageSummary, BackupSemantics, PendingBackupRestore,
 };
 use crate::runtime_settings::{RuntimeSettings, StorageSettingsSnapshot, load_from_db};
 
@@ -30,7 +29,6 @@ const BACKUP_DIR: &str = "/data/backup";
 const DEFAULT_PENDING_RESTORE_PATH: &str = "/data/backup/pending_restore.json";
 const DEFAULT_LAST_RESTORE_RESULT_PATH: &str = "/data/backup/last_restore_result.json";
 const REQUIRED_BACKUP_TABLES: [&str; 3] = ["users", "settings", "images"];
-const AUTH_VALID_AFTER_KEY: &str = "auth_valid_after";
 
 #[derive(Debug)]
 pub enum StartupRestoreOutcome {
@@ -63,14 +61,6 @@ struct MySqlDumpTarget {
     database: String,
 }
 
-pub fn auth_valid_after_key() -> &'static str {
-    AUTH_VALID_AFTER_KEY
-}
-
-pub fn token_issued_before_cutoff(iat: i64, valid_after: Option<i64>) -> bool {
-    valid_after.is_some_and(|cutoff| iat < cutoff)
-}
-
 pub async fn load_restore_status() -> anyhow::Result<BackupRestoreStatusResponse> {
     Ok(BackupRestoreStatusResponse {
         pending: load_pending_restore_plan().await?,
@@ -85,6 +75,7 @@ pub async fn precheck_restore(
 ) -> Result<BackupRestorePrecheckResponse, crate::error::AppError> {
     let backup = backup_file_summary(filename).await?;
     let backup_database_kind = backup_database_kind_from_filename(filename);
+    let mut semantics = backup.semantics.clone();
     let mut blockers = Vec::new();
     let mut warnings = vec![
         "恢复仅回滚数据库元数据，不会自动回滚本地图片目录或对象存储内容。".to_string(),
@@ -145,6 +136,7 @@ pub async fn precheck_restore(
 
             match load_backup_manifest(filename).await {
                 Ok(Some(manifest)) => {
+                    semantics = manifest.semantics;
                     object_rollback_anchor = Some(manifest.object_rollback_anchor);
                 }
                 Ok(None) => warnings.push(
@@ -172,6 +164,7 @@ pub async fn precheck_restore(
 
             match load_backup_manifest(filename).await {
                 Ok(Some(manifest)) => {
+                    semantics = manifest.semantics.clone();
                     if !manifest.database_kind.eq_ignore_ascii_case("mysql") {
                         blockers
                             .push("备份 manifest 的数据库类型不是 MySQL / MariaDB。".to_string());
@@ -210,7 +203,7 @@ pub async fn precheck_restore(
             }
 
             warnings.push(
-                "MySQL / MariaDB 恢复会在启动前先导出 rollback_before_restore_*.mysql.sql，再清空当前 schema 并重新导入。"
+                "MySQL / MariaDB 运维恢复通常会先导出 rollback_before_restore_*.mysql.sql，再清空当前 schema 并重新导入。"
                     .to_string(),
             );
         }
@@ -222,6 +215,10 @@ pub async fn precheck_restore(
 
     append_object_rollback_anchor_warnings(object_rollback_anchor.as_ref(), &mut warnings);
 
+    if !semantics.ui_restore_supported {
+        blockers.push("当前这类备份不支持页面恢复，只支持下载或运维侧恢复。".to_string());
+    }
+
     Ok(BackupRestorePrecheckResponse {
         eligible: blockers.is_empty(),
         filename: backup.filename,
@@ -232,6 +229,7 @@ pub async fn precheck_restore(
             .map(DatabaseKind::as_str)
             .unwrap_or("unknown")
             .to_string(),
+        semantics,
         integrity_check_passed,
         app_installed,
         has_admin,
@@ -260,7 +258,7 @@ pub async fn schedule_restore(
 
     if let Some(existing) = load_pending_restore_plan()
         .await
-        .map_err(|error| crate::error::AppError::Internal(error.into()))?
+        .map_err(crate::error::AppError::Internal)?
     {
         if existing.filename == filename {
             return Ok(BackupRestoreScheduleResponse {
@@ -281,6 +279,7 @@ pub async fn schedule_restore(
     let pending = PendingBackupRestore {
         filename: filename.to_string(),
         database_kind: precheck.backup_database_kind.clone(),
+        semantics: precheck.semantics.clone(),
         requested_by_user_id,
         requested_by_email: requested_by_email.to_string(),
         scheduled_at: Utc::now(),
@@ -290,7 +289,7 @@ pub async fn schedule_restore(
 
     write_json_file(&pending_restore_path(), &pending)
         .await
-        .map_err(|error| crate::error::AppError::Internal(error.into()))?;
+        .map_err(crate::error::AppError::Internal)?;
 
     Ok(BackupRestoreScheduleResponse {
         scheduled: true,
@@ -680,7 +679,7 @@ pub async fn finalize_restore_success(
     state: &crate::db::AppState,
     applied: &AppliedRestoreContext,
 ) -> anyhow::Result<BackupRestoreResult> {
-    invalidate_redis_after_restore(state).await?;
+    invalidate_runtime_state_after_restore(state).await?;
     let database_label = restore_database_label(&applied.pending.database_kind);
     let completion_message = if applied.pending.database_kind.eq_ignore_ascii_case("sqlite") {
         format!(
@@ -729,6 +728,7 @@ pub async fn finalize_restore_rollback(
     state: &crate::db::AppState,
     result: &BackupRestoreResult,
 ) -> anyhow::Result<()> {
+    invalidate_runtime_state_after_restore(state).await?;
     log_audit_db(
         &state.database,
         Some(ADMIN_USER_ID),
@@ -789,6 +789,7 @@ fn restore_result(
         status: status.to_string(),
         filename: pending.filename.clone(),
         database_kind: pending.database_kind.clone(),
+        semantics: pending.semantics.clone(),
         message,
         scheduled_at: Some(pending.scheduled_at),
         started_at: Some(started_at),
@@ -797,10 +798,13 @@ fn restore_result(
     }
 }
 
-async fn invalidate_redis_after_restore(state: &crate::db::AppState) -> anyhow::Result<()> {
-    let mut redis = state.redis.clone();
-    let cutoff = Utc::now().timestamp();
-    let _: () = redis.set(auth_valid_after_key(), cutoff).await?;
+async fn invalidate_runtime_state_after_restore(state: &crate::db::AppState) -> anyhow::Result<()> {
+    use crate::domain::auth::state_repository::AuthStateRepository;
+
+    let _ = state.auth_state_repository.bump_session_epoch().await?;
+    let Some(mut cache) = state.cache.clone() else {
+        return Ok(());
+    };
 
     for pattern in [
         "token_revoked:*",
@@ -810,7 +814,7 @@ async fn invalidate_redis_after_restore(state: &crate::db::AppState) -> anyhow::
         "hash:info:*",
         "img:*",
     ] {
-        let _ = crate::cache::Cache::del_pattern(&mut redis, pattern).await;
+        let _ = crate::cache::Cache::del_pattern(&mut cache, pattern).await;
     }
 
     Ok(())
@@ -1221,6 +1225,7 @@ fn unknown_storage_summary() -> BackupRestoreStorageSummary {
 fn backup_database_kind_from_pending(pending: &PendingBackupRestore) -> Option<DatabaseKind> {
     DatabaseKind::parse(&pending.database_kind)
         .ok()
+        .or_else(|| DatabaseKind::parse(&pending.semantics.database_family).ok())
         .or_else(|| backup_database_kind_from_filename(&pending.filename))
 }
 
@@ -1353,15 +1358,8 @@ fn mysql_client_binary() -> anyhow::Result<String> {
         .ok_or_else(|| anyhow::anyhow!("未找到 mysql 或 mariadb 客户端"))
 }
 
-fn mysql_local_ssl_disable_args(target: &MySqlDumpTarget) -> &'static [&'static str] {
-    if matches!(
-        target.host.as_str(),
-        "mysql" | "localhost" | "127.0.0.1" | "::1"
-    ) {
-        &["--skip-ssl"]
-    } else {
-        &[]
-    }
+fn mysql_local_ssl_disable_args(_target: &MySqlDumpTarget) -> &'static [&'static str] {
+    &[]
 }
 
 fn find_first_binary(candidates: &[&str]) -> Option<String> {
@@ -1397,11 +1395,15 @@ fn mysql_identifier(value: &str) -> String {
 }
 
 async fn load_pending_restore_plan() -> anyhow::Result<Option<PendingBackupRestore>> {
-    read_json_file(&pending_restore_path()).await
+    Ok(read_json_file(&pending_restore_path())
+        .await?
+        .map(normalize_pending_restore))
 }
 
 async fn load_last_restore_result() -> anyhow::Result<Option<BackupRestoreResult>> {
-    read_json_file(&last_restore_result_path()).await
+    Ok(read_json_file(&last_restore_result_path())
+        .await?
+        .map(normalize_restore_result))
 }
 
 async fn persist_last_restore_result(result: &BackupRestoreResult) -> anyhow::Result<()> {
@@ -1502,5 +1504,22 @@ async fn backup_file_summary(filename: &str) -> Result<BackupFileSummary, crate:
             .map(chrono::DateTime::<chrono::Utc>::from)
             .unwrap_or_else(Utc::now),
         size_bytes: metadata.len(),
+        semantics: BackupSemantics::infer(filename, backup_database_kind_from_filename(filename)),
     })
+}
+
+fn normalize_pending_restore(mut pending: PendingBackupRestore) -> PendingBackupRestore {
+    if pending.semantics.is_unknown() {
+        pending.semantics =
+            BackupSemantics::infer_from_kind_str(&pending.filename, Some(&pending.database_kind));
+    }
+    pending
+}
+
+fn normalize_restore_result(mut result: BackupRestoreResult) -> BackupRestoreResult {
+    if result.semantics.is_unknown() {
+        result.semantics =
+            BackupSemantics::infer_from_kind_str(&result.filename, Some(&result.database_kind));
+    }
+    result
 }

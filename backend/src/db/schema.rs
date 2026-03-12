@@ -1,11 +1,10 @@
-use sqlx::{MySqlPool, PgPool, SqlitePool, migrate::Migrator};
+use sqlx::{MySqlPool, PgPool, SqlitePool};
 use tracing::info;
 
-use super::DatabasePool;
-
-static MYSQL_MIGRATOR: Migrator = sqlx::migrate!("./migrations/mysql");
-static POSTGRES_MIGRATOR: Migrator = sqlx::migrate!("./migrations/postgresql");
-static SQLITE_MIGRATOR: Migrator = sqlx::migrate!("./migrations/sqlite");
+use super::{
+    DatabasePool,
+    migrations::{mysql_migrator, postgres_migrator, sqlite_migrator},
+};
 
 pub async fn run_migrations(pool: &DatabasePool) -> Result<(), sqlx::Error> {
     match pool {
@@ -17,19 +16,19 @@ pub async fn run_migrations(pool: &DatabasePool) -> Result<(), sqlx::Error> {
 }
 
 async fn run_mysql_migrations(pool: &MySqlPool) -> Result<(), sqlx::Error> {
-    MYSQL_MIGRATOR.run(pool).await?;
+    mysql_migrator().run(pool).await?;
     info!("MySQL migrations completed successfully");
     Ok(())
 }
 
 async fn run_postgres_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
-    POSTGRES_MIGRATOR.run(pool).await?;
+    postgres_migrator().run(pool).await?;
     info!("PostgreSQL migrations completed successfully");
     Ok(())
 }
 
 async fn run_sqlite_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
-    SQLITE_MIGRATOR.run(pool).await?;
+    sqlite_migrator().run(pool).await?;
     info!("SQLite migrations completed successfully");
     Ok(())
 }

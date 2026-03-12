@@ -19,7 +19,7 @@ use uuid::Uuid;
 
 use super::repository::ImageRepository;
 use crate::audit::log_audit_db;
-use crate::cache::{Cache, HashCache, ImageCache};
+use crate::cache::{Cache, CacheConnection, HashCache, ImageCache};
 use crate::config::Config;
 use crate::db::DatabasePool;
 use crate::error::AppError;
@@ -41,7 +41,7 @@ const MAX_TAG_LENGTH: usize = 50;
 
 pub struct ImageDomainServiceDependencies {
     pub database: DatabasePool,
-    pub redis: Option<redis::aio::ConnectionManager>,
+    pub cache: Option<CacheConnection>,
     pub config: Config,
     pub image_processor: ImageProcessor,
     pub storage_manager: Arc<StorageManager>,
@@ -50,14 +50,14 @@ pub struct ImageDomainServiceDependencies {
 impl ImageDomainServiceDependencies {
     pub fn new(
         database: DatabasePool,
-        redis: Option<redis::aio::ConnectionManager>,
+        cache: Option<CacheConnection>,
         config: Config,
         image_processor: ImageProcessor,
         storage_manager: Arc<StorageManager>,
     ) -> Self {
         Self {
             database,
-            redis,
+            cache,
             config,
             image_processor,
             storage_manager,
@@ -68,7 +68,7 @@ impl ImageDomainServiceDependencies {
 /// 图片领域服务
 pub struct ImageDomainService<I: ImageRepository> {
     database: DatabasePool,
-    redis: Option<redis::aio::ConnectionManager>,
+    cache: Option<CacheConnection>,
     config: Config,
     image_repository: I,
     image_processor: ImageProcessor,

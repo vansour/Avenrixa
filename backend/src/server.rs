@@ -2,7 +2,9 @@
 //! 负责服务器的初始化和启动
 
 use crate::db::AppState;
+use crate::domain::auth::state_repository::AuthStateRepository;
 use crate::{db::ADMIN_USER_ID, tasks};
+use chrono::Utc;
 use std::net::SocketAddr;
 use tokio::net::TcpListener;
 use tracing::info;
@@ -69,6 +71,8 @@ pub fn spawn_cleanup_tasks(state: &AppState) {
     let expiry_pool = cleanup_pool;
     let admin_service_for_expiry = state.admin_domain_service.clone();
     let installed_state_for_expiry = state.database.clone();
+    let auth_state_repository = state.auth_state_repository.clone();
+    let installed_state_for_auth_cleanup = state.database.clone();
 
     tokio::spawn(async move {
         let mut interval =
@@ -94,6 +98,26 @@ pub fn spawn_cleanup_tasks(state: &AppState) {
                 }
             } else {
                 tracing::warn!("Expiry task skipped: no executor available");
+            }
+        }
+    });
+
+    tokio::spawn(async move {
+        let mut interval =
+            tokio::time::interval(tokio::time::Duration::from_secs(expiry_check_interval));
+        loop {
+            interval.tick().await;
+            if !crate::db::is_app_installed(&installed_state_for_auth_cleanup)
+                .await
+                .unwrap_or(false)
+            {
+                continue;
+            }
+            if let Err(error) = auth_state_repository
+                .purge_expired_revoked_tokens(Utc::now())
+                .await
+            {
+                tracing::error!("Revoked token cleanup failed: {}", error);
             }
         }
     });

@@ -10,6 +10,8 @@ pub struct Claims {
     pub role: String,
     #[serde(default)]
     pub token_version: u64,
+    #[serde(default)]
+    pub session_epoch: u64,
     pub exp: i64,
     pub iat: i64,
 }

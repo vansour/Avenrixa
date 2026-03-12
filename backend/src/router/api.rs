@@ -17,7 +17,8 @@ pub(super) fn create_root_routes(state: AppState) -> Router {
 }
 
 pub(super) fn create_api_v1_router(state: AppState, config: &Config) -> Router {
-    let api_routes = api::create_api_routes().with_state(state);
+    let boot_routes = api::create_boot_public_routes().with_state(state.clone());
+    let throttled_api_routes = api::create_throttled_api_routes().with_state(state);
     let mut governor_conf = GovernorConfigBuilder::default();
     governor_conf
         .per_second(config.server.rate_limit_per_second as u64)
@@ -26,7 +27,8 @@ pub(super) fn create_api_v1_router(state: AppState, config: &Config) -> Router {
         .finish()
         .expect("Invalid rate limit configuration");
 
-    Router::new()
-        .nest("/api/v1", api_routes)
-        .layer(GovernorLayer::new(governor_conf))
+    Router::new().nest("/api/v1", boot_routes).nest(
+        "/api/v1",
+        throttled_api_routes.layer(GovernorLayer::new(governor_conf)),
+    )
 }

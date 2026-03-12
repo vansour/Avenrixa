@@ -4,12 +4,19 @@ use dioxus::prelude::*;
 #[component]
 pub fn Modal(
     #[props(default)] title: String,
+    #[props(default)] content_class: String,
     children: Element,
     on_close: EventHandler<()>,
 ) -> Element {
+    let content_class = if content_class.trim().is_empty() {
+        "modal-content".to_string()
+    } else {
+        format!("modal-content {}", content_class.trim())
+    };
+
     rsx! {
         div { class: "modal-overlay",
-            div { class: "modal-content",
+            div { class: "{content_class}",
                 h2 { class: "modal-title", "{title}" }
                 div { class: "modal-close", onclick: move |_| on_close.call(()), "×" }
                 {children}

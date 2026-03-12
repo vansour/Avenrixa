@@ -5,22 +5,25 @@ use crate::models::User;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use uuid::Uuid;
+
+type TokenState = (Uuid, DateTime<Utc>, bool);
+type TokenStore = Arc<Mutex<HashMap<String, TokenState>>>;
 
 #[derive(Clone)]
 pub struct MockAuthRepository {
-    pub users: Arc<std::sync::Mutex<Vec<User>>>,
-    pub reset_tokens: Arc<std::sync::Mutex<HashMap<String, (Uuid, DateTime<Utc>, bool)>>>,
-    pub verification_tokens: Arc<std::sync::Mutex<HashMap<String, (Uuid, DateTime<Utc>, bool)>>>,
+    pub users: Arc<Mutex<Vec<User>>>,
+    pub reset_tokens: TokenStore,
+    pub verification_tokens: TokenStore,
 }
 
 impl MockAuthRepository {
     pub fn new() -> Self {
         Self {
-            users: Arc::new(std::sync::Mutex::new(Vec::new())),
-            reset_tokens: Arc::new(std::sync::Mutex::new(HashMap::new())),
-            verification_tokens: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            users: Arc::new(Mutex::new(Vec::new())),
+            reset_tokens: Arc::new(Mutex::new(HashMap::new())),
+            verification_tokens: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }

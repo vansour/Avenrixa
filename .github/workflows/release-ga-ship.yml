@@ -1,0 +1,89 @@
+name: Release 0.1 GA Ship
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_repository:
+        description: Target GHCR image repository, for example ghcr.io/<owner>/vansour-image
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release-ga-ship:
+    name: Release 0.1 GA Ship
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve release metadata
+        id: release-meta
+        env:
+          INPUT_IMAGE_REPOSITORY: ${{ inputs.image_repository }}
+        run: |
+          release_version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)"
+          image_repository="${INPUT_IMAGE_REPOSITORY:-ghcr.io/${GITHUB_REPOSITORY_OWNER}/vansour-image}"
+          echo "release_version=${release_version}" >> "${GITHUB_OUTPUT}"
+          echo "image_repository=${image_repository}" >> "${GITHUB_OUTPUT}"
+          echo "release_image_ref=${image_repository}:${release_version}" >> "${GITHUB_OUTPUT}"
+          echo "latest_image_ref=${image_repository}:latest" >> "${GITHUB_OUTPUT}"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev pkg-config
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Show Docker versions
+        run: |
+          docker --version
+          docker compose version
+
+      - name: Show publish target
+        run: |
+          echo "Release version: ${{ steps.release-meta.outputs.release_version }}"
+          echo "Image repository: ${{ steps.release-meta.outputs.image_repository }}"
+          echo "Image ref: ${{ steps.release-meta.outputs.release_image_ref }}"
+          echo "Latest ref: ${{ steps.release-meta.outputs.latest_image_ref }}"
+
+      - name: Run 0.1 GA ship
+        env:
+          RELEASE_VERSION: ${{ steps.release-meta.outputs.release_version }}
+          RELEASE_BUILD_REVISION: ${{ github.sha }}
+          RELEASE_IMAGE_REF: ${{ steps.release-meta.outputs.release_image_ref }}
+          RELEASE_IMAGE_PUSH: "1"
+          RELEASE_IMAGE_ADDITIONAL_TAGS: ${{ steps.release-meta.outputs.latest_image_ref }}
+          DOCKER_BUILDKIT: "1"
+          COMPOSE_DOCKER_CLI_BUILD: "1"
+        run: ./scripts/release-ga-ship.sh
+
+      - name: Upload GA release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-0.1-ga-assets
+          path: dist/release/
+          if-no-files-found: error
+          retention-days: 14

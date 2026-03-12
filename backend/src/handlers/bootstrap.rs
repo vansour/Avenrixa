@@ -11,11 +11,7 @@ use crate::models::{
 pub async fn get_bootstrap_status(
     State(state): State<BootstrapAppState>,
 ) -> Result<Json<BootstrapStatusResponse>, AppError> {
-    let file = state
-        .store
-        .load()
-        .await
-        .map_err(|error| AppError::Internal(error.into()))?;
+    let file = state.store.load().await.map_err(AppError::Internal)?;
     Ok(Json(state.store.bootstrap_status(
         &state.config,
         file.as_ref(),
@@ -38,11 +34,7 @@ pub async fn update_bootstrap_database_config(
 pub async fn bootstrap_health_check(
     State(state): State<BootstrapAppState>,
 ) -> Result<Json<HealthStatus>, AppError> {
-    let file = state
-        .store
-        .load()
-        .await
-        .map_err(|error| AppError::Internal(error.into()))?;
+    let file = state.store.load().await.map_err(AppError::Internal)?;
     let configured_database_kind = file
         .as_ref()
         .map(|file| file.database_kind.as_str())
@@ -63,9 +55,9 @@ pub async fn bootstrap_health_check(
             status: "unhealthy".to_string(),
             message: database_message,
         },
-        redis: ComponentStatus {
-            status: "unhealthy".to_string(),
-            message: Some("Bootstrap 模式未初始化 Redis".to_string()),
+        cache: ComponentStatus {
+            status: "disabled".to_string(),
+            message: Some("Bootstrap 模式未启用外部缓存".to_string()),
         },
         storage: ComponentStatus::healthy(),
         version: None,

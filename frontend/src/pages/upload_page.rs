@@ -1,4 +1,5 @@
-use crate::app_context::{use_image_service, use_toast_store};
+use crate::app_context::{use_auth_store, use_image_service, use_toast_store};
+use crate::auth_session::{auth_session_expired_message, handle_auth_session_error};
 use dioxus::html::FileData;
 use dioxus::prelude::*;
 
@@ -115,6 +116,7 @@ async fn read_image_from_clipboard() -> Result<(String, Option<String>, Vec<u8>)
 /// 上传页面组件
 #[component]
 pub fn UploadPage() -> Element {
+    let auth_store = use_auth_store();
     let image_service = use_image_service();
     let toast_store = use_toast_store();
 
@@ -173,6 +175,7 @@ pub fn UploadPage() -> Element {
     };
 
     let clipboard_image_service = image_service.clone();
+    let clipboard_auth_store = auth_store.clone();
     let clipboard_toast_store = toast_store.clone();
     let handle_clipboard_upload = move |event: dioxus::events::MouseEvent| {
         event.prevent_default();
@@ -181,6 +184,7 @@ pub fn UploadPage() -> Element {
         }
 
         let image_service = clipboard_image_service.clone();
+        let auth_store = clipboard_auth_store.clone();
         let toast_store = clipboard_toast_store.clone();
         spawn(async move {
             is_uploading.set(true);
@@ -208,9 +212,13 @@ pub fn UploadPage() -> Element {
                     selected_file.set(None);
                 }
                 Err(err) => {
-                    let message = format!("剪贴板上传失败: {}", err);
-                    error_message.set(message.clone());
-                    toast_store.show_error(message);
+                    if handle_auth_session_error(&auth_store, &toast_store, &err) {
+                        error_message.set(auth_session_expired_message());
+                    } else {
+                        let message = format!("剪贴板上传失败: {}", err);
+                        error_message.set(message.clone());
+                        toast_store.show_error(message);
+                    }
                 }
             }
 
@@ -231,6 +239,7 @@ pub fn UploadPage() -> Element {
         };
 
         let image_service = image_service.clone();
+        let auth_store = auth_store.clone();
         let toast_store = toast_store.clone();
 
         spawn(async move {
@@ -270,9 +279,13 @@ pub fn UploadPage() -> Element {
                     selected_file.set(None);
                 }
                 Err(err) => {
-                    let message = format!("上传失败: {}", err);
-                    error_message.set(message.clone());
-                    toast_store.show_error(message);
+                    if handle_auth_session_error(&auth_store, &toast_store, &err) {
+                        error_message.set(auth_session_expired_message());
+                    } else {
+                        let message = format!("上传失败: {}", err);
+                        error_message.set(message.clone());
+                        toast_store.show_error(message);
+                    }
                 }
             }
 

@@ -1,7 +1,7 @@
 use crate::services::api_client::ApiClient;
 use crate::types::api::{
     BootstrapStatusResponse, InstallBootstrapRequest, InstallBootstrapResponse,
-    InstallStatusResponse, UpdateBootstrapDatabaseConfigRequest,
+    InstallStatusResponse, StorageDirectoryBrowseResponse, UpdateBootstrapDatabaseConfigRequest,
     UpdateBootstrapDatabaseConfigResponse,
 };
 use crate::types::errors::Result;
@@ -31,6 +31,20 @@ impl InstallService {
 
     pub async fn get_install_status(&self) -> Result<InstallStatusResponse> {
         self.api_client.get_json("/api/v1/install/status").await
+    }
+
+    pub async fn browse_storage_directories(
+        &self,
+        path: Option<&str>,
+    ) -> Result<StorageDirectoryBrowseResponse> {
+        let url = match path.map(str::trim).filter(|value| !value.is_empty()) {
+            Some(path) => format!(
+                "/api/v1/install/storage-directories?path={}",
+                urlencoding::encode(path)
+            ),
+            None => "/api/v1/install/storage-directories".to_string(),
+        };
+        self.api_client.get_json(&url).await
     }
 
     pub async fn bootstrap_installation(

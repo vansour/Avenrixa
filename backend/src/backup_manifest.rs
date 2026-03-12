@@ -10,23 +10,28 @@ use serde::{Deserialize, Serialize};
 use crate::config::DatabaseKind;
 use crate::models::{
     BackupMetadataManifest, BackupObjectRollbackAnchor, BackupRestoreStorageSummary,
+    BackupSemantics,
 };
 use crate::runtime_settings::{StorageBackend, StorageSettingsSnapshot};
 
 const BACKUP_DIR: &str = "/data/backup";
+const CURRENT_BACKUP_MANIFEST_FORMAT_VERSION: u32 = 2;
 
 pub async fn capture_backup_manifest(
     filename: &str,
     database_kind: DatabaseKind,
+    semantics: BackupSemantics,
     created_at: DateTime<Utc>,
     storage_settings: &StorageSettingsSnapshot,
     app_installed: bool,
     has_admin: bool,
 ) -> BackupMetadataManifest {
     BackupMetadataManifest {
+        format_version: CURRENT_BACKUP_MANIFEST_FORMAT_VERSION,
         filename: filename.to_string(),
         created_at,
         database_kind: database_kind.as_str().to_string(),
+        semantics,
         app_installed,
         has_admin,
         storage_signature: storage_signature(storage_settings),
@@ -42,7 +47,9 @@ pub async fn write_backup_manifest(manifest: &BackupMetadataManifest) -> anyhow:
 pub async fn load_backup_manifest(
     filename: &str,
 ) -> anyhow::Result<Option<BackupMetadataManifest>> {
-    read_json_file(&backup_manifest_path(filename)).await
+    Ok(read_json_file(&backup_manifest_path(filename))
+        .await?
+        .map(|manifest| normalize_backup_manifest(filename, manifest)))
 }
 
 pub fn storage_signature(snapshot: &StorageSettingsSnapshot) -> String {
@@ -177,4 +184,70 @@ where
     let content = serde_json::to_string_pretty(value)?;
     tokio::fs::write(path, content).await?;
     Ok(())
+}
+
+fn normalize_backup_manifest(
+    filename: &str,
+    mut manifest: BackupMetadataManifest,
+) -> BackupMetadataManifest {
+    if manifest.semantics.is_unknown() {
+        manifest.semantics =
+            BackupSemantics::infer_from_kind_str(filename, Some(&manifest.database_kind));
+    }
+    if manifest.format_version == 0 {
+        manifest.format_version = 1;
+    }
+    manifest
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::Utc;
+
+    use super::normalize_backup_manifest;
+    use crate::models::{
+        BackupMetadataManifest, BackupObjectRollbackAnchor, BackupRestoreStorageSummary,
+        BackupSemantics,
+    };
+
+    #[test]
+    fn legacy_manifest_is_upgraded_with_inferred_semantics() {
+        let manifest = BackupMetadataManifest {
+            format_version: 1,
+            filename: "backup_legacy.mysql.sql".to_string(),
+            created_at: Utc::now(),
+            database_kind: "mysql".to_string(),
+            semantics: BackupSemantics::default(),
+            app_installed: true,
+            has_admin: true,
+            storage_signature: "sig".to_string(),
+            storage: BackupRestoreStorageSummary {
+                storage_backend: "local".to_string(),
+                local_storage_path: "/data/images".to_string(),
+                s3_endpoint: None,
+                s3_region: None,
+                s3_bucket: None,
+                s3_prefix: None,
+                s3_force_path_style: true,
+            },
+            object_rollback_anchor: BackupObjectRollbackAnchor {
+                strategy: "local-directory-snapshot".to_string(),
+                checkpoint_at: Utc::now(),
+                local_storage_path: Some("/data/images".to_string()),
+                s3_endpoint: None,
+                s3_region: None,
+                s3_bucket: None,
+                s3_prefix: None,
+                s3_force_path_style: true,
+                s3_bucket_versioning_status: None,
+                capture_error: None,
+            },
+        };
+
+        let filename = manifest.filename.clone();
+        let normalized = normalize_backup_manifest(&filename, manifest);
+        assert_eq!(normalized.semantics.database_family, "mysql");
+        assert_eq!(normalized.semantics.backup_kind, "mysql-logical-dump");
+        assert!(!normalized.semantics.ui_restore_supported);
+    }
 }

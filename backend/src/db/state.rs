@@ -1,14 +1,14 @@
 use super::DatabasePool;
 use crate::auth::AuthService;
-use crate::cache::Cache;
+use crate::cache::{Cache, CacheConnection};
 use crate::config::Config;
 use crate::config::DatabaseKind;
 use crate::domain::admin::AdminDomainService;
 use crate::domain::auth::DefaultAuthDomainService;
+use crate::domain::auth::state_repository::DatabaseAuthStateRepository;
 use crate::domain::image::DefaultImageDomainService;
 use crate::runtime_settings::RuntimeSettingsService;
 use crate::storage_backend::StorageManager;
-use redis::aio::ConnectionManager;
 use std::sync::Arc;
 use std::time::Instant;
 use uuid::Uuid;
@@ -16,7 +16,8 @@ use uuid::Uuid;
 #[derive(Clone)]
 pub struct AppState {
     pub database: DatabasePool,
-    pub redis: ConnectionManager,
+    pub cache: Option<CacheConnection>,
+    pub auth_state_repository: DatabaseAuthStateRepository,
     pub config: Config,
     pub auth: AuthService,
     pub auth_domain_service: Option<Arc<DefaultAuthDomainService>>,
@@ -41,9 +42,11 @@ impl AppState {
     }
 
     pub async fn invalidate_user_image_cache(&self, user_id: Uuid) -> Result<(), anyhow::Error> {
-        let mut redis = self.redis.clone();
+        let Some(mut cache) = self.cache.clone() else {
+            return Ok(());
+        };
         Cache::del_pattern(
-            &mut redis,
+            &mut cache,
             &crate::cache::ImageCache::images_invalidate(user_id),
         )
         .await

@@ -8,31 +8,22 @@ APP_HOST_PORT="${APP_HOST_PORT:-8080}"
 SMOKE_TIMEOUT_SECONDS="${SMOKE_TIMEOUT_SECONDS:-240}"
 SMOKE_POLL_INTERVAL_SECONDS="${SMOKE_POLL_INTERVAL_SECONDS:-2}"
 COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-vansour-image-browser-regression}"
+COMPOSE_VARIANT="${COMPOSE_VARIANT:-mysql}"
 PRESERVE_STACK_ON_FAILURE="${PRESERVE_STACK_ON_FAILURE:-0}"
 MYSQL_SMOKE_RESET_DATA_DIR="${MYSQL_SMOKE_RESET_DATA_DIR:-1}"
+CACHE_MODE="${CACHE_MODE:-redis8}"
 
 ADMIN_EMAIL="${ADMIN_EMAIL:-admin@example.com}"
 ADMIN_PASSWORD="${ADMIN_PASSWORD:-Password123456!}"
+ADMIN_NEW_PASSWORD="${ADMIN_NEW_PASSWORD:-Password123456!updated}"
+SECOND_ADMIN_EMAIL="${SECOND_ADMIN_EMAIL:-browser-second-admin@example.com}"
 SITE_NAME="${SITE_NAME:-MySQL/MariaDB Browser Regression}"
 MYSQL_DATABASE_URL="${MYSQL_DATABASE_URL:-}"
 BROWSER_BASE_URL="${BROWSER_BASE_URL:-http://127.0.0.1:${APP_HOST_PORT}}"
 BROWSER_PHASE_TIMEOUT_MS="${BROWSER_PHASE_TIMEOUT_MS:-45000}"
 MYSQL_DATA_DIR="${MYSQL_DATA_DIR:-}"
 
-compose_args=()
-if [[ -n "${COMPOSE_FILE_PATHS:-}" ]]; then
-  read -r -a compose_files <<< "${COMPOSE_FILE_PATHS}"
-else
-  compose_files=("compose.mysql.yml")
-fi
-
-for compose_file in "${compose_files[@]}"; do
-  compose_args+=("-f" "${compose_file}")
-done
-
-compose() {
-  docker compose -p "${COMPOSE_PROJECT_NAME}" "${compose_args[@]}" "$@"
-}
+source "${ROOT_DIR}/scripts/compose-runtime.sh"
 
 configured_container_names() {
   compose config 2>/dev/null | sed -n 's/^[[:space:]]*container_name:[[:space:]]*//p'
@@ -59,6 +50,38 @@ BROWSER_STORAGE_STATE_PATH=""
 
 health_url="http://127.0.0.1:${APP_HOST_PORT}/health"
 
+expected_cache_component_status() {
+  case "${CACHE_MODE}" in
+    redis8|dragonfly)
+      printf 'healthy'
+      ;;
+    none)
+      printf 'disabled'
+      ;;
+  esac
+}
+
+assert_cache_health_component() {
+  local health_payload
+  local expected_cache_status
+  local actual_cache_status
+  local overall_status
+
+  health_payload="$(curl -fsS "${health_url}")"
+  expected_cache_status="$(expected_cache_component_status)"
+  actual_cache_status="$(printf '%s' "${health_payload}" | jq -r '.cache.status')"
+  overall_status="$(printf '%s' "${health_payload}" | jq -r '.status')"
+
+  if [[ "${overall_status}" != "healthy" ]]; then
+    echo "Unexpected overall health status: ${overall_status}" >&2
+    exit 1
+  fi
+  if [[ "${actual_cache_status}" != "${expected_cache_status}" ]]; then
+    echo "Unexpected cache health status: expected ${expected_cache_status}, got ${actual_cache_status}" >&2
+    exit 1
+  fi
+}
+
 require_commands() {
   local required_commands=(docker curl jq node npm npx)
   for command in "${required_commands[@]}"; do
@@ -72,6 +95,10 @@ require_commands() {
 log_step() {
   echo
   echo "==> $1"
+}
+
+escape_sql_string() {
+  printf "%s" "$1" | sed "s/'/''/g"
 }
 
 wait_for_url() {
@@ -116,6 +143,10 @@ cleanup() {
   fi
 }
 
+start_stack() {
+  compose up -d --remove-orphans
+}
+
 trap on_error ERR
 trap cleanup EXIT
 
@@ -147,45 +178,19 @@ detect_browser_executable() {
 }
 
 uses_mysql_compose_file() {
-  local compose_file
-  for compose_file in "${compose_files[@]}"; do
-    case "$(basename "${compose_file}")" in
-      compose.mysql.yml|compose.mysql.ops.yml|compose.mariadb.yml|compose.mariadb.ops.yml)
-      return 0
-        ;;
-    esac
-  done
-
-  return 1
+  compose_variant_uses_mysql
 }
 
 uses_mariadb_compose_file() {
-  local compose_file
-  for compose_file in "${compose_files[@]}"; do
-    case "$(basename "${compose_file}")" in
-      compose.mariadb.yml|compose.mariadb.ops.yml)
-      return 0
-        ;;
-    esac
-  done
-
-  return 1
+  compose_variant_uses_mariadb
 }
 
 default_mysql_database_url() {
-  if uses_mariadb_compose_file; then
-    printf 'mariadb://user:pass@mysql:3306/image'
-  else
-    printf 'mysql://user:pass@mysql:3306/image'
-  fi
+  compose_variant_default_database_url
 }
 
 default_mysql_data_dir() {
-  if uses_mariadb_compose_file; then
-    printf '%s/data-mariadb' "${ROOT_DIR}"
-  else
-    printf '%s/data-mysql' "${ROOT_DIR}"
-  fi
+  compose_variant_default_data_dir
 }
 
 reset_mysql_data_dir_if_needed() {
@@ -222,6 +227,7 @@ run_browser_phase() {
   env \
     ADMIN_EMAIL="${ADMIN_EMAIL}" \
     ADMIN_PASSWORD="${ADMIN_PASSWORD}" \
+    ADMIN_NEW_PASSWORD="${ADMIN_NEW_PASSWORD}" \
     SITE_NAME="${SITE_NAME}" \
     MYSQL_DATABASE_URL="${MYSQL_DATABASE_URL}" \
     BROWSER_BASE_URL="${BROWSER_BASE_URL}" \
@@ -230,6 +236,19 @@ run_browser_phase() {
     BROWSER_STORAGE_STATE_PATH="${BROWSER_STORAGE_STATE_PATH}" \
     "$@" \
     node scripts/browser-regression/run.mjs "${phase}"
+}
+
+seed_second_admin_for_demotion_regression() {
+  local second_admin_uuid
+  local escaped_email
+
+  second_admin_uuid="$(cat /proc/sys/kernel/random/uuid)"
+  escaped_email="$(escape_sql_string "${SECOND_ADMIN_EMAIL}")"
+
+  compose exec -T mysql mysql -uuser -ppass image -e "
+INSERT INTO users (id, email, email_verified_at, password_hash, role, created_at)
+VALUES (UUID_TO_BIN('${second_admin_uuid}'), '${escaped_email}', UTC_TIMESTAMP(6), 'browser-regression-placeholder-hash', 'admin', UTC_TIMESTAMP(6));
+"
 }
 
 require_commands
@@ -244,7 +263,8 @@ fi
 
 reset_mysql_data_dir_if_needed
 
-echo "Using compose files: ${compose_files[*]}"
+echo "Using compose variant: ${COMPOSE_VARIANT}"
+echo "Cache mode: ${CACHE_MODE}"
 echo "Browser base URL: ${BROWSER_BASE_URL}"
 
 install_browser_regression_deps
@@ -256,29 +276,36 @@ remove_container_name_conflicts
 compose build
 
 log_step "Starting browser regression stack"
-compose up -d --remove-orphans
+start_stack
 wait_for_url "${health_url}" "${SMOKE_TIMEOUT_SECONDS}"
+assert_cache_health_component
 
-log_step "Browser phase 1: MySQL/MariaDB database bootstrap"
-run_browser_phase "bootstrap-mysql" >/dev/null
+log_step "Browser phase 1: check preconfigured database or run bootstrap fallback"
+phase_one_output="$(run_browser_phase "bootstrap-mysql")"
+phase_one_skipped="$(printf '%s' "${phase_one_output}" | jq -r '.skipped // false')"
 
-log_step "Restarting app after database bootstrap"
-compose restart app >/dev/null
-wait_for_url "${health_url}" "${SMOKE_TIMEOUT_SECONDS}"
+if [[ "${phase_one_skipped}" != "true" ]]; then
+  log_step "Restarting app after database bootstrap fallback"
+  compose restart app >/dev/null
+  wait_for_url "${health_url}" "${SMOKE_TIMEOUT_SECONDS}"
+  assert_cache_health_component
+fi
 
-log_step "Browser phase 2: install wizard, first-run guide, maintenance restore plan"
-phase_two_output="$(run_browser_phase "install-and-restore-plan")"
+log_step "Browser phase 2: install wizard, first-run guide, maintenance backup flow"
+phase_two_output="$(run_browser_phase "install-and-backup")"
 backup_filename="$(printf '%s' "${phase_two_output}" | jq -r '.backupFilename')"
 if [[ -z "${backup_filename}" || "${backup_filename}" == "null" ]]; then
   echo "Browser regression did not return a backup filename" >&2
   exit 1
 fi
 
-log_step "Restarting app to execute pending restore"
-compose restart app >/dev/null
-wait_for_url "${health_url}" "${SMOKE_TIMEOUT_SECONDS}"
+log_step "Browser phase 3: verify backup audit and maintenance wording"
+run_browser_phase "verify-backup-audit" BROWSER_BACKUP_FILENAME="${backup_filename}" >/dev/null
 
-log_step "Browser phase 3: login again and verify restore audit/result"
-run_browser_phase "verify-after-restore" BROWSER_BACKUP_FILENAME="${backup_filename}" >/dev/null
+log_step "Seeding second admin for demotion regression"
+seed_second_admin_for_demotion_regression
+
+log_step "Browser phase 4: verify auth semantics on settings and login page"
+run_browser_phase "auth-semantics" >/dev/null
 
 echo "Browser click regression passed"

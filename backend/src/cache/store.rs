@@ -1,4 +1,4 @@
-use redis::AsyncCommands;
+use super::{CacheCommands, CacheConnectionLike};
 use serde::{Serialize, de::DeserializeOwned};
 use tracing::warn;
 
@@ -21,7 +21,7 @@ impl Cache {
     pub async fn get<T, C>(conn: &mut C, key: impl AsRef<str>) -> Result<Option<T>, anyhow::Error>
     where
         T: DeserializeOwned,
-        C: redis::aio::ConnectionLike + Send + Sync,
+        C: CacheConnectionLike + Send + Sync,
     {
         let key = prefixed_key(key);
         let value: Result<Option<String>, _> = conn.get(&key).await;
@@ -32,7 +32,7 @@ impl Cache {
                 .map(Some),
             Ok(None) => Ok(None),
             Err(error) => {
-                warn!("Redis get error (key: {}): {}", key, error);
+                warn!("External cache get error (key: {}): {}", key, error);
                 Ok(None)
             }
         }
@@ -45,7 +45,7 @@ impl Cache {
         ttl_seconds: u64,
     ) -> Result<(), anyhow::Error>
     where
-        C: redis::aio::ConnectionLike + Send + Sync,
+        C: CacheConnectionLike + Send + Sync,
     {
         let key = prefixed_key(key);
         let value = serde_json::to_string(&value)
@@ -53,7 +53,7 @@ impl Cache {
         let result: Result<(), _> = conn.set_ex(&key, value, ttl_seconds).await;
 
         if let Err(error) = result {
-            warn!("Redis set error (key: {}): {}", key, error);
+            warn!("External cache set error (key: {}): {}", key, error);
         }
 
         Ok(())
@@ -61,19 +61,19 @@ impl Cache {
 
     pub async fn del<C>(conn: &mut C, key: impl AsRef<str>) -> Result<(), anyhow::Error>
     where
-        C: redis::aio::ConnectionLike + Send + Sync,
+        C: CacheConnectionLike + Send + Sync,
     {
         let key = prefixed_key(key);
         let result: Result<(), _> = conn.del(&key).await;
         if let Err(error) = result {
-            warn!("Redis del error (key: {}): {}", key, error);
+            warn!("External cache del error (key: {}): {}", key, error);
         }
         Ok(())
     }
 
     pub async fn del_pattern<C>(conn: &mut C, pattern: impl AsRef<str>) -> Result<(), anyhow::Error>
     where
-        C: redis::aio::ConnectionLike + Send + Sync,
+        C: CacheConnectionLike + Send + Sync,
     {
         let pattern = prefixed_key(pattern);
         let mut cursor: u64 = 0;
@@ -87,12 +87,12 @@ impl Cache {
                 .arg(100)
                 .query_async(conn)
                 .await
-                .map_err(|error| anyhow::anyhow!("Redis SCAN error: {}", error))?;
+                .map_err(|error| anyhow::anyhow!("External cache SCAN error: {}", error))?;
 
             if !keys.is_empty() {
                 conn.del::<_, ()>(keys)
                     .await
-                    .map_err(|error| anyhow::anyhow!("Redis DEL error: {}", error))?;
+                    .map_err(|error| anyhow::anyhow!("External cache DEL error: {}", error))?;
             }
 
             cursor = next_cursor;

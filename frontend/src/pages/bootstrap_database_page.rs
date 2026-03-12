@@ -19,13 +19,6 @@ pub fn BootstrapDatabasePage(
 
     let mut database_kind = use_signal(|| initial_database_kind.to_string());
     let mut database_url = use_signal(String::new);
-    let mut database_max_connections = use_signal(|| {
-        status
-            .database_max_connections
-            .unwrap_or(10)
-            .max(1)
-            .to_string()
-    });
     let mut is_saving = use_signal(|| false);
     let mut error_message = use_signal(String::new);
     let mut success_message = use_signal(String::new);
@@ -45,11 +38,11 @@ pub fn BootstrapDatabasePage(
         "postgresql://user:pass@host:5432/dbname"
     };
     let page_title = if is_sqlite {
-        "当前实例尚未连接数据库。先写入 SQLite 数据库文件位置，重启服务后会自动执行迁移并进入安装向导。"
+        "当前实例启动时未检测到预设的 SQLite 数据库连接。这个页面只是兜底引导：写入数据库文件位置并重启服务后，系统会继续进入安装向导。"
     } else if is_mysql {
-        "当前实例尚未连接数据库。先写入 MySQL / MariaDB 连接信息，重启服务后会自动执行迁移并进入安装向导。"
+        "当前实例启动时未检测到预设的 MySQL / MariaDB 数据库连接。这个页面只是兜底引导：写入连接信息并重启服务后，系统会继续进入安装向导。"
     } else {
-        "当前实例尚未连接数据库。先写入 PostgreSQL 连接信息，重启服务后再继续管理员安装。"
+        "当前实例启动时未检测到预设的 PostgreSQL 数据库连接。这个页面只是兜底引导：写入连接信息并重启服务后，再继续管理员安装。"
     };
     let save_button_label = if is_sqlite {
         "保存 SQLite 配置"
@@ -79,16 +72,6 @@ pub fn BootstrapDatabasePage(
             return;
         }
 
-        let max_connections = if current_database_kind == "sqlite" {
-            None
-        } else {
-            database_max_connections()
-                .trim()
-                .parse::<u32>()
-                .ok()
-                .filter(|value| *value > 0)
-        };
-
         let install_service = install_service.clone();
         let toast_store = toast_store.clone();
 
@@ -101,7 +84,6 @@ pub fn BootstrapDatabasePage(
                 .update_bootstrap_database_config(UpdateBootstrapDatabaseConfigRequest {
                     database_kind: current_database_kind.clone(),
                     database_url: url,
-                    database_max_connections: max_connections,
                 })
                 .await
             {
@@ -120,7 +102,8 @@ pub fn BootstrapDatabasePage(
                         database_kind: response.database_kind,
                         database_configured: response.database_configured,
                         database_url_masked: Some(response.database_url_masked),
-                        database_max_connections: Some(response.database_max_connections),
+                        cache_configured: false,
+                        cache_url_masked: None,
                         restart_required: response.restart_required,
                         runtime_error: None,
                     });
@@ -162,17 +145,6 @@ pub fn BootstrapDatabasePage(
                         }
                     }
 
-                    label { class: "settings-field",
-                        span { "最大连接数（可选）" }
-                        input {
-                            r#type: "number",
-                            min: "1",
-                            value: "{database_max_connections()}",
-                            oninput: move |event| database_max_connections.set(event.value()),
-                            disabled: is_saving() || is_sqlite,
-                        }
-                    }
-
                     label { class: "settings-field settings-field-full",
                         span { "{database_target_label}" }
                         input {
@@ -187,8 +159,11 @@ pub fn BootstrapDatabasePage(
 
                 if let Some(masked) = status.database_url_masked.as_ref() {
                     p { class: "install-file-meta",
-                        "当前已保存的数据库配置：{masked}"
+                        "当前已保存的数据库配置摘要：{masked}"
                     }
+                }
+                p { class: "install-file-meta",
+                    "如果你使用 Docker Compose 或其他可控部署入口，优先通过环境变量 `DATABASE_KIND` / `DATABASE_URL` 预设数据库连接；只有未预设时才需要使用这个页面。"
                 }
                 if is_sqlite {
                     p { class: "install-file-meta",
@@ -220,7 +195,7 @@ pub fn BootstrapDatabasePage(
                 div { class: "settings-stack",
                     if is_sqlite {
                         p { class: "login-subtitle",
-                            "1. 选择 SQLite 并填写数据库文件位置。"
+                            "1. 优先在部署环境里设置 `DATABASE_KIND=sqlite` 和 `DATABASE_URL`；只有未预设时才在这里填写数据库文件位置。"
                         }
                         p { class: "login-subtitle",
                             "2. 保存配置，确认数据库文件可以创建并通过基础查询校验。"
@@ -230,7 +205,7 @@ pub fn BootstrapDatabasePage(
                         }
                     } else if is_mysql {
                         p { class: "login-subtitle",
-                            "1. 选择 MySQL 并填写连接信息。"
+                            "1. 优先在部署环境里设置 `DATABASE_KIND=mysql` 和 `DATABASE_URL`；只有未预设时才在这里填写连接信息。"
                         }
                         p { class: "login-subtitle",
                             "2. 保存配置，确认数据库连接可建立并通过基础查询校验。"
@@ -240,7 +215,7 @@ pub fn BootstrapDatabasePage(
                         }
                     } else {
                         p { class: "login-subtitle",
-                            "1. 填写并保存 PostgreSQL 连接。"
+                            "1. 优先在部署环境里设置 `DATABASE_KIND=postgresql` 和 `DATABASE_URL`；只有未预设时才在这里填写并保存 PostgreSQL 连接。"
                         }
                         p { class: "login-subtitle",
                             "2. 重启应用服务。"

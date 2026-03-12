@@ -11,7 +11,7 @@ use crate::backup_manifest::{capture_backup_manifest, write_backup_manifest};
 use crate::config::{DatabaseKind, normalize_mysql_compatible_url};
 use crate::db::DatabasePool;
 use crate::error::AppError;
-use crate::models::{BackupFileSummary, BackupResponse};
+use crate::models::{BackupFileSummary, BackupResponse, BackupSemantics};
 use crate::runtime_settings::StorageSettingsSnapshot;
 
 const BACKUP_DIR: &str = "/data/backup";
@@ -72,11 +72,13 @@ impl AdminDomainService {
                 continue;
             };
             let created_at = file_timestamp(&metadata).unwrap_or_else(Utc::now);
+            let semantics = BackupSemantics::infer(&filename, None);
 
             backups.push(BackupFileSummary {
                 filename,
                 created_at,
                 size_bytes: metadata.len(),
+                semantics,
             });
         }
 
@@ -100,6 +102,7 @@ impl AdminDomainService {
 
         match &self.database {
             DatabasePool::Postgres(_) => {
+                let semantics = BackupSemantics::from_database_kind(DatabaseKind::Postgres);
                 let filename = format!("backup_{}.sql", Uuid::new_v4());
                 let backup_path = backup_path(&filename)?;
                 let database = self.database.clone();
@@ -214,6 +217,7 @@ impl AdminDomainService {
                 if let Err(error) = persist_backup_manifest(
                     &filename,
                     DatabaseKind::Postgres,
+                    semantics.clone(),
                     created_at,
                     &storage_settings,
                 )
@@ -247,6 +251,10 @@ impl AdminDomainService {
                         "result": "completed",
                         "risk_level": "info",
                         "database_kind": "postgresql",
+                        "backup_kind": semantics.backup_kind.clone(),
+                        "backup_scope": semantics.backup_scope.clone(),
+                        "restore_mode": semantics.restore_mode.clone(),
+                        "ui_restore_supported": semantics.ui_restore_supported,
                         "backup_size_bytes": backup_size_bytes,
                     }),
                 );
@@ -254,9 +262,11 @@ impl AdminDomainService {
                 Ok(BackupResponse {
                     filename,
                     created_at,
+                    semantics,
                 })
             }
             DatabasePool::MySql(_) => {
+                let semantics = BackupSemantics::from_database_kind(DatabaseKind::MySql);
                 let filename = format!("backup_{}.mysql.sql", Uuid::new_v4());
                 let backup_path = backup_path(&filename)?;
                 let database = self.database.clone();
@@ -393,6 +403,7 @@ impl AdminDomainService {
                 if let Err(error) = persist_backup_manifest(
                     &filename,
                     DatabaseKind::MySql,
+                    semantics.clone(),
                     created_at,
                     &storage_settings,
                 )
@@ -429,6 +440,10 @@ impl AdminDomainService {
                         "result": "completed",
                         "risk_level": "info",
                         "database_kind": "mysql",
+                        "backup_kind": semantics.backup_kind.clone(),
+                        "backup_scope": semantics.backup_scope.clone(),
+                        "restore_mode": semantics.restore_mode.clone(),
+                        "ui_restore_supported": semantics.ui_restore_supported,
                         "backup_size_bytes": backup_size_bytes,
                         "warning_excerpt": warning_excerpt,
                     }),
@@ -437,9 +452,11 @@ impl AdminDomainService {
                 Ok(BackupResponse {
                     filename,
                     created_at,
+                    semantics,
                 })
             }
             DatabasePool::Sqlite(pool) => {
+                let semantics = BackupSemantics::from_database_kind(DatabaseKind::Sqlite);
                 let filename = format!("backup_{}.sqlite3", Uuid::new_v4());
                 let backup_path = backup_path(&filename)?;
                 let backup_sql = format!(
@@ -503,6 +520,7 @@ impl AdminDomainService {
                 if let Err(error) = persist_backup_manifest(
                     &filename,
                     DatabaseKind::Sqlite,
+                    semantics.clone(),
                     created_at,
                     &storage_settings,
                 )
@@ -536,6 +554,10 @@ impl AdminDomainService {
                         "result": "completed",
                         "risk_level": "info",
                         "database_kind": "sqlite",
+                        "backup_kind": semantics.backup_kind.clone(),
+                        "backup_scope": semantics.backup_scope.clone(),
+                        "restore_mode": semantics.restore_mode.clone(),
+                        "ui_restore_supported": semantics.ui_restore_supported,
                         "backup_size_bytes": backup_size_bytes,
                     }),
                 );
@@ -543,6 +565,7 @@ impl AdminDomainService {
                 Ok(BackupResponse {
                     filename,
                     created_at,
+                    semantics,
                 })
             }
         }
@@ -688,12 +711,14 @@ fn is_valid_backup_filename(filename: &str) -> bool {
 async fn persist_backup_manifest(
     filename: &str,
     database_kind: DatabaseKind,
+    semantics: BackupSemantics,
     created_at: DateTime<Utc>,
     storage_settings: &StorageSettingsSnapshot,
 ) -> anyhow::Result<()> {
     let manifest = capture_backup_manifest(
         filename,
         database_kind,
+        semantics,
         created_at,
         storage_settings,
         true,
@@ -753,15 +778,8 @@ fn parse_mysql_dump_target(database_url: &str) -> anyhow::Result<MySqlDumpTarget
     })
 }
 
-fn mysql_local_ssl_disable_args(target: &MySqlDumpTarget) -> &'static [&'static str] {
-    if matches!(
-        target.host.as_str(),
-        "mysql" | "localhost" | "127.0.0.1" | "::1"
-    ) {
-        &["--skip-ssl"]
-    } else {
-        &[]
-    }
+fn mysql_local_ssl_disable_args(_target: &MySqlDumpTarget) -> &'static [&'static str] {
+    &[]
 }
 
 fn backup_path(filename: &str) -> Result<PathBuf, AppError> {

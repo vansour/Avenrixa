@@ -9,16 +9,17 @@ mod queries;
 mod restore;
 mod settings;
 
+use crate::cache::CacheConnection;
 use crate::config::Config;
 use crate::db::DatabasePool;
+use crate::models::ComponentStatus;
 use crate::storage_backend::StorageManager;
-
-use redis::aio::ConnectionManager;
 
 /// 管理领域服务
 pub struct AdminDomainService {
     pub(super) database: DatabasePool,
-    pub(super) redis: Option<ConnectionManager>,
+    pub(super) cache: Option<CacheConnection>,
+    pub(super) cache_status: ComponentStatus,
     pub(super) config: Config,
     pub(super) storage_manager: std::sync::Arc<StorageManager>,
 }
@@ -26,13 +27,15 @@ pub struct AdminDomainService {
 impl AdminDomainService {
     pub fn new(
         database: DatabasePool,
-        redis: Option<ConnectionManager>,
+        cache: Option<CacheConnection>,
+        cache_status: ComponentStatus,
         config: Config,
         storage_manager: std::sync::Arc<StorageManager>,
     ) -> Self {
         Self {
             database,
-            redis,
+            cache,
+            cache_status,
             config,
             storage_manager,
         }

@@ -1,7 +1,9 @@
 use sqlx::{MySql, Postgres, QueryBuilder, Sqlite};
 use uuid::Uuid;
 
-use super::sql::{IMAGE_SELECT_COLUMNS, IMAGE_SELECT_WITH_TOTAL_COUNT};
+use super::sql::{
+    IMAGE_SELECT_COLUMNS, IMAGE_SELECT_WITH_TOTAL_COUNT, MYSQL_IMAGE_SELECT_WITH_TOTAL_COUNT,
+};
 use super::{MySqlImageRepository, PostgresImageRepository, SqliteImageRepository};
 use crate::models::Image;
 
@@ -181,7 +183,7 @@ impl MySqlImageRepository {
             .map(|value| value.to_lowercase());
 
         let mut builder = QueryBuilder::<MySql>::new("SELECT ");
-        builder.push(IMAGE_SELECT_WITH_TOTAL_COUNT);
+        builder.push(MYSQL_IMAGE_SELECT_WITH_TOTAL_COUNT);
         builder.push(" FROM images WHERE images.user_id = ");
         builder.push_bind(user_id);
         builder.push(" AND images.deleted_at IS NULL AND images.status = 'active'");
@@ -330,7 +332,7 @@ impl MySqlImageRepository {
         offset: i32,
     ) -> Result<Vec<Image>, sqlx::Error> {
         let total: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM images WHERE user_id = ? AND deleted_at IS NOT NULL",
+            "SELECT CAST(COUNT(*) AS SIGNED) FROM images WHERE user_id = ? AND deleted_at IS NOT NULL",
         )
         .bind(user_id)
         .fetch_one(&self.pool)

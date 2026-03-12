@@ -50,14 +50,12 @@ pub async fn cleanup_expired_images(
 
         let can_delete_row = if referenced_filenames.contains(filename) {
             true
+        } else if let Some(result) = file_delete_results.get(filename) {
+            *result
         } else {
-            if let Some(result) = file_delete_results.get(filename) {
-                *result
-            } else {
-                let delete_ok = tokio::fs::remove_file(&file_storage_path).await.is_ok();
-                file_delete_results.insert(filename.clone(), delete_ok);
-                delete_ok
-            }
+            let delete_ok = tokio::fs::remove_file(&file_storage_path).await.is_ok();
+            file_delete_results.insert(filename.clone(), delete_ok);
+            delete_ok
         };
 
         if can_delete_row {

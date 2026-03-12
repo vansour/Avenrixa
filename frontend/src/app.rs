@@ -42,14 +42,10 @@ pub fn App() -> Element {
         let mut show_first_run_guide = show_first_run_guide;
         move || {
             let current_user = auth_store.user();
-            let current_bootstrap_status = bootstrap_status();
             let current_install_status = install_status();
             let boot_ready = is_boot_ready();
 
             let eligible = boot_ready
-                && current_bootstrap_status
-                    .as_ref()
-                    .is_some_and(|status| status.mode == "runtime")
                 && current_install_status
                     .as_ref()
                     .is_some_and(|status| status.installed)
@@ -77,7 +73,7 @@ pub fn App() -> Element {
         let bootstrap_status = bootstrap_status;
         let site_name = site_name;
         let install_status = install_status;
-        let is_boot_ready = is_boot_ready;
+        let boot_ready_signal = is_boot_ready;
         move || {
             let install_service = install_service.clone();
             let auth_service = auth_service.clone();
@@ -86,25 +82,8 @@ pub fn App() -> Element {
             let mut bootstrap_status = bootstrap_status;
             let mut site_name = site_name;
             let mut install_status = install_status;
-            let mut is_boot_ready = is_boot_ready;
+            let mut is_boot_ready = boot_ready_signal;
             async move {
-                let bootstrap = match install_service.get_bootstrap_status().await {
-                    Ok(status) => status,
-                    Err(err) => {
-                        toast_store.show_error(format!("初始化引导状态失败: {}", err));
-                        is_boot_ready.set(true);
-                        return;
-                    }
-                };
-
-                bootstrap_status.set(Some(bootstrap.clone()));
-                if bootstrap.mode != "runtime" {
-                    auth_store.logout();
-                    install_status.set(None);
-                    is_boot_ready.set(true);
-                    return;
-                }
-
                 let status = match install_service.get_install_status().await {
                     Ok(status) => status,
                     Err(err) => {
@@ -118,6 +97,16 @@ pub fn App() -> Element {
                 install_status.set(Some(status.clone()));
 
                 if !status.installed {
+                    let bootstrap = match install_service.get_bootstrap_status().await {
+                        Ok(status) => status,
+                        Err(err) => {
+                            toast_store.show_error(format!("初始化引导状态失败: {}", err));
+                            is_boot_ready.set(true);
+                            return;
+                        }
+                    };
+
+                    bootstrap_status.set(Some(bootstrap));
                     auth_store.logout();
                     is_boot_ready.set(true);
                     return;
@@ -191,10 +180,10 @@ pub fn App() -> Element {
                     section { class: "dashboard-page page-hero",
                         h1 { "正在初始化站点" }
                     }
-                } else if let Some(status) = bootstrap_status() {
-                    if status.mode == "bootstrap" {
+                } else if let Some(bootstrap) = bootstrap_status() {
+                    if bootstrap.mode == "bootstrap" {
                         BootstrapDatabasePage {
-                            status: status.clone(),
+                            status: bootstrap.clone(),
                             on_status_updated: move |next: BootstrapStatusResponse| {
                                 bootstrap_status.set(Some(next));
                             },
@@ -202,6 +191,7 @@ pub fn App() -> Element {
                     } else if let Some(status) = install_status() {
                         if !status.installed {
                             InstallWizardPage {
+                                bootstrap_status: bootstrap.clone(),
                                 initial_config: status.config.clone(),
                                 on_installed: move |response: crate::types::api::InstallBootstrapResponse| {
                                     site_name.set(response.config.site_name.clone());
@@ -233,7 +223,7 @@ pub fn App() -> Element {
                                 },
                             }
                         } else {
-                            LoginPage {}
+                            LoginPage { mail_enabled: status.config.mail_enabled }
                         }
                     } else {
                         section { class: "dashboard-page page-hero",
@@ -245,7 +235,7 @@ pub fn App() -> Element {
                     if status.installed && is_authenticated {
                         UploadPage {}
                     } else {
-                        LoginPage {}
+                        LoginPage { mail_enabled: status.config.mail_enabled }
                     }
                 } else {
                     section { class: "dashboard-page page-hero",

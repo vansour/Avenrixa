@@ -1,4 +1,4 @@
-name: SQLite E2E
+name: SQLite E2E (Supplemental)
 
 on:
   workflow_dispatch:
@@ -13,9 +13,15 @@ env:
 
 jobs:
   sqlite-e2e:
-    name: SQLite E2E Smoke
+    name: SQLite E2E Smoke [Supplemental] (${{ matrix.cache_mode }})
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        cache_mode:
+          - redis8
+          - none
 
     steps:
       - name: Checkout
@@ -30,7 +36,10 @@ jobs:
         id: sqlite_e2e
         continue-on-error: true
         env:
-          COMPOSE_PROJECT_NAME: vansour-image-sqlite-e2e-ci
+          COMPOSE_PROJECT_NAME: vansour-image-sqlite-e2e-ci-${{ matrix.cache_mode }}
+          COMPOSE_VARIANT: sqlite
+          COMPOSE_ENABLE_MAILPIT: "1"
+          CACHE_MODE: ${{ matrix.cache_mode }}
           DOCKER_BUILDKIT: "1"
           COMPOSE_DOCKER_CLI_BUILD: "1"
           PRESERVE_STACK_ON_FAILURE: "1"
@@ -38,14 +47,24 @@ jobs:
 
       - name: Dump compose state after failure
         if: steps.sqlite_e2e.outcome != 'success'
+        env:
+          COMPOSE_PROJECT_NAME: vansour-image-sqlite-e2e-ci-${{ matrix.cache_mode }}
+          COMPOSE_VARIANT: sqlite
+          COMPOSE_ENABLE_MAILPIT: "1"
+          CACHE_MODE: ${{ matrix.cache_mode }}
         run: |
-          docker compose -p vansour-image-sqlite-e2e-ci -f compose.sqlite.yml -f compose.sqlite.mailpit.yml ps
-          docker compose -p vansour-image-sqlite-e2e-ci -f compose.sqlite.yml -f compose.sqlite.mailpit.yml logs --no-color --tail=300
+          ./scripts/compose-runtime.sh ps
+          ./scripts/compose-runtime.sh logs --no-color --tail=300
 
       - name: Cleanup SQLite E2E stack
         if: always()
+        env:
+          COMPOSE_PROJECT_NAME: vansour-image-sqlite-e2e-ci-${{ matrix.cache_mode }}
+          COMPOSE_VARIANT: sqlite
+          COMPOSE_ENABLE_MAILPIT: "1"
+          CACHE_MODE: ${{ matrix.cache_mode }}
         run: |
-          docker compose -p vansour-image-sqlite-e2e-ci -f compose.sqlite.yml -f compose.sqlite.mailpit.yml down -v --remove-orphans || true
+          ./scripts/compose-runtime.sh down -v --remove-orphans || true
 
       - name: Mark workflow failed when smoke failed
         if: steps.sqlite_e2e.outcome != 'success'

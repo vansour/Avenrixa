@@ -34,14 +34,14 @@ fn validate_enabled_mail_settings(settings: &RuntimeSettings) -> Result<(), AppE
 
     if settings.mail_link_base_url.trim().is_empty() {
         return Err(AppError::ValidationError(
-            "启用邮件服务时邮件跳转地址不能为空".to_string(),
+            "启用邮件服务时站点访问地址不能为空".to_string(),
         ));
     }
     let link_url = Url::parse(&settings.mail_link_base_url)
-        .map_err(|_| AppError::ValidationError("邮件跳转地址格式无效".to_string()))?;
+        .map_err(|_| AppError::ValidationError("站点访问地址格式无效".to_string()))?;
     if !matches!(link_url.scheme(), "http" | "https") {
         return Err(AppError::ValidationError(
-            "邮件跳转地址必须是 http 或 https".to_string(),
+            "站点访问地址必须是 http 或 https".to_string(),
         ));
     }
 
@@ -408,7 +408,7 @@ mod tests {
         assert!(matches!(
             validate_and_merge(base_runtime_settings(), req),
             Err(AppError::ValidationError(message))
-                if message == "邮件跳转地址必须是 http 或 https"
+                if message == "站点访问地址必须是 http 或 https"
         ));
     }
 

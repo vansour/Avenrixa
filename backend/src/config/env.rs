@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
 
-use super::types::{Config, DatabaseKind, default_max_connections};
+use super::types::{Config, DatabaseKind};
 
 impl Config {
     pub fn from_env() -> Self {
@@ -29,12 +29,12 @@ impl Config {
             }
             config.database.url = db_url;
         }
-        if let Ok(max_connections) = std::env::var("DATABASE_MAX_CONNECTIONS") {
-            config.database.max_connections =
-                max_connections.parse().unwrap_or(default_max_connections());
-        }
-        if let Ok(redis_url) = std::env::var("REDIS_URL") {
-            config.redis.url = redis_url;
+        if let Ok(cache_url) = std::env::var("REDIS_URL") {
+            config.cache_backend.url = if cache_url.trim().is_empty() {
+                None
+            } else {
+                Some(cache_url)
+            };
         }
         if let Ok(storage_path) = std::env::var("STORAGE_PATH") {
             config.storage.path = storage_path;

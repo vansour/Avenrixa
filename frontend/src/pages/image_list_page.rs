@@ -1,4 +1,5 @@
-use crate::app_context::{use_image_service, use_image_store, use_toast_store};
+use crate::app_context::{use_auth_store, use_image_service, use_image_store, use_toast_store};
+use crate::auth_session::{auth_session_expired_message, handle_auth_session_error};
 use crate::components::{ImageGrid, Loading};
 use crate::store::ImageCollectionKind;
 use crate::types::api::PaginationParams;
@@ -20,12 +21,14 @@ fn open_in_new_tab(_url: &str) -> bool {
 /// 图片列表页面组件
 #[component]
 pub fn ImageListPage() -> Element {
+    let auth_store = use_auth_store();
     let image_service = use_image_service();
     let image_store = use_image_store();
     let toast_store = use_toast_store();
     let kind = ImageCollectionKind::Active;
 
     let _load_images = use_resource({
+        let auth_store = auth_store.clone();
         let image_service = image_service.clone();
         let image_store = image_store.clone();
         let toast_store = toast_store.clone();
@@ -34,6 +37,7 @@ pub fn ImageListPage() -> Element {
             let page = state.current_page.max(1) as i32;
             let size = state.page_size.clamp(1, 100) as i32;
             let _ = state.reload_token;
+            let auth_store = auth_store.clone();
             let image_service = image_service.clone();
             let image_store = image_store.clone();
             let toast_store = toast_store.clone();
@@ -56,9 +60,13 @@ pub fn ImageListPage() -> Element {
                         }
                     }
                     Err(error) => {
-                        let message = format!("加载图片失败: {}", error);
-                        image_store.set_error_message(kind, message.clone());
-                        toast_store.show_error(message);
+                        if handle_auth_session_error(&auth_store, &toast_store, &error) {
+                            image_store.set_error_message(kind, auth_session_expired_message());
+                        } else {
+                            let message = format!("加载图片失败: {}", error);
+                            image_store.set_error_message(kind, message.clone());
+                            toast_store.show_error(message);
+                        }
                     }
                 }
 
@@ -104,6 +112,7 @@ pub fn ImageListPage() -> Element {
     };
 
     let image_service_for_delete = image_service.clone();
+    let auth_store_for_delete = auth_store.clone();
     let image_store_for_delete = image_store.clone();
     let toast_store_for_delete = toast_store.clone();
     let handle_delete = move |image: ImageItem| {
@@ -113,6 +122,7 @@ pub fn ImageListPage() -> Element {
         }
 
         let image_service = image_service_for_delete.clone();
+        let auth_store = auth_store_for_delete.clone();
         let image_store = image_store_for_delete.clone();
         let toast_store = toast_store_for_delete.clone();
         spawn(async move {
@@ -128,7 +138,11 @@ pub fn ImageListPage() -> Element {
                     image_store.mark_for_reload(kind);
                 }
                 Err(error) => {
-                    toast_store.show_error(format!("删除失败: {}", error));
+                    if handle_auth_session_error(&auth_store, &toast_store, &error) {
+                        image_store.set_error_message(kind, auth_session_expired_message());
+                    } else {
+                        toast_store.show_error(format!("删除失败: {}", error));
+                    }
                 }
             }
 
@@ -156,6 +170,7 @@ pub fn ImageListPage() -> Element {
     };
 
     let image_service_for_batch_delete = image_service.clone();
+    let auth_store_for_batch_delete = auth_store.clone();
     let image_store_for_batch_delete = image_store.clone();
     let toast_store_for_batch_delete = toast_store.clone();
     let handle_delete_selected = move |_| {
@@ -167,6 +182,7 @@ pub fn ImageListPage() -> Element {
         let delete_list: Vec<String> = state.selected_ids.iter().cloned().collect();
         let count = delete_list.len();
         let image_service = image_service_for_batch_delete.clone();
+        let auth_store = auth_store_for_batch_delete.clone();
         let image_store = image_store_for_batch_delete.clone();
         let toast_store = toast_store_for_batch_delete.clone();
 
@@ -180,7 +196,11 @@ pub fn ImageListPage() -> Element {
                     image_store.mark_for_reload(kind);
                 }
                 Err(error) => {
-                    toast_store.show_error(format!("批量删除失败: {}", error));
+                    if handle_auth_session_error(&auth_store, &toast_store, &error) {
+                        image_store.set_error_message(kind, auth_session_expired_message());
+                    } else {
+                        toast_store.show_error(format!("批量删除失败: {}", error));
+                    }
                 }
             }
 

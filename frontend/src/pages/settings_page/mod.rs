@@ -3,8 +3,10 @@ mod state;
 mod view;
 
 use crate::app_context::{use_auth_store, use_settings_service, use_toast_store};
-use crate::store::SettingsAnchor;
+use crate::auth_session::{auth_session_expired_message, handle_auth_session_error};
+use crate::store::{AuthStore, SettingsAnchor, ToastStore};
 use crate::types::api::AdminSettingsConfig;
+use crate::types::errors::AppError;
 use dioxus::prelude::*;
 use gloo_timers::future::TimeoutFuture;
 
@@ -17,10 +19,25 @@ use view::{
     ADMIN_SETTINGS_SECTIONS, SettingsSection, USER_SETTINGS_SECTIONS, render_settings_fields,
 };
 
-pub use state::SettingsFormState;
-pub use view::{render_general_fields, render_storage_fields};
+pub use state::{SettingsFormState, default_mail_link_base_url};
+pub use view::{
+    render_general_fields, render_general_fields_compact, render_s3_fields, render_storage_fields,
+    render_storage_fields_compact,
+};
 
 const SETTINGS_LOAD_RETRY_DELAYS_MS: [u32; 3] = [0, 500, 1500];
+
+pub(super) fn settings_auth_expired_message() -> String {
+    auth_session_expired_message()
+}
+
+pub(super) fn handle_settings_auth_error(
+    auth_store: &AuthStore,
+    toast_store: &ToastStore,
+    err: &AppError,
+) -> bool {
+    handle_auth_session_error(auth_store, toast_store, err)
+}
 
 #[component]
 pub fn SettingsPage(
@@ -144,12 +161,13 @@ pub fn SettingsPage(
                 }
 
                 if let Some(err) = last_error {
-                    if err.should_redirect_login() {
-                        auth_store.logout();
+                    if handle_settings_auth_error(&auth_store, &toast_store, &err) {
+                        error_message.set(settings_auth_expired_message());
+                    } else {
+                        let message = format!("加载设置失败: {}", err);
+                        error_message.set(message.clone());
+                        toast_store.show_error(message);
                     }
-                    let message = format!("加载设置失败: {}", err);
-                    error_message.set(message.clone());
-                    toast_store.show_error(message);
                 }
 
                 is_loading.set(false);
@@ -158,8 +176,9 @@ pub fn SettingsPage(
     });
 
     let settings_service_for_save = settings_service.clone();
+    let auth_store_for_save = auth_store.clone();
     let toast_store_for_save = toast_store.clone();
-    let on_site_name_updated_for_save = on_site_name_updated.clone();
+    let on_site_name_updated_for_save = on_site_name_updated;
     let handle_save = move |_| {
         if is_saving() {
             return;
@@ -173,9 +192,10 @@ pub fn SettingsPage(
 
         let req = form.build_update_request();
         let settings_service = settings_service_for_save.clone();
+        let auth_store = auth_store_for_save.clone();
         let toast_store = toast_store_for_save.clone();
         let mut form = form;
-        let on_site_name_updated = on_site_name_updated_for_save.clone();
+        let on_site_name_updated = on_site_name_updated_for_save;
         spawn(async move {
             is_saving.set(true);
             error_message.set(String::new());
@@ -191,9 +211,13 @@ pub fn SettingsPage(
                     }
                 }
                 Err(err) => {
-                    let message = format!("保存设置失败: {}", err);
-                    error_message.set(message.clone());
-                    toast_store.show_error(message);
+                    if handle_settings_auth_error(&auth_store, &toast_store, &err) {
+                        error_message.set(settings_auth_expired_message());
+                    } else {
+                        let message = format!("保存设置失败: {}", err);
+                        error_message.set(message.clone());
+                        toast_store.show_error(message);
+                    }
                 }
             }
 
@@ -461,7 +485,7 @@ fn trimmed_option_eq(draft: String, current: Option<String>) -> bool {
 
 fn current_storage_summary(form: SettingsFormState) -> &'static str {
     if form.is_s3_backend() {
-        "S3 / MinIO"
+        "对象存储"
     } else {
         "本地目录"
     }

@@ -1,3 +1,4 @@
+use crate::cache::CacheBackendError;
 use axum::http::StatusCode;
 use thiserror::Error;
 
@@ -56,7 +57,7 @@ pub enum AppError {
     #[error("数据库操作失败")]
     DatabaseError(#[from] sqlx::Error),
     #[error("缓存操作失败")]
-    CacheError(#[from] redis::RedisError),
+    CacheError(#[from] CacheBackendError),
     #[error("文件操作失败")]
     IoError(#[from] std::io::Error),
     #[error("内部服务器错误")]

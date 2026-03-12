@@ -37,10 +37,7 @@ impl Config {
             }
         }
 
-        if self.redis.url.trim().is_empty() {
-            return Err(ConfigError::RedisUrlEmpty);
-        }
-        if self.redis.ttl == 0 {
+        if self.cache_backend.ttl == 0 {
             return Err(ConfigError::InvalidTtl);
         }
 
@@ -93,7 +90,9 @@ impl Config {
             return Err(ConfigError::InvalidCookieMaxAge);
         }
 
-        if self.cache.list_ttl == 0 || self.cache.detail_ttl == 0 || self.cache.categories_ttl == 0
+        if self.cache_policy.list_ttl == 0
+            || self.cache_policy.detail_ttl == 0
+            || self.cache_policy.categories_ttl == 0
         {
             return Err(ConfigError::InvalidTtl);
         }

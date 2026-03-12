@@ -3,6 +3,12 @@
 # 阶段 1: 统一构建环境 (Builder)
 # ==========================================
 FROM rust:trixie AS builder
+ARG APP_VERSION=1.0.0
+ARG APP_REVISION=dev
+ARG BUILD_DATE=unknown
+ENV APP_VERSION=${APP_VERSION}
+ENV APP_REVISION=${APP_REVISION}
+ENV BUILD_DATE=${BUILD_DATE}
 WORKDIR /app
 
 # 1. 安装前端构建强依赖的目标架构
@@ -80,6 +86,16 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 # 阶段 2: 最终运行时环境 (Runtime)
 # ==========================================
 FROM debian:trixie-slim AS runtime
+ARG APP_VERSION=1.0.0
+ARG APP_REVISION=dev
+ARG BUILD_DATE=unknown
+LABEL org.opencontainers.image.title="vansour-image" \
+      org.opencontainers.image.version=${APP_VERSION} \
+      org.opencontainers.image.revision=${APP_REVISION} \
+      org.opencontainers.image.created=${BUILD_DATE}
+ENV APP_VERSION=${APP_VERSION}
+ENV APP_REVISION=${APP_REVISION}
+ENV BUILD_DATE=${BUILD_DATE}
 
 # 安装运行时必需依赖（以 root 用户运行，避免卷权限问题）
 RUN apt-get update && apt-get install -y --no-install-recommends \

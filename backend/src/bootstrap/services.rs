@@ -1,4 +1,4 @@
-use super::redis::RedisConnections;
+use super::cache::CacheConnections;
 use crate::auth::AuthService;
 use crate::config::Config;
 use crate::db::DatabasePool;
@@ -29,7 +29,7 @@ pub struct ServiceBundle {
 
 pub async fn build_services(
     database: &DatabasePool,
-    redis_connections: &RedisConnections,
+    cache_connections: &CacheConnections,
     config: &Config,
 ) -> anyhow::Result<ServiceBundle> {
     let auth = AuthService::new(config)
@@ -65,7 +65,7 @@ pub async fn build_services(
                 DatabaseImageRepository::Postgres(PostgresImageRepository::new(pool.clone()));
             let image_dependencies = ImageDomainServiceDependencies::new(
                 database.clone(),
-                Some(redis_connections.app.clone()),
+                cache_connections.app.clone(),
                 config.clone(),
                 image_processor.clone(),
                 storage_manager.clone(),
@@ -80,7 +80,7 @@ pub async fn build_services(
                 DatabaseImageRepository::MySql(MySqlImageRepository::new(pool.clone()));
             let image_dependencies = ImageDomainServiceDependencies::new(
                 database.clone(),
-                Some(redis_connections.app.clone()),
+                cache_connections.app.clone(),
                 config.clone(),
                 image_processor.clone(),
                 storage_manager.clone(),
@@ -95,7 +95,7 @@ pub async fn build_services(
                 DatabaseImageRepository::Sqlite(SqliteImageRepository::new(pool.clone()));
             let image_dependencies = ImageDomainServiceDependencies::new(
                 database.clone(),
-                Some(redis_connections.app.clone()),
+                cache_connections.app.clone(),
                 config.clone(),
                 image_processor.clone(),
                 storage_manager.clone(),
@@ -110,7 +110,8 @@ pub async fn build_services(
 
     let admin_domain_service = Some(Arc::new(AdminDomainService::new(
         database.clone(),
-        Some(redis_connections.app.clone()),
+        cache_connections.app.clone(),
+        cache_connections.status.clone(),
         config.clone(),
         storage_manager.clone(),
     )));

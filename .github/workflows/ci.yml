@@ -44,25 +44,43 @@ jobs:
         run: cargo test --workspace
 
   compose-smoke:
-    name: Compose Smoke (${{ matrix.name }})
+    name: Compose Smoke [${{ matrix.coverage_label }}] (${{ matrix.name }})
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: default
+          - name: default-redis8
+            coverage_label: GA
             compose_project_name: vansour-image-ci
-            compose_file_paths: ""
+            compose_variant: postgres
+            smoke_flow: postgres
+            cache_mode: redis8
+          - name: default-no-cache
+            coverage_label: Supplemental
+            compose_project_name: vansour-image-ci-nocache
+            compose_variant: postgres
             smoke_flow: health
-          - name: mysql
+            cache_mode: none
+          - name: mysql-redis8
+            coverage_label: Supplemental
             compose_project_name: vansour-image-ci-mysql
-            compose_file_paths: "compose.mysql.yml"
+            compose_variant: mysql
             smoke_flow: auto
-          - name: mariadb
+            cache_mode: redis8
+          - name: mysql-dragonfly
+            coverage_label: Supplemental
+            compose_project_name: vansour-image-ci-mysql-dragonfly
+            compose_variant: mysql
+            smoke_flow: auto
+            cache_mode: dragonfly
+          - name: mariadb-redis8
+            coverage_label: Supplemental
             compose_project_name: vansour-image-ci-mariadb
-            compose_file_paths: "compose.mariadb.yml"
+            compose_variant: mariadb
             smoke_flow: auto
+            cache_mode: redis8
 
     steps:
       - name: Checkout
@@ -76,26 +94,33 @@ jobs:
       - name: Compose smoke check
         env:
           COMPOSE_PROJECT_NAME: ${{ matrix.compose_project_name }}
-          COMPOSE_FILE_PATHS: ${{ matrix.compose_file_paths }}
+          COMPOSE_VARIANT: ${{ matrix.compose_variant }}
           SMOKE_FLOW: ${{ matrix.smoke_flow }}
+          CACHE_MODE: ${{ matrix.cache_mode }}
           DOCKER_BUILDKIT: "1"
           COMPOSE_DOCKER_CLI_BUILD: "1"
         run: ./scripts/compose-smoke.sh
 
   browser-click-regression:
-    name: Browser Click Regression (${{ matrix.name }})
+    name: Browser Click Regression [Supplemental] (${{ matrix.name }})
     runs-on: ubuntu-latest
     timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: mysql
+          - name: mysql-redis8
             compose_project_name: vansour-image-ci-browser-mysql
-            compose_file_paths: "compose.mysql.yml"
-          - name: mariadb
+            compose_variant: mysql
+            cache_mode: redis8
+          - name: mysql-no-cache
+            compose_project_name: vansour-image-ci-browser-mysql-nocache
+            compose_variant: mysql
+            cache_mode: none
+          - name: mariadb-redis8
             compose_project_name: vansour-image-ci-browser-mariadb
-            compose_file_paths: "compose.mariadb.yml"
+            compose_variant: mariadb
+            cache_mode: redis8
 
     steps:
       - name: Checkout
@@ -116,7 +141,8 @@ jobs:
       - name: Browser click regression
         env:
           COMPOSE_PROJECT_NAME: ${{ matrix.compose_project_name }}
-          COMPOSE_FILE_PATHS: ${{ matrix.compose_file_paths }}
+          COMPOSE_VARIANT: ${{ matrix.compose_variant }}
+          CACHE_MODE: ${{ matrix.cache_mode }}
           DOCKER_BUILDKIT: "1"
           COMPOSE_DOCKER_CLI_BUILD: "1"
         run: ./scripts/browser-click-regression.sh

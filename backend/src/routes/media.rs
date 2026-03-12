@@ -3,11 +3,15 @@ use crate::db::DatabasePool;
 use crate::middleware::AuthUser;
 use axum::http::{StatusCode, header};
 use axum::{
+    body::Body,
     extract::{Path, State},
     response::Response,
 };
 use image::ImageFormat;
 use tracing::error;
+
+const PRIVATE_MEDIA_CACHE_CONTROL: &str = "private, no-store, max-age=0";
+const PRIVATE_MEDIA_VARY: &str = "Cookie, Authorization";
 
 fn is_valid_image_key(value: &str) -> bool {
     value.len() == 64 && value.chars().all(|character| character.is_ascii_hexdigit())
@@ -131,6 +135,16 @@ async fn active_image_exists_by_filename(
     Ok(exists.is_some())
 }
 
+fn private_media_response(content_type: &str, body: Body) -> Response {
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, content_type)
+        .header(header::CACHE_CONTROL, PRIVATE_MEDIA_CACHE_CONTROL)
+        .header(header::VARY, PRIVATE_MEDIA_VARY)
+        .body(body)
+        .unwrap()
+}
+
 pub(crate) async fn serve_thumbnail(
     Path(path_key): Path<String>,
     auth_user: AuthUser,
@@ -177,12 +191,10 @@ pub(crate) async fn serve_thumbnail(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
-    Ok(Response::builder()
-        .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, "image/webp")
-        .header(header::CACHE_CONTROL, "public, max-age=86400")
-        .body(axum::body::Body::from(cursor.into_inner()))
-        .unwrap())
+    Ok(private_media_response(
+        "image/webp",
+        Body::from(cursor.into_inner()),
+    ))
 }
 
 pub(crate) async fn serve_image(
@@ -215,10 +227,31 @@ pub(crate) async fn serve_image(
         })?;
     let mime = mime_guess::from_path(&filename).first_or_octet_stream();
 
-    Ok(Response::builder()
-        .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, mime.as_ref())
-        .header(header::CACHE_CONTROL, "public, max-age=86400")
-        .body(axum::body::Body::from(data))
-        .unwrap())
+    Ok(private_media_response(mime.as_ref(), Body::from(data)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn private_media_response_uses_non_shared_cache_headers() {
+        let response = private_media_response("image/png", Body::from(Vec::<u8>::new()));
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(header::CONTENT_TYPE),
+            Some(&axum::http::HeaderValue::from_static("image/png"))
+        );
+        assert_eq!(
+            response.headers().get(header::CACHE_CONTROL),
+            Some(&axum::http::HeaderValue::from_static(
+                PRIVATE_MEDIA_CACHE_CONTROL
+            ))
+        );
+        assert_eq!(
+            response.headers().get(header::VARY),
+            Some(&axum::http::HeaderValue::from_static(PRIVATE_MEDIA_VARY))
+        );
+    }
 }

@@ -1,7 +1,7 @@
 use super::types::{
-    CacheConfig, CleanupConfig, Config, CookieConfig, DatabaseConfig, DatabaseKind, ImageConfig,
-    MailConfig, RateLimitConfig, RedisConfig, ServerConfig, StorageConfig, default_frontend_dir,
-    default_max_connections,
+    CacheBackendConfig, CachePolicyConfig, CleanupConfig, Config, CookieConfig, DatabaseConfig,
+    DatabaseKind, ImageConfig, MailConfig, RateLimitConfig, ServerConfig, StorageConfig,
+    default_frontend_dir, default_max_connections,
 };
 
 impl Default for Config {
@@ -21,8 +21,8 @@ impl Default for Config {
                 url: String::new(),
                 max_connections: default_max_connections(),
             },
-            redis: RedisConfig {
-                url: "redis://dragonfly:6379".to_string(),
+            cache_backend: CacheBackendConfig {
+                url: None,
                 key_prefix: "img:".to_string(),
                 ttl: 3600,
             },
@@ -39,7 +39,7 @@ impl Default for Config {
                 enable_file_check: true,
                 file_check_concurrent_threshold: 50,
             },
-            cache: CacheConfig {
+            cache_policy: CachePolicyConfig {
                 list_ttl: 300,
                 detail_ttl: 1800,
                 categories_ttl: 3600,

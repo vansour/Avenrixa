@@ -19,7 +19,6 @@ pub struct BootstrapConfigFile {
     #[serde(default)]
     pub database_kind: DatabaseKind,
     pub database_url: String,
-    pub database_max_connections: Option<u32>,
 }
 
 #[derive(Clone)]
@@ -33,8 +32,12 @@ impl BootstrapConfigStore {
             .ok()
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from(DEFAULT_BOOTSTRAP_CONFIG_PATH));
+        Self::from_path(path)
+    }
+
+    pub(crate) fn from_path(path: impl Into<PathBuf>) -> Self {
         Self {
-            path: Arc::new(path),
+            path: Arc::new(path.into()),
         }
     }
 
@@ -60,17 +63,14 @@ impl BootstrapConfigStore {
     pub async fn save_database_config(
         &self,
         req: &UpdateBootstrapDatabaseConfigRequest,
-        fallback_max_connections: u32,
+        connection_test_max_connections: u32,
     ) -> anyhow::Result<UpdateBootstrapDatabaseConfigResponse> {
         let database_kind = DatabaseKind::parse(&req.database_kind)
             .map_err(|error| anyhow::anyhow!(error.to_string()))?;
         let database_url = normalize_database_target(database_kind, &req.database_url)
             .map_err(|error| anyhow::anyhow!(error.to_string()))?;
 
-        let max_connections = req
-            .database_max_connections
-            .unwrap_or(fallback_max_connections)
-            .max(1);
+        let max_connections = connection_test_max_connections.max(1);
 
         match database_kind {
             DatabaseKind::Postgres => {
@@ -83,7 +83,6 @@ impl BootstrapConfigStore {
         let payload = BootstrapConfigFile {
             database_kind,
             database_url,
-            database_max_connections: Some(max_connections),
         };
 
         if let Some(parent) = self.path().parent() {
@@ -96,7 +95,6 @@ impl BootstrapConfigStore {
             database_kind: payload.database_kind.as_str().to_string(),
             database_configured: true,
             database_url_masked: mask_database_url(payload.database_kind, &payload.database_url),
-            database_max_connections: max_connections,
             restart_required: true,
         })
     }
@@ -112,9 +110,6 @@ impl BootstrapConfigStore {
         {
             config.database.kind = file.database_kind;
             config.database.url = file.database_url.trim().to_string();
-            if let Some(max_connections) = file.database_max_connections {
-                config.database.max_connections = max_connections.max(1);
-            }
         }
         config
     }
@@ -133,9 +128,8 @@ impl BootstrapConfigStore {
             database_configured: file.is_some(),
             database_url_masked: file
                 .map(|file| mask_database_url(file.database_kind, &file.database_url)),
-            database_max_connections: file
-                .and_then(|file| file.database_max_connections)
-                .or(Some(config.database.max_connections)),
+            cache_configured: config.cache_backend.url.is_some(),
+            cache_url_masked: config.cache_backend.url.as_deref().map(mask_cache_url),
             restart_required: file.is_some(),
             runtime_error,
         }
@@ -148,7 +142,17 @@ impl BootstrapConfigStore {
             database_configured: !config.database.url.trim().is_empty(),
             database_url_masked: (!config.database.url.trim().is_empty())
                 .then(|| mask_database_url(config.database.kind, &config.database.url)),
-            database_max_connections: Some(config.database.max_connections),
+            cache_configured: config
+                .cache_backend
+                .url
+                .as_deref()
+                .is_some_and(|value| !value.trim().is_empty()),
+            cache_url_masked: config
+                .cache_backend
+                .url
+                .as_deref()
+                .filter(|value| !value.trim().is_empty())
+                .map(mask_cache_url),
             restart_required: false,
             runtime_error: None,
         }
@@ -204,32 +208,155 @@ fn normalize_database_target(
 
 pub fn mask_database_url(database_kind: DatabaseKind, database_url: &str) -> String {
     match database_kind {
-        DatabaseKind::Postgres => match reqwest::Url::parse(database_url) {
-            Ok(mut url) => {
-                let username = url.username().to_string();
-                if !username.is_empty() {
-                    let _ = url.set_username(&username);
-                }
-                if url.password().is_some() {
-                    let _ = url.set_password(Some("******"));
-                }
-                url.to_string()
+        DatabaseKind::Postgres => "postgresql://******".to_string(),
+        DatabaseKind::MySql => {
+            if database_url
+                .trim()
+                .to_ascii_lowercase()
+                .starts_with("mariadb://")
+            {
+                "mariadb://******".to_string()
+            } else {
+                "mysql://******".to_string()
             }
-            Err(_) => "******".to_string(),
-        },
-        DatabaseKind::MySql => match reqwest::Url::parse(database_url) {
-            Ok(mut url) => {
-                let username = url.username().to_string();
-                if !username.is_empty() {
-                    let _ = url.set_username(&username);
-                }
-                if url.password().is_some() {
-                    let _ = url.set_password(Some("******"));
-                }
-                url.to_string()
+        }
+        DatabaseKind::Sqlite => {
+            if database_url
+                .trim()
+                .to_ascii_lowercase()
+                .starts_with("sqlite://")
+            {
+                "sqlite://******".to_string()
+            } else {
+                "******".to_string()
             }
-            Err(_) => "******".to_string(),
-        },
-        DatabaseKind::Sqlite => database_url.to_string(),
+        }
+    }
+}
+
+pub fn mask_cache_url(cache_url: &str) -> String {
+    let trimmed = cache_url.trim().to_ascii_lowercase();
+    if trimmed.starts_with("rediss://") {
+        "rediss://******".to_string()
+    } else if trimmed.starts_with("redis://") {
+        "redis://******".to_string()
+    } else {
+        "******".to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config_with_database(kind: DatabaseKind, url: &str) -> Config {
+        let mut config = Config::default();
+        config.database.kind = kind;
+        config.database.url = url.to_string();
+        config
+    }
+
+    #[test]
+    fn resolve_runtime_database_config_uses_bootstrap_file_when_env_is_missing() {
+        let store = BootstrapConfigStore::from_env();
+        let config = Config::default();
+        let file = BootstrapConfigFile {
+            database_kind: DatabaseKind::Sqlite,
+            database_url: "sqlite:///data/sqlite/app.db".to_string(),
+        };
+
+        let resolved = store.resolve_runtime_database_config(config, Some(&file));
+
+        assert_eq!(resolved.database.kind, DatabaseKind::Sqlite);
+        assert_eq!(resolved.database.url, "sqlite:///data/sqlite/app.db");
+    }
+
+    #[test]
+    fn resolve_runtime_database_config_keeps_env_database_when_present() {
+        let store = BootstrapConfigStore::from_env();
+        let config = config_with_database(
+            DatabaseKind::Postgres,
+            "postgresql://user:pass@postgres:5432/image",
+        );
+        let file = BootstrapConfigFile {
+            database_kind: DatabaseKind::Sqlite,
+            database_url: "sqlite:///data/sqlite/app.db".to_string(),
+        };
+
+        let resolved = store.resolve_runtime_database_config(config.clone(), Some(&file));
+
+        assert_eq!(resolved.database.kind, config.database.kind);
+        assert_eq!(resolved.database.url, config.database.url);
+    }
+
+    #[test]
+    fn bootstrap_status_masks_saved_database_target_without_leaking_value() {
+        let store = BootstrapConfigStore::from_env();
+        let config = Config::default();
+        let file = BootstrapConfigFile {
+            database_kind: DatabaseKind::Sqlite,
+            database_url: "/srv/app/private.sqlite3".to_string(),
+        };
+
+        let status = store.bootstrap_status(&config, Some(&file), None);
+
+        assert_eq!(status.mode, "bootstrap");
+        assert_eq!(status.database_kind, "sqlite");
+        assert_eq!(status.database_url_masked.as_deref(), Some("******"));
+        assert!(!status.cache_configured);
+        assert_eq!(status.cache_url_masked, None);
+        assert!(status.database_configured);
+        assert!(status.restart_required);
+    }
+
+    #[test]
+    fn runtime_status_masks_database_target_without_leaking_value() {
+        let store = BootstrapConfigStore::from_env();
+        let config = config_with_database(
+            DatabaseKind::MySql,
+            "mysql://user:pass@mysql.internal:3306/image",
+        );
+
+        let status = store.runtime_status(&config);
+
+        assert_eq!(status.mode, "runtime");
+        assert_eq!(status.database_kind, "mysql");
+        assert_eq!(
+            status.database_url_masked.as_deref(),
+            Some("mysql://******")
+        );
+        assert!(!status.cache_configured);
+        assert_eq!(status.cache_url_masked, None);
+        assert!(status.database_configured);
+        assert!(!status.restart_required);
+    }
+
+    #[test]
+    fn mask_database_url_preserves_only_scheme_family() {
+        assert_eq!(
+            mask_database_url(
+                DatabaseKind::Postgres,
+                "postgresql://user:pass@postgres:5432/image"
+            ),
+            "postgresql://******"
+        );
+        assert_eq!(
+            mask_database_url(DatabaseKind::MySql, "mariadb://user:pass@mysql:3306/image"),
+            "mariadb://******"
+        );
+        assert_eq!(
+            mask_database_url(DatabaseKind::Sqlite, "sqlite:///data/sqlite/app.db"),
+            "sqlite://******"
+        );
+    }
+
+    #[test]
+    fn mask_cache_url_preserves_only_scheme_family() {
+        assert_eq!(mask_cache_url("redis://cache:6379"), "redis://******");
+        assert_eq!(
+            mask_cache_url("rediss://user:pass@cache.example.com:6380/0"),
+            "rediss://******"
+        );
+        assert_eq!(mask_cache_url("cache.internal"), "******");
     }
 }

@@ -61,6 +61,7 @@ impl AuthService {
         self.api_client
             .post_json("/api/v1/auth/change-password", &req)
             .await?;
+        self.auth_store.logout();
         Ok(())
     }
 

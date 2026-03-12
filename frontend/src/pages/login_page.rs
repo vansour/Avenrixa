@@ -67,7 +67,7 @@ fn initial_mode() -> LoginMode {
 
 /// 登录页面组件
 #[component]
-pub fn LoginPage() -> Element {
+pub fn LoginPage(mail_enabled: bool) -> Element {
     let auth_service = use_auth_service();
     let toast_store = use_toast_store();
 
@@ -91,6 +91,17 @@ pub fn LoginPage() -> Element {
     let show_request_reset = mode() == LoginMode::RequestReset;
     let show_confirm_reset = mode() == LoginMode::ConfirmReset;
     let show_confirm_email_verification = mode() == LoginMode::ConfirmEmailVerification;
+
+    use_effect(move || {
+        if mail_enabled {
+            return;
+        }
+
+        if matches!(mode(), LoginMode::Register | LoginMode::RequestReset) {
+            error_message.set(String::new());
+            mode.set(LoginMode::Login);
+        }
+    });
 
     let auth_service_for_login = auth_service.clone();
     let toast_store_for_login = toast_store.clone();
@@ -347,11 +358,13 @@ pub fn LoginPage() -> Element {
                         } else if show_confirm_email_verification {
                             "验证邮箱后即可使用新账号登录"
                         } else if show_register {
-                            "公开注册已开启，注册后需要完成邮箱验证"
+                            "注册后需要完成邮箱验证"
                         } else if show_confirm_reset {
                             "输入新密码以完成重置"
-                        } else {
+                        } else if mail_enabled {
                             "管理图片资产与访问权限"
+                        } else {
+                            "当前站点未启用邮件能力，仅支持已有账号直接登录"
                         }
                     }
 
@@ -521,23 +534,27 @@ pub fn LoginPage() -> Element {
                                 "注册后需要点击邮件中的验证链接激活账号。"
                             } else if show_confirm_email_verification {
                                 "验证成功后即可返回登录。"
-                            } else {
+                            } else if mail_enabled {
                                 "如果你还没有账号，可以先完成公开注册。"
+                            } else {
+                                "注册和密码找回入口会在邮件能力启用后开放。"
                             }
                         }
                         if show_login {
-                            div { class: "login-form",
-                                button {
-                                    class: "btn btn-ghost btn-full",
-                                    disabled: is_loading(),
-                                    onclick: switch_to_register,
-                                    "注册新账号"
-                                }
-                                button {
-                                    class: "btn btn-ghost btn-full",
-                                    disabled: is_loading(),
-                                    onclick: switch_to_request_reset,
-                                    "忘记密码"
+                            if mail_enabled {
+                                div { class: "login-form",
+                                    button {
+                                        class: "btn btn-ghost btn-full",
+                                        disabled: is_loading(),
+                                        onclick: switch_to_register,
+                                        "注册新账号"
+                                    }
+                                    button {
+                                        class: "btn btn-ghost btn-full",
+                                        disabled: is_loading(),
+                                        onclick: switch_to_request_reset,
+                                        "忘记密码"
+                                    }
                                 }
                             }
                         } else {

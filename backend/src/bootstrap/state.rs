@@ -1,17 +1,19 @@
+use super::cache::connect_cache;
 use super::database::initialize_database;
-use super::redis::connect_redis;
 use super::services::build_services;
 use crate::config::Config;
 use crate::db::AppState;
+use crate::domain::auth::state_repository::DatabaseAuthStateRepository;
 
 pub async fn build_app_state(config: Config) -> anyhow::Result<AppState> {
     let database = initialize_database(&config).await?;
-    let redis_connections = connect_redis(&config).await?;
-    let services = build_services(&database, &redis_connections, &config).await?;
+    let cache_connections = connect_cache(&config).await;
+    let services = build_services(&database, &cache_connections, &config).await?;
 
     Ok(AppState {
+        auth_state_repository: DatabaseAuthStateRepository::from_database(&database),
         database,
-        redis: redis_connections.app,
+        cache: cache_connections.app,
         config,
         auth: services.auth,
         auth_domain_service: services.auth_domain_service,

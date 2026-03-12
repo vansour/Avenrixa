@@ -1,7 +1,7 @@
 use crate::types::api::{AdminSettingsConfig, UpdateAdminSettingsConfigRequest};
 use dioxus::prelude::*;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct SettingsFormState {
     pub site_name: Signal<String>,
     pub storage_backend: Signal<String>,
@@ -40,7 +40,8 @@ impl SettingsFormState {
             .set(config.mail_smtp_password_set);
         self.mail_from_email.set(config.mail_from_email);
         self.mail_from_name.set(config.mail_from_name);
-        self.mail_link_base_url.set(config.mail_link_base_url);
+        self.mail_link_base_url
+            .set(default_mail_link_base_url(config.mail_link_base_url));
         self.s3_endpoint.set(config.s3_endpoint.unwrap_or_default());
         self.s3_region.set(config.s3_region.unwrap_or_default());
         self.s3_bucket.set(config.s3_bucket.unwrap_or_default());
@@ -76,7 +77,7 @@ impl SettingsFormState {
                 || mail_from_email.is_empty()
                 || mail_link_base_url.is_empty()
             {
-                return Err("启用邮件服务后请填写 SMTP 主机、发件邮箱和邮件跳转地址".to_string());
+                return Err("启用邮件服务后请填写 SMTP 主机、发件邮箱和站点访问地址".to_string());
             }
 
             if mail_smtp_port
@@ -131,6 +132,17 @@ impl SettingsFormState {
             s3_force_path_style: Some((self.s3_force_path_style)()),
         }
     }
+}
+
+pub fn default_mail_link_base_url(value: impl AsRef<str>) -> String {
+    let value = value.as_ref().trim();
+    if !value.is_empty() {
+        return value.to_string();
+    }
+
+    web_sys::window()
+        .and_then(|window| window.location().origin().ok())
+        .unwrap_or_default()
 }
 
 fn optional_trimmed(value: String) -> Option<String> {

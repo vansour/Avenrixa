@@ -1,10 +1,12 @@
 use crate::app_context::{use_admin_service, use_auth_service, use_auth_store, use_toast_store};
 use crate::components::{ConfirmationModal, ConfirmationTone};
+use crate::store::{AuthStore, ToastStore};
 use crate::types::api::{
     AdminUserSummary, AuditLog, BackupFileSummary, BackupObjectRollbackAnchor, BackupResponse,
     BackupRestorePrecheckResponse, BackupRestoreStatusResponse, BackupRestoreStorageSummary,
-    HealthStatus, PaginationParams, Setting, SystemStats, UpdateProfileRequest,
+    BackupSemantics, HealthStatus, PaginationParams, Setting, SystemStats, UpdateProfileRequest,
 };
+use crate::types::errors::AppError;
 use dioxus::prelude::*;
 use std::collections::HashMap;
 
@@ -12,6 +14,7 @@ use super::view::{
     AccountSettingsSection, AdvancedSettingsSection, AuditSettingsSection,
     MaintenanceSettingsSection, SecuritySettingsSection, SystemStatusSection, UsersSettingsSection,
 };
+use super::{handle_settings_auth_error, settings_auth_expired_message};
 
 #[derive(Clone, PartialEq, Eq)]
 struct ConfirmationPlan {
@@ -133,8 +136,8 @@ fn maintenance_confirmation_plan(action: MaintenanceAction) -> ConfirmationPlan 
     }
 }
 
-fn backup_supports_restore(filename: &str) -> bool {
-    filename.ends_with(".sqlite3") || filename.ends_with(".mysql.sql")
+fn backup_supports_restore(semantics: &BackupSemantics) -> bool {
+    semantics.ui_restore_supported
 }
 
 fn format_restore_bytes(bytes: u64) -> String {
@@ -167,7 +170,7 @@ fn summarize_restore_storage(storage: &BackupRestoreStorageSummary) -> String {
             .s3_endpoint
             .clone()
             .unwrap_or_else(|| "未配置 endpoint".to_string());
-        format!("S3/MinIO · {} · {}", bucket, endpoint)
+        format!("对象存储 · {} · {}", bucket, endpoint)
     } else {
         format!("本地目录 · {}", storage.local_storage_path)
     }
@@ -182,6 +185,25 @@ fn database_kind_label(kind: &str) -> &'static str {
         "PostgreSQL"
     } else {
         "数据库"
+    }
+}
+
+fn backup_kind_label(semantics: &BackupSemantics) -> &'static str {
+    match semantics.backup_kind.as_str() {
+        "sqlite-database-snapshot" => "SQLite 数据库快照",
+        "mysql-logical-dump" => "MySQL / MariaDB 逻辑导出",
+        "postgresql-logical-dump" => "PostgreSQL 逻辑导出",
+        _ => database_kind_label(&semantics.database_family),
+    }
+}
+
+fn restore_mode_label(semantics: &BackupSemantics) -> &'static str {
+    match semantics.restore_mode.as_str() {
+        "ui-restart-file-swap" => "重启前文件替换恢复",
+        "ui-restart-sql-import" => "重启前导入恢复",
+        "ops-tooling-only" => "仅运维脚本恢复",
+        "download-only" => "仅下载，不支持页面恢复",
+        _ => "恢复方式未知",
     }
 }
 
@@ -226,7 +248,11 @@ fn restore_confirmation_plan(precheck: &BackupRestorePrecheckResponse) -> Confir
         format!(
             "当前数据库后端：{}；目标备份类型：{}。",
             database_kind_label(&precheck.current_database_kind),
-            database_kind_label(&precheck.backup_database_kind)
+            backup_kind_label(&precheck.semantics)
+        ),
+        format!(
+            "当前恢复方式：{}。",
+            restore_mode_label(&precheck.semantics)
         ),
         "恢复不是在线热切换；真正的数据替换或 SQL 导入会发生在下一次服务启动前。".to_string(),
         format!(
@@ -368,6 +394,36 @@ fn merge_messages(primary: &str, secondary: &str) -> String {
     }
 }
 
+fn set_settings_load_error(
+    auth_store: &AuthStore,
+    toast_store: &ToastStore,
+    mut error_message: Signal<String>,
+    err: &AppError,
+    prefix: &str,
+) {
+    if handle_settings_auth_error(auth_store, toast_store, err) {
+        error_message.set(settings_auth_expired_message());
+    } else {
+        error_message.set(format!("{prefix}: {err}"));
+    }
+}
+
+fn set_settings_action_error(
+    auth_store: &AuthStore,
+    toast_store: &ToastStore,
+    mut error_message: Signal<String>,
+    err: &AppError,
+    prefix: &str,
+) {
+    if handle_settings_auth_error(auth_store, toast_store, err) {
+        error_message.set(settings_auth_expired_message());
+    } else {
+        let message = format!("{prefix}: {err}");
+        error_message.set(message.clone());
+        toast_store.show_error(message);
+    }
+}
+
 #[component]
 pub fn AccountSectionController() -> Element {
     let auth_service = use_auth_service();
@@ -409,8 +465,9 @@ pub fn AccountSectionController() -> Element {
                     toast_store.show_success("已退出登录".to_string());
                 }
                 Err(err) => {
-                    if err.should_redirect_login() {
-                        auth_store.logout();
+                    if handle_settings_auth_error(&auth_store, &toast_store, &err) {
+                        is_logging_out.set(false);
+                        return;
                     }
                     let message = format!("退出登录失败: {}", err);
                     toast_store.show_error(message.clone());
@@ -457,6 +514,7 @@ pub fn SecuritySectionController() -> Element {
     };
 
     let auth_service_for_password = auth_service.clone();
+    let auth_store_for_password = auth_store.clone();
     let toast_store_for_password = toast_store.clone();
     let handle_change_password = move |_| {
         if is_updating_password() {
@@ -494,6 +552,7 @@ pub fn SecuritySectionController() -> Element {
         }
 
         let auth_service = auth_service_for_password.clone();
+        let auth_store = auth_store_for_password.clone();
         let toast_store = toast_store_for_password.clone();
         spawn(async move {
             is_updating_password.set(true);
@@ -508,14 +567,18 @@ pub fn SecuritySectionController() -> Element {
                     current_password.set(String::new());
                     new_password.set(String::new());
                     confirm_password.set(String::new());
-                    let message = "密码已更新".to_string();
+                    let message = "密码已更新，请重新登录".to_string();
                     success_message.set(message.clone());
                     toast_store.show_success(message);
                 }
                 Err(err) => {
-                    let message = format!("修改密码失败: {}", err);
-                    error_message.set(message.clone());
-                    toast_store.show_error(message);
+                    set_settings_action_error(
+                        &auth_store,
+                        &toast_store,
+                        error_message,
+                        &err,
+                        "修改密码失败",
+                    );
                 }
             }
 
@@ -540,6 +603,8 @@ pub fn SecuritySectionController() -> Element {
 #[component]
 pub fn SystemSectionController() -> Element {
     let admin_service = use_admin_service();
+    let auth_store = use_auth_store();
+    let toast_store = use_toast_store();
 
     let mut health = use_signal(|| None::<HealthStatus>);
     let mut stats = use_signal(|| None::<SystemStats>);
@@ -549,9 +614,13 @@ pub fn SystemSectionController() -> Element {
 
     let _load_system_status = use_resource({
         let admin_service = admin_service.clone();
+        let auth_store = auth_store.clone();
+        let toast_store = toast_store.clone();
         move || {
             let _ = reload_tick();
             let admin_service = admin_service.clone();
+            let auth_store = auth_store.clone();
+            let toast_store = toast_store.clone();
             async move {
                 is_loading.set(true);
                 error_message.set(String::new());
@@ -559,6 +628,22 @@ pub fn SystemSectionController() -> Element {
                 let health_result = admin_service.get_health_status().await;
                 let stats_result = admin_service.get_system_stats().await;
                 let mut errors = Vec::new();
+
+                if let Err(err) = &health_result
+                    && handle_settings_auth_error(&auth_store, &toast_store, err)
+                {
+                    error_message.set(settings_auth_expired_message());
+                    is_loading.set(false);
+                    return;
+                }
+
+                if let Err(err) = &stats_result
+                    && handle_settings_auth_error(&auth_store, &toast_store, err)
+                {
+                    error_message.set(settings_auth_expired_message());
+                    is_loading.set(false);
+                    return;
+                }
 
                 match health_result {
                     Ok(next_health) => health.set(Some(next_health)),
@@ -600,6 +685,7 @@ pub fn SystemSectionController() -> Element {
 #[component]
 pub fn MaintenanceSectionController() -> Element {
     let admin_service = use_admin_service();
+    let auth_store = use_auth_store();
     let toast_store = use_toast_store();
 
     let mut error_message = use_signal(String::new);
@@ -624,9 +710,13 @@ pub fn MaintenanceSectionController() -> Element {
 
     let _load_backups = use_resource({
         let admin_service = admin_service.clone();
+        let auth_store = auth_store.clone();
+        let toast_store = toast_store.clone();
         move || {
             let _ = reload_backups_tick();
             let admin_service = admin_service.clone();
+            let auth_store = auth_store.clone();
+            let toast_store = toast_store.clone();
             async move {
                 is_loading_backups.set(true);
                 backup_list_error_message.set(String::new());
@@ -636,12 +726,19 @@ pub fn MaintenanceSectionController() -> Element {
                         let latest_backup = result.first().map(|backup| BackupResponse {
                             filename: backup.filename.clone(),
                             created_at: backup.created_at,
+                            semantics: backup.semantics.clone(),
                         });
                         backup_files.set(result);
                         last_backup.set(latest_backup);
                     }
                     Err(err) => {
-                        backup_list_error_message.set(format!("加载备份列表失败: {}", err));
+                        set_settings_load_error(
+                            &auth_store,
+                            &toast_store,
+                            backup_list_error_message,
+                            &err,
+                            "加载备份列表失败",
+                        );
                     }
                 }
 
@@ -652,9 +749,13 @@ pub fn MaintenanceSectionController() -> Element {
 
     let _load_restore_status = use_resource({
         let admin_service = admin_service.clone();
+        let auth_store = auth_store.clone();
+        let toast_store = toast_store.clone();
         move || {
             let _ = reload_restore_status_tick();
             let admin_service = admin_service.clone();
+            let auth_store = auth_store.clone();
+            let toast_store = toast_store.clone();
             async move {
                 is_loading_restore_status.set(true);
                 restore_status_error_message.set(String::new());
@@ -662,7 +763,13 @@ pub fn MaintenanceSectionController() -> Element {
                 match admin_service.get_backup_restore_status().await {
                     Ok(status) => restore_status.set(Some(status)),
                     Err(err) => {
-                        restore_status_error_message.set(format!("加载恢复状态失败: {}", err));
+                        set_settings_load_error(
+                            &auth_store,
+                            &toast_store,
+                            restore_status_error_message,
+                            &err,
+                            "加载恢复状态失败",
+                        );
                     }
                 }
 
@@ -672,9 +779,11 @@ pub fn MaintenanceSectionController() -> Element {
     });
 
     let admin_service_for_deleted_cleanup = admin_service.clone();
+    let auth_store_for_deleted_cleanup = auth_store.clone();
     let toast_store_for_deleted_cleanup = toast_store.clone();
     let run_cleanup_deleted = move || {
         let admin_service = admin_service_for_deleted_cleanup.clone();
+        let auth_store = auth_store_for_deleted_cleanup.clone();
         let toast_store = toast_store_for_deleted_cleanup.clone();
         spawn(async move {
             is_cleaning_deleted.set(true);
@@ -694,9 +803,13 @@ pub fn MaintenanceSectionController() -> Element {
                     toast_store.show_success(message);
                 }
                 Err(err) => {
-                    let message = format!("清理已删除文件失败: {}", err);
-                    error_message.set(message.clone());
-                    toast_store.show_error(message);
+                    set_settings_action_error(
+                        &auth_store,
+                        &toast_store,
+                        error_message,
+                        &err,
+                        "清理已删除文件失败",
+                    );
                 }
             }
 
@@ -720,9 +833,11 @@ pub fn MaintenanceSectionController() -> Element {
     };
 
     let admin_service_for_expired_cleanup = admin_service.clone();
+    let auth_store_for_expired_cleanup = auth_store.clone();
     let toast_store_for_expired_cleanup = toast_store.clone();
     let run_cleanup_expired = move || {
         let admin_service = admin_service_for_expired_cleanup.clone();
+        let auth_store = auth_store_for_expired_cleanup.clone();
         let toast_store = toast_store_for_expired_cleanup.clone();
         spawn(async move {
             is_cleaning_expired.set(true);
@@ -741,9 +856,13 @@ pub fn MaintenanceSectionController() -> Element {
                     toast_store.show_success(message);
                 }
                 Err(err) => {
-                    let message = format!("处理过期图片失败: {}", err);
-                    error_message.set(message.clone());
-                    toast_store.show_error(message);
+                    set_settings_action_error(
+                        &auth_store,
+                        &toast_store,
+                        error_message,
+                        &err,
+                        "处理过期图片失败",
+                    );
                 }
             }
 
@@ -767,6 +886,7 @@ pub fn MaintenanceSectionController() -> Element {
     };
 
     let admin_service_for_backup = admin_service.clone();
+    let auth_store_for_backup = auth_store.clone();
     let toast_store_for_backup = toast_store.clone();
     let handle_backup_database = move |_| {
         if is_cleaning_deleted()
@@ -779,6 +899,7 @@ pub fn MaintenanceSectionController() -> Element {
         }
 
         let admin_service = admin_service_for_backup.clone();
+        let auth_store = auth_store_for_backup.clone();
         let toast_store = toast_store_for_backup.clone();
         spawn(async move {
             is_backing_up.set(true);
@@ -795,9 +916,13 @@ pub fn MaintenanceSectionController() -> Element {
                     toast_store.show_success(message);
                 }
                 Err(err) => {
-                    let message = format!("数据库备份失败: {}", err);
-                    error_message.set(message.clone());
-                    toast_store.show_error(message);
+                    set_settings_action_error(
+                        &auth_store,
+                        &toast_store,
+                        error_message,
+                        &err,
+                        "数据库备份失败",
+                    );
                 }
             }
 
@@ -806,9 +931,11 @@ pub fn MaintenanceSectionController() -> Element {
     };
 
     let admin_service_for_delete_backup = admin_service.clone();
+    let auth_store_for_delete_backup = auth_store.clone();
     let toast_store_for_delete_backup = toast_store.clone();
     let run_delete_backup = move |filename: String| {
         let admin_service = admin_service_for_delete_backup.clone();
+        let auth_store = auth_store_for_delete_backup.clone();
         let toast_store = toast_store_for_delete_backup.clone();
         spawn(async move {
             deleting_backup_filename.set(Some(filename.clone()));
@@ -823,9 +950,13 @@ pub fn MaintenanceSectionController() -> Element {
                     reload_backups_tick.set(reload_backups_tick().wrapping_add(1));
                 }
                 Err(err) => {
-                    let message = format!("删除备份文件失败: {}", err);
-                    error_message.set(message.clone());
-                    toast_store.show_error(message);
+                    set_settings_action_error(
+                        &auth_store,
+                        &toast_store,
+                        error_message,
+                        &err,
+                        "删除备份文件失败",
+                    );
                 }
             }
 
@@ -879,9 +1010,11 @@ pub fn MaintenanceSectionController() -> Element {
     };
 
     let admin_service_for_schedule_restore = admin_service.clone();
+    let auth_store_for_schedule_restore = auth_store.clone();
     let toast_store_for_schedule_restore = toast_store.clone();
     let run_schedule_restore = move |filename: String| {
         let admin_service = admin_service_for_schedule_restore.clone();
+        let auth_store = auth_store_for_schedule_restore.clone();
         let toast_store = toast_store_for_schedule_restore.clone();
         spawn(async move {
             processing_restore_filename.set(Some(filename.clone()));
@@ -899,9 +1032,13 @@ pub fn MaintenanceSectionController() -> Element {
                     toast_store.show_success(message);
                 }
                 Err(err) => {
-                    let message = format!("写入恢复计划失败: {}", err);
-                    error_message.set(message.clone());
-                    toast_store.show_error(message);
+                    set_settings_action_error(
+                        &auth_store,
+                        &toast_store,
+                        error_message,
+                        &err,
+                        "写入恢复计划失败",
+                    );
                 }
             }
 
@@ -910,8 +1047,9 @@ pub fn MaintenanceSectionController() -> Element {
     };
 
     let admin_service_for_restore_precheck = admin_service.clone();
+    let auth_store_for_restore_precheck = auth_store.clone();
     let toast_store_for_restore_precheck = toast_store.clone();
-    let handle_restore_backup = move |filename: String| {
+    let handle_restore_backup = move |backup: BackupFileSummary| {
         if is_cleaning_deleted()
             || is_cleaning_expired()
             || is_backing_up()
@@ -921,10 +1059,12 @@ pub fn MaintenanceSectionController() -> Element {
             return;
         }
 
-        if !backup_supports_restore(&filename) {
+        let filename = backup.filename.clone();
+        if !backup_supports_restore(&backup.semantics) {
             let message = format!(
-                "当前恢复流程只支持 SQLite 或 MySQL / MariaDB 备份文件：{}",
-                filename
+                "当前页面不支持恢复这类备份：{}（{}）。按 1.0 范围，这类备份只支持下载或运维侧恢复。",
+                filename,
+                backup_kind_label(&backup.semantics)
             );
             error_message.set(message.clone());
             toast_store_for_restore_precheck.show_error(message);
@@ -942,6 +1082,7 @@ pub fn MaintenanceSectionController() -> Element {
         }
 
         let admin_service = admin_service_for_restore_precheck.clone();
+        let auth_store = auth_store_for_restore_precheck.clone();
         let toast_store = toast_store_for_restore_precheck.clone();
         spawn(async move {
             processing_restore_filename.set(Some(filename.clone()));
@@ -962,9 +1103,13 @@ pub fn MaintenanceSectionController() -> Element {
                     }
                 }
                 Err(err) => {
-                    let message = format!("恢复预检失败: {}", err);
-                    error_message.set(message.clone());
-                    toast_store.show_error(message);
+                    set_settings_action_error(
+                        &auth_store,
+                        &toast_store,
+                        error_message,
+                        &err,
+                        "恢复预检失败",
+                    );
                 }
             }
 
@@ -1042,6 +1187,7 @@ pub fn MaintenanceSectionController() -> Element {
 #[component]
 pub fn UsersSectionController() -> Element {
     let admin_service = use_admin_service();
+    let auth_store = use_auth_store();
     let toast_store = use_toast_store();
 
     let mut users = use_signal(Vec::<AdminUserSummary>::new);
@@ -1055,9 +1201,13 @@ pub fn UsersSectionController() -> Element {
 
     let _load_users = use_resource({
         let admin_service = admin_service.clone();
+        let auth_store = auth_store.clone();
+        let toast_store = toast_store.clone();
         move || {
             let _ = reload_tick();
             let admin_service = admin_service.clone();
+            let auth_store = auth_store.clone();
+            let toast_store = toast_store.clone();
             async move {
                 is_loading.set(true);
                 error_message.set(String::new());
@@ -1072,7 +1222,13 @@ pub fn UsersSectionController() -> Element {
                         role_drafts.set(next_role_map);
                     }
                     Err(err) => {
-                        error_message.set(format!("加载用户列表失败: {}", err));
+                        set_settings_load_error(
+                            &auth_store,
+                            &toast_store,
+                            error_message,
+                            &err,
+                            "加载用户列表失败",
+                        );
                     }
                 }
 
@@ -1089,6 +1245,7 @@ pub fn UsersSectionController() -> Element {
     };
 
     let toast_store_for_user_role = toast_store.clone();
+    let auth_store_for_confirm_role = auth_store.clone();
     let admin_service_for_confirm_role = admin_service.clone();
     let toast_store_for_confirm_role = toast_store.clone();
     let handle_save_user_role = move |user_id: String| {
@@ -1156,6 +1313,7 @@ pub fn UsersSectionController() -> Element {
                     pending_role_change.set(None);
 
                     let admin_service = admin_service_for_confirm_role.clone();
+                    let auth_store = auth_store_for_confirm_role.clone();
                     let toast_store = toast_store_for_confirm_role.clone();
                     spawn(async move {
                         updating_user_id.set(Some(user_id.clone()));
@@ -1182,9 +1340,13 @@ pub fn UsersSectionController() -> Element {
                                 toast_store.show_success(message);
                             }
                             Err(err) => {
-                                let message = format!("更新用户角色失败: {}", err);
-                                error_message.set(message.clone());
-                                toast_store.show_error(message);
+                                set_settings_action_error(
+                                    &auth_store,
+                                    &toast_store,
+                                    error_message,
+                                    &err,
+                                    "更新用户角色失败",
+                                );
                             }
                         }
 
@@ -1199,6 +1361,8 @@ pub fn UsersSectionController() -> Element {
 #[component]
 pub fn AuditSectionController() -> Element {
     let admin_service = use_admin_service();
+    let auth_store = use_auth_store();
+    let toast_store = use_toast_store();
 
     let mut logs = use_signal(Vec::<AuditLog>::new);
     let mut total = use_signal(|| 0_i64);
@@ -1210,11 +1374,15 @@ pub fn AuditSectionController() -> Element {
 
     let _load_audit_logs = use_resource({
         let admin_service = admin_service.clone();
+        let auth_store = auth_store.clone();
+        let toast_store = toast_store.clone();
         move || {
             let _ = reload_tick();
             let page = current_page().max(1);
             let size = page_size().clamp(1, 100);
             let admin_service = admin_service.clone();
+            let auth_store = auth_store.clone();
+            let toast_store = toast_store.clone();
             async move {
                 is_loading.set(true);
                 error_message.set(String::new());
@@ -1245,7 +1413,13 @@ pub fn AuditSectionController() -> Element {
                         total.set(result.total);
                     }
                     Err(err) => {
-                        error_message.set(format!("加载审计日志失败: {}", err));
+                        set_settings_load_error(
+                            &auth_store,
+                            &toast_store,
+                            error_message,
+                            &err,
+                            "加载审计日志失败",
+                        );
                     }
                 }
 
@@ -1310,6 +1484,7 @@ pub fn AdvancedSectionController(
     #[props(default)] on_site_name_updated: EventHandler<String>,
 ) -> Element {
     let admin_service = use_admin_service();
+    let auth_store = use_auth_store();
     let toast_store = use_toast_store();
 
     let mut settings = use_signal(Vec::<Setting>::new);
@@ -1323,9 +1498,13 @@ pub fn AdvancedSectionController(
 
     let _load_raw_settings = use_resource({
         let admin_service = admin_service.clone();
+        let auth_store = auth_store.clone();
+        let toast_store = toast_store.clone();
         move || {
             let _ = reload_tick();
             let admin_service = admin_service.clone();
+            let auth_store = auth_store.clone();
+            let toast_store = toast_store.clone();
             async move {
                 is_loading.set(true);
                 error_message.set(String::new());
@@ -1340,7 +1519,13 @@ pub fn AdvancedSectionController(
                         setting_drafts.set(draft_map);
                     }
                     Err(err) => {
-                        error_message.set(format!("加载原始设置失败: {}", err));
+                        set_settings_load_error(
+                            &auth_store,
+                            &toast_store,
+                            error_message,
+                            &err,
+                            "加载原始设置失败",
+                        );
                     }
                 }
 
@@ -1357,11 +1542,13 @@ pub fn AdvancedSectionController(
     };
 
     let admin_service_for_raw_setting = admin_service.clone();
+    let auth_store_for_raw_setting = auth_store.clone();
     let toast_store_for_raw_setting = toast_store.clone();
-    let on_site_name_updated_for_raw_setting = on_site_name_updated.clone();
+    let on_site_name_updated_for_raw_setting = on_site_name_updated;
     let admin_service_for_confirm_setting = admin_service.clone();
+    let auth_store_for_confirm_setting = auth_store.clone();
     let toast_store_for_confirm_setting = toast_store.clone();
-    let on_site_name_updated_for_confirm_setting = on_site_name_updated.clone();
+    let on_site_name_updated_for_confirm_setting = on_site_name_updated;
     let handle_save_setting = move |key: String| {
         if saving_key().is_some() {
             return;
@@ -1406,8 +1593,9 @@ pub fn AdvancedSectionController(
         }
 
         let admin_service = admin_service_for_raw_setting.clone();
+        let auth_store = auth_store_for_raw_setting.clone();
         let toast_store = toast_store_for_raw_setting.clone();
-        let on_site_name_updated = on_site_name_updated_for_raw_setting.clone();
+        let on_site_name_updated = on_site_name_updated_for_raw_setting;
         spawn(async move {
             saving_key.set(Some(key.clone()));
             error_message.set(String::new());
@@ -1427,9 +1615,13 @@ pub fn AdvancedSectionController(
                     reload_tick.set(reload_tick().wrapping_add(1));
                 }
                 Err(err) => {
-                    let message = format!("更新原始设置失败: {}", err);
-                    error_message.set(message.clone());
-                    toast_store.show_error(message);
+                    set_settings_action_error(
+                        &auth_store,
+                        &toast_store,
+                        error_message,
+                        &err,
+                        "更新原始设置失败",
+                    );
                 }
             }
 
@@ -1467,8 +1659,9 @@ pub fn AdvancedSectionController(
                     pending_setting_change.set(None);
 
                     let admin_service = admin_service_for_confirm_setting.clone();
+                    let auth_store = auth_store_for_confirm_setting.clone();
                     let toast_store = toast_store_for_confirm_setting.clone();
-                    let on_site_name_updated = on_site_name_updated_for_confirm_setting.clone();
+                    let on_site_name_updated = on_site_name_updated_for_confirm_setting;
                     spawn(async move {
                         saving_key.set(Some(key.clone()));
                         error_message.set(String::new());
@@ -1488,9 +1681,13 @@ pub fn AdvancedSectionController(
                                 reload_tick.set(reload_tick().wrapping_add(1));
                             }
                             Err(err) => {
-                                let message = format!("更新原始设置失败: {}", err);
-                                error_message.set(message.clone());
-                                toast_store.show_error(message);
+                                set_settings_action_error(
+                                    &auth_store,
+                                    &toast_store,
+                                    error_message,
+                                    &err,
+                                    "更新原始设置失败",
+                                );
                             }
                         }
 

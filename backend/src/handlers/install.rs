@@ -1,6 +1,9 @@
-use axum::{Json, extract::State, http::HeaderMap};
+use axum::{
+    Json,
+    extract::{Query, State},
+    http::HeaderMap,
+};
 use base64::Engine;
-use redis::AsyncCommands;
 
 use crate::audit::log_audit_db;
 use crate::config::DatabaseKind;
@@ -14,13 +17,16 @@ use crate::db::{
     mark_app_installed_tx, upsert_setting_mysql_tx, upsert_setting_sqlite_tx, upsert_setting_tx,
     validate_admin_bootstrap_config,
 };
-use crate::domain::auth::user_token_version_key;
 use crate::error::AppError;
-use crate::handlers::auth::common::append_session_cookies;
-use crate::models::{InstallBootstrapRequest, InstallBootstrapResponse, InstallStatusResponse};
+use crate::handlers::auth::common::{append_session_cookies, issue_session_tokens};
+use crate::handlers::storage_browser::{BrowseStorageDirectoriesQuery, browse_storage_directories};
+use crate::models::{
+    AdminSettingsConfig, InstallBootstrapRequest, InstallBootstrapResponse, InstallStatusResponse,
+    StorageDirectoryBrowseResponse,
+};
 use crate::runtime_settings::validate_and_merge;
 use crate::runtime_settings::{
-    persist_settings_mysql_tx, persist_settings_sqlite_tx, persist_settings_tx,
+    RuntimeSettings, persist_settings_mysql_tx, persist_settings_sqlite_tx, persist_settings_tx,
 };
 
 const MAX_FAVICON_BYTES: usize = 256 * 1024;
@@ -34,17 +40,31 @@ pub async fn get_install_status(
     let favicon_configured = get_setting_value(&state.database, SITE_FAVICON_DATA_URL_SETTING_KEY)
         .await?
         .is_some_and(|value| !value.trim().is_empty());
+    let restart_required = if installed {
+        state.storage_manager.restart_required(&settings)
+    } else {
+        false
+    };
 
     Ok(Json(InstallStatusResponse {
         installed,
         has_admin,
         favicon_configured,
-        config: settings.to_admin_config(if installed {
-            state.storage_manager.restart_required(&settings)
-        } else {
-            false
-        }),
+        config: public_install_status_config(&settings, installed, restart_required),
     }))
+}
+
+pub async fn browse_install_storage_directories(
+    State(state): State<AppState>,
+    Query(query): Query<BrowseStorageDirectoriesQuery>,
+) -> Result<Json<StorageDirectoryBrowseResponse>, AppError> {
+    if is_app_installed(&state.database).await? {
+        return Err(AppError::AppAlreadyInstalled);
+    }
+
+    Ok(Json(
+        browse_storage_directories(query.path.as_deref()).await?,
+    ))
 }
 
 pub async fn bootstrap_installation(
@@ -154,20 +174,13 @@ pub async fn bootstrap_installation(
     let settings = state.runtime_settings.get_runtime_settings().await?;
     let user_response = crate::models::UserResponse::from(user);
 
-    let mut redis = state.redis.clone();
-    let token_version = redis
-        .get::<_, Option<u64>>(user_token_version_key(user_response.id))
-        .await?
-        .unwrap_or(0);
-    let access_token = state.auth.generate_access_token(
+    let (access_token, refresh_token) = issue_session_tokens(
+        &state,
         user_response.id,
         &user_response.email,
         &user_response.role,
-        token_version,
-    )?;
-    let refresh_token = state
-        .auth
-        .generate_refresh_token(user_response.id, token_version)?;
+    )
+    .await?;
 
     let mut headers = HeaderMap::new();
     append_session_cookies(
@@ -255,4 +268,96 @@ fn validate_favicon_data_url(value: Option<String>) -> Result<Option<String>, Ap
         mime,
         base64::engine::general_purpose::STANDARD.encode(bytes)
     )))
+}
+
+fn public_install_status_config(
+    settings: &RuntimeSettings,
+    installed: bool,
+    restart_required: bool,
+) -> AdminSettingsConfig {
+    let mut config = settings.to_admin_config(if installed { false } else { restart_required });
+
+    // `install/status` is intentionally public because the login shell and first-run flow
+    // need basic bootstrap state. Do not expose runtime connection details or secret-bearing
+    // config here.
+    config.mail_smtp_user = None;
+    config.mail_smtp_password_set = false;
+    config.s3_access_key = None;
+    config.s3_secret_key_set = false;
+    config.local_storage_path.clear();
+    config.mail_smtp_host.clear();
+    config.mail_smtp_port = 0;
+    config.mail_from_email.clear();
+    config.mail_from_name.clear();
+    config.mail_link_base_url.clear();
+    config.s3_endpoint = None;
+    config.s3_region = None;
+    config.s3_bucket = None;
+    config.s3_prefix = None;
+    config.s3_force_path_style = false;
+
+    config
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::runtime_settings::StorageBackend;
+
+    fn sample_runtime_settings() -> RuntimeSettings {
+        RuntimeSettings {
+            site_name: "Vansour Image".to_string(),
+            storage_backend: StorageBackend::S3,
+            local_storage_path: "/data/images".to_string(),
+            mail_enabled: true,
+            mail_smtp_host: "smtp.example.com".to_string(),
+            mail_smtp_port: 587,
+            mail_smtp_user: Some("mailer".to_string()),
+            mail_smtp_password: Some("secret".to_string()),
+            mail_from_email: "noreply@example.com".to_string(),
+            mail_from_name: "Vansour".to_string(),
+            mail_link_base_url: "https://img.example.com/reset".to_string(),
+            s3_endpoint: Some("https://minio.example.com".to_string()),
+            s3_region: Some("us-east-1".to_string()),
+            s3_bucket: Some("bucket".to_string()),
+            s3_prefix: Some("images".to_string()),
+            s3_access_key: Some("access-key".to_string()),
+            s3_secret_key: Some("secret-key".to_string()),
+            s3_force_path_style: true,
+        }
+    }
+
+    #[test]
+    fn public_install_status_config_redacts_credentials_before_install() {
+        let config = public_install_status_config(&sample_runtime_settings(), false, false);
+
+        assert!(config.local_storage_path.is_empty());
+        assert!(config.mail_smtp_host.is_empty());
+        assert_eq!(config.mail_smtp_port, 0);
+        assert!(config.mail_from_email.is_empty());
+        assert!(config.mail_enabled);
+        assert_eq!(config.mail_smtp_user, None);
+        assert!(!config.mail_smtp_password_set);
+        assert_eq!(config.s3_endpoint, None);
+        assert_eq!(config.s3_bucket, None);
+        assert_eq!(config.s3_access_key, None);
+        assert!(!config.s3_secret_key_set);
+    }
+
+    #[test]
+    fn public_install_status_config_redacts_runtime_details_after_install() {
+        let config = public_install_status_config(&sample_runtime_settings(), true, true);
+
+        assert_eq!(config.site_name, "Vansour Image");
+        assert_eq!(config.storage_backend, "s3");
+        assert!(config.mail_enabled);
+        assert!(config.local_storage_path.is_empty());
+        assert!(config.mail_smtp_host.is_empty());
+        assert_eq!(config.mail_smtp_port, 0);
+        assert!(config.mail_from_email.is_empty());
+        assert_eq!(config.s3_endpoint, None);
+        assert_eq!(config.s3_bucket, None);
+        assert_eq!(config.s3_access_key, None);
+        assert!(!config.restart_required);
+    }
 }

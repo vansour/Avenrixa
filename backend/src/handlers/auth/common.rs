@@ -1,8 +1,11 @@
 use crate::config::CookieConfig;
 use crate::db::AppState;
 use crate::domain::auth::DefaultAuthDomainService;
+use crate::domain::auth::state_repository::{AuthStateRepository, AuthStateSnapshot, hash_token};
 use crate::error::AppError;
 use axum::http::{HeaderMap, HeaderValue, header};
+use axum_extra::extract::cookie::CookieJar;
+use chrono::{Duration, Utc};
 use lettre::message::Mailbox;
 use lettre::transport::smtp::authentication::Credentials;
 use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
@@ -110,19 +113,62 @@ pub(super) fn append_cleared_session_cookies(
 }
 
 pub(super) fn read_cookie(headers: &HeaderMap, name: &str) -> Option<String> {
-    headers
-        .get(header::COOKIE)?
-        .to_str()
-        .ok()?
-        .split(';')
-        .find_map(|cookie| {
-            let (key, value) = cookie.trim().split_once('=')?;
-            if key == name {
-                Some(value.to_string())
-            } else {
-                None
-            }
-        })
+    CookieJar::from_headers(headers)
+        .get(name)
+        .map(|cookie| cookie.value().to_string())
+}
+
+pub(super) async fn load_auth_state_snapshot(
+    state: &AppState,
+    user_id: uuid::Uuid,
+) -> Result<AuthStateSnapshot, AppError> {
+    let user_token_version = state
+        .auth_state_repository
+        .get_user_token_version(user_id)
+        .await?
+        .unwrap_or(0);
+    let session_epoch = state.auth_state_repository.get_session_epoch().await?;
+
+    Ok(AuthStateSnapshot {
+        user_token_version,
+        session_epoch,
+    })
+}
+
+pub(crate) async fn issue_session_tokens(
+    state: &AppState,
+    user_id: uuid::Uuid,
+    email: &str,
+    role: &str,
+) -> Result<(String, String), AppError> {
+    let snapshot = load_auth_state_snapshot(state, user_id).await?;
+    let access_token = state.auth.generate_access_token(
+        user_id,
+        email,
+        role,
+        snapshot.user_token_version,
+        snapshot.session_epoch,
+    )?;
+    let refresh_token = state.auth.generate_refresh_token(
+        user_id,
+        snapshot.user_token_version,
+        snapshot.session_epoch,
+    )?;
+    Ok((access_token, refresh_token))
+}
+
+pub(super) async fn revoke_token(state: &AppState, token: &str) -> Result<(), AppError> {
+    let ttl_seconds = state.auth.token_ttl_seconds(token).unwrap_or(0);
+    if ttl_seconds == 0 {
+        return Ok(());
+    }
+
+    let expires_at = Utc::now() + Duration::seconds(ttl_seconds.min(i64::MAX as u64) as i64);
+    state
+        .auth_state_repository
+        .revoke_token_hash(&hash_token(token), expires_at)
+        .await?;
+    Ok(())
 }
 
 pub(super) fn append_query_params(base_url: &str, params: &[(&str, &str)]) -> String {
@@ -200,5 +246,32 @@ pub(super) async fn ensure_app_installed(state: &AppState) -> Result<(), AppErro
         Ok(())
     } else {
         Err(AppError::AppNotInstalled)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn read_cookie_returns_named_cookie_value() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::COOKIE,
+            HeaderValue::from_static("foo=bar; auth_token=hello%20world"),
+        );
+
+        assert_eq!(
+            read_cookie(&headers, AUTH_TOKEN_COOKIE_NAME).as_deref(),
+            Some("hello world")
+        );
+    }
+
+    #[test]
+    fn read_cookie_returns_none_when_cookie_is_missing() {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::COOKIE, HeaderValue::from_static("foo=bar"));
+
+        assert_eq!(read_cookie(&headers, AUTH_TOKEN_COOKIE_NAME), None);
     }
 }

@@ -1,0 +1,38 @@
+{
+  "format_version": 2,
+  "filename": "backup_82d485e7-77d0-44bf-8be8-f9afcf8ceed8.sql",
+  "created_at": "2026-03-12T10:26:46.582156456Z",
+  "database_kind": "postgresql",
+  "semantics": {
+    "database_family": "postgresql",
+    "backup_kind": "postgresql-logical-dump",
+    "backup_scope": "database-only",
+    "restore_mode": "download-only",
+    "artifact_layout": "single-file-plus-manifest",
+    "ui_restore_supported": false
+  },
+  "app_installed": true,
+  "has_admin": true,
+  "storage_signature": "97d4785e0a8c65fd725ed6eb522760e62521342ab932f07011c17078e959293a",
+  "storage": {
+    "storage_backend": "local",
+    "local_storage_path": "/data/images",
+    "s3_endpoint": null,
+    "s3_region": null,
+    "s3_bucket": null,
+    "s3_prefix": null,
+    "s3_force_path_style": true
+  },
+  "object_rollback_anchor": {
+    "strategy": "local-directory-snapshot",
+    "checkpoint_at": "2026-03-12T10:26:46.582156456Z",
+    "local_storage_path": "/data/images",
+    "s3_endpoint": null,
+    "s3_region": null,
+    "s3_bucket": null,
+    "s3_prefix": null,
+    "s3_force_path_style": true,
+    "s3_bucket_versioning_status": null,
+    "capture_error": null
+  }
+}

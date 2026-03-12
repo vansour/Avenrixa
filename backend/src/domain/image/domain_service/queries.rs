@@ -15,11 +15,11 @@ impl<I: ImageRepository> ImageDomainService<I> {
         // 尝试从缓存获取 (仅对无标签过滤的简单列表查询进行缓存)
         let cache_key = ImageCache::list(user_id, page, page_size);
         if tag.is_none()
-            && let Some(manager) = self.redis.as_ref()
+            && let Some(manager) = self.cache.as_ref()
         {
-            let mut redis = manager.clone();
+            let mut cache = manager.clone();
             if let Ok(Some(cached)) =
-                Cache::get::<Paginated<Image>, _>(&mut redis, &cache_key).await
+                Cache::get::<Paginated<Image>, _>(&mut cache, &cache_key).await
             {
                 return Ok(cached);
             }
@@ -90,11 +90,11 @@ impl<I: ImageRepository> ImageDomainService<I> {
 
         // 缓存结果
         if tag.is_none()
-            && let Some(manager) = self.redis.as_ref()
+            && let Some(manager) = self.cache.as_ref()
         {
-            let mut redis = manager.clone();
-            let ttl = self.config.cache.list_ttl;
-            let _ = Cache::set(&mut redis, &cache_key, &result, ttl).await;
+            let mut cache = manager.clone();
+            let ttl = self.config.cache_policy.list_ttl;
+            let _ = Cache::set(&mut cache, &cache_key, &result, ttl).await;
         }
 
         Ok(result)

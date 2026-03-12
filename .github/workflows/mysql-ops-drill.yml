@@ -1,4 +1,4 @@
-name: MySQL Family Ops Drill
+name: MySQL Family Ops Drill (Supplemental)
 
 on:
   workflow_dispatch:
@@ -13,7 +13,7 @@ env:
 
 jobs:
   mysql-ops-drill:
-    name: MySQL Family Ops Drill (${{ matrix.name }})
+    name: MySQL Family Ops Drill [Supplemental] (${{ matrix.name }})
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
@@ -22,11 +22,11 @@ jobs:
         include:
           - name: mysql
             compose_project_name: vansour-image-mysql-ops-drill-ci
-            compose_file_paths: compose.mysql.yml
+            compose_variant: mysql
             data_dir: data-mysql
           - name: mariadb
             compose_project_name: vansour-image-mariadb-ops-drill-ci
-            compose_file_paths: compose.mariadb.yml
+            compose_variant: mariadb
             data_dir: data-mariadb
 
     steps:
@@ -43,7 +43,7 @@ jobs:
         continue-on-error: true
         env:
           COMPOSE_PROJECT_NAME: ${{ matrix.compose_project_name }}
-          COMPOSE_FILE_PATHS: ${{ matrix.compose_file_paths }}
+          COMPOSE_VARIANT: ${{ matrix.compose_variant }}
           DOCKER_BUILDKIT: "1"
           COMPOSE_DOCKER_CLI_BUILD: "1"
           PRESERVE_STACK_ON_FAILURE: "1"
@@ -51,14 +51,20 @@ jobs:
 
       - name: Dump compose state after failure
         if: steps.mysql_ops_drill.outcome != 'success'
+        env:
+          COMPOSE_PROJECT_NAME: ${{ matrix.compose_project_name }}
+          COMPOSE_VARIANT: ${{ matrix.compose_variant }}
         run: |
-          docker compose -p "${{ matrix.compose_project_name }}" -f "${{ matrix.compose_file_paths }}" ps
-          docker compose -p "${{ matrix.compose_project_name }}" -f "${{ matrix.compose_file_paths }}" logs --no-color --tail=300
+          ./scripts/compose-runtime.sh ps
+          ./scripts/compose-runtime.sh logs --no-color --tail=300
 
       - name: Cleanup MySQL ops drill stack
         if: always()
+        env:
+          COMPOSE_PROJECT_NAME: ${{ matrix.compose_project_name }}
+          COMPOSE_VARIANT: ${{ matrix.compose_variant }}
         run: |
-          docker compose -p "${{ matrix.compose_project_name }}" -f "${{ matrix.compose_file_paths }}" down -v --remove-orphans || true
+          ./scripts/compose-runtime.sh down -v --remove-orphans || true
           rm -rf "${{ matrix.data_dir }}" || true
 
       - name: Mark workflow failed when drill failed

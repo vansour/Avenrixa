@@ -1,0 +1,60 @@
+name: PostgreSQL Ops Drill (GA)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * 1"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  postgres-ops-drill:
+    name: PostgreSQL Ops Drill [GA]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show Docker versions
+        run: |
+          docker --version
+          docker compose version
+
+      - name: Run PostgreSQL ops drill
+        id: postgres_ops_drill
+        continue-on-error: true
+        env:
+          COMPOSE_PROJECT_NAME: vansour-image-postgres-ops-drill-ci
+          COMPOSE_VARIANT: postgres
+          DOCKER_BUILDKIT: "1"
+          COMPOSE_DOCKER_CLI_BUILD: "1"
+          PRESERVE_STACK_ON_FAILURE: "1"
+        run: ./scripts/postgres-ops-drill.sh
+
+      - name: Dump compose state after failure
+        if: steps.postgres_ops_drill.outcome != 'success'
+        env:
+          COMPOSE_PROJECT_NAME: vansour-image-postgres-ops-drill-ci
+          COMPOSE_VARIANT: postgres
+        run: |
+          ./scripts/compose-runtime.sh ps
+          ./scripts/compose-runtime.sh logs --no-color --tail=300
+
+      - name: Cleanup PostgreSQL ops drill stack
+        if: always()
+        env:
+          COMPOSE_PROJECT_NAME: vansour-image-postgres-ops-drill-ci
+          COMPOSE_VARIANT: postgres
+        run: |
+          ./scripts/compose-runtime.sh down -v --remove-orphans || true
+          rm -rf data || true
+
+      - name: Mark workflow failed when drill failed
+        if: steps.postgres_ops_drill.outcome != 'success'
+        run: exit 1

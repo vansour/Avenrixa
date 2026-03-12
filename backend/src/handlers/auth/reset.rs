@@ -4,11 +4,10 @@ use super::common::{
 };
 use crate::audit::log_audit_db;
 use crate::db::AppState;
-use crate::domain::auth::user_token_version_key;
+use crate::domain::auth::state_repository::AuthStateRepository;
 use crate::error::AppError;
 use crate::models::{PasswordResetConfirmRequest, PasswordResetRequest};
 use axum::{Json, extract::State, http::HeaderMap};
-use redis::AsyncCommands;
 
 fn reset_link(base_url: &str, token: &str) -> String {
     append_query_params(base_url, &[("token", token)])
@@ -75,8 +74,10 @@ pub async fn confirm_password_reset(
         .reset_password_by_token(&req.token, &req.new_password)
         .await?;
 
-    let mut redis = state.redis.clone();
-    let _: u64 = redis.incr(user_token_version_key(user.id), 1_u64).await?;
+    state
+        .auth_state_repository
+        .bump_user_token_version(user.id)
+        .await?;
 
     log_audit_db(
         &state.database,

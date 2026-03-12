@@ -18,7 +18,7 @@ async fn setup_service() -> TestServiceContext {
     config.storage.enable_file_check = false;
     let image_processor = ImageProcessor::new(1920, 1080, 80);
 
-    let redis = None;
+    let cache = None;
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
     let local_storage_path = temp_dir.path().join("images");
     config.storage.path = local_storage_path.to_string_lossy().into_owned();
@@ -46,7 +46,7 @@ async fn setup_service() -> TestServiceContext {
     }));
     let dependencies = ImageDomainServiceDependencies::new(
         DatabasePool::Postgres(pool),
-        redis,
+        cache,
         config,
         image_processor,
         storage_manager,

@@ -134,12 +134,26 @@ pub struct InstallStatusResponse {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StorageDirectoryEntry {
+    pub name: String,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StorageDirectoryBrowseResponse {
+    pub current_path: String,
+    pub parent_path: Option<String>,
+    pub directories: Vec<StorageDirectoryEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BootstrapStatusResponse {
     pub mode: String,
     pub database_kind: String,
     pub database_configured: bool,
     pub database_url_masked: Option<String>,
-    pub database_max_connections: Option<u32>,
+    pub cache_configured: bool,
+    pub cache_url_masked: Option<String>,
     pub restart_required: bool,
     pub runtime_error: Option<String>,
 }
@@ -171,7 +185,6 @@ pub struct UpdateAdminSettingsConfigRequest {
 pub struct UpdateBootstrapDatabaseConfigRequest {
     pub database_kind: String,
     pub database_url: String,
-    pub database_max_connections: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -179,7 +192,6 @@ pub struct UpdateBootstrapDatabaseConfigResponse {
     pub database_kind: String,
     pub database_configured: bool,
     pub database_url_masked: String,
-    pub database_max_connections: u32,
     pub restart_required: bool,
 }
 
@@ -216,7 +228,8 @@ pub struct HealthStatus {
     pub status: String,
     pub timestamp: DateTime<Utc>,
     pub database: ComponentStatus,
-    pub redis: ComponentStatus,
+    #[serde(alias = "redis")]
+    pub cache: ComponentStatus,
     pub storage: ComponentStatus,
     pub version: Option<String>,
     pub uptime_seconds: Option<u64>,
@@ -237,6 +250,7 @@ pub struct SystemStats {
 pub struct BackupResponse {
     pub filename: String,
     pub created_at: DateTime<Utc>,
+    pub semantics: BackupSemantics,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -244,6 +258,17 @@ pub struct BackupFileSummary {
     pub filename: String,
     pub created_at: DateTime<Utc>,
     pub size_bytes: u64,
+    pub semantics: BackupSemantics,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BackupSemantics {
+    pub database_family: String,
+    pub backup_kind: String,
+    pub backup_scope: String,
+    pub restore_mode: String,
+    pub artifact_layout: String,
+    pub ui_restore_supported: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -279,6 +304,7 @@ pub struct BackupRestorePrecheckResponse {
     pub backup_size_bytes: u64,
     pub current_database_kind: String,
     pub backup_database_kind: String,
+    pub semantics: BackupSemantics,
     pub integrity_check_passed: bool,
     pub app_installed: bool,
     pub has_admin: bool,
@@ -294,6 +320,7 @@ pub struct BackupRestorePrecheckResponse {
 pub struct PendingBackupRestore {
     pub filename: String,
     pub database_kind: String,
+    pub semantics: BackupSemantics,
     pub requested_by_user_id: String,
     pub requested_by_email: String,
     pub scheduled_at: DateTime<Utc>,
@@ -306,6 +333,7 @@ pub struct BackupRestoreResult {
     pub status: String,
     pub filename: String,
     pub database_kind: String,
+    pub semantics: BackupSemantics,
     pub message: String,
     pub scheduled_at: Option<DateTime<Utc>>,
     pub started_at: Option<DateTime<Utc>>,
