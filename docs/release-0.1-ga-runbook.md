@@ -10,11 +10,12 @@
 ./scripts/release-ga-ship.sh
 ```
 
-GitHub Actions 手动触发：
+GitHub Actions 入口：
 
 - `.github/workflows/release-ga-ship.yml`
+- 推送 `v*` tag 时会自动触发，例如 `v0.1.0`
 - 默认发布到 `ghcr.io/<repository_owner>/vansour-image:<version>`，并追加 `:latest`
-- 可通过 workflow input `image_repository` 覆盖目标仓库
+- 也可继续手动触发，并通过 workflow input `image_repository` 覆盖目标仓库
 
 ## 阶段 3 关注点
 

@@ -339,6 +339,7 @@ cargo test --workspace
 
 - 校验当前工作区版本已经是稳定正式版号
 - 校验 `CHANGELOG.md` 已存在正式版条目
+- 推送 `v*` tag 时会自动触发对应的 GitHub Actions 正式发布 workflow
 - GitHub Actions 工作流会默认发布到 `ghcr.io/<repository_owner>/vansour-image:<version>` 并追加 `:latest`
 - 生成正式版 `release-notes.md`
 - 导出镜像元数据、发布 bundle、`release-manifest.json` 与 `SHA256SUMS`

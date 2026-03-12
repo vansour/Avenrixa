@@ -1,6 +1,9 @@
 name: Release 0.1 GA Ship
 
 on:
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
     inputs:
       image_repository:
@@ -28,9 +31,17 @@ jobs:
       - name: Resolve release metadata
         id: release-meta
         env:
-          INPUT_IMAGE_REPOSITORY: ${{ inputs.image_repository }}
+          INPUT_IMAGE_REPOSITORY: ${{ github.event.inputs.image_repository || '' }}
         run: |
-          release_version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)"
+          workspace_version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)"
+          release_version="${workspace_version}"
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            release_version="${GITHUB_REF_NAME#v}"
+          fi
+          if [[ "${release_version}" != "${workspace_version}" ]]; then
+            echo "Tag version (${release_version}) must match workspace version (${workspace_version})" >&2
+            exit 1
+          fi
           image_repository="${INPUT_IMAGE_REPOSITORY:-ghcr.io/${GITHUB_REPOSITORY_OWNER}/vansour-image}"
           echo "release_version=${release_version}" >> "${GITHUB_OUTPUT}"
           echo "image_repository=${image_repository}" >> "${GITHUB_OUTPUT}"
