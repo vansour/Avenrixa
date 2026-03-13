@@ -254,7 +254,7 @@ write_restore_result() {
 restore_local_data_from_archive() {
   local archive_path="$1"
 
-  rm -rf "${ROOT_DIR:?}/${DATA_DIR}"
+  compose_remove_host_path "${DATA_DIR}"
   tar -xzf "${archive_path}" -C "${ROOT_DIR}"
 }
 

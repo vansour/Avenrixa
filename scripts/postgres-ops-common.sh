@@ -156,8 +156,7 @@ write_json_file() {
   local path="$1"
   local payload="$2"
 
-  mkdir -p "$(dirname "${path}")"
-  printf '%s\n' "${payload}" > "${path}"
+  compose_write_host_file "$(dirname "${path}")" "${path}" "${payload}"
 }
 
 wait_for_compose_service_health() {
@@ -768,14 +767,12 @@ postgres_physical_helper_image() {
 read_optional_file() {
   local path="$1"
 
-  if [[ -f "${path}" ]]; then
-    tr -d '\r' < "${path}"
-  fi
+  compose_read_optional_host_file "$(dirname "${path}")" "${path}"
 }
 
 postgres_directory_size_bytes() {
   local path="$1"
-  du -sb "${path}" | awk '{print $1}'
+  compose_directory_size_bytes "$(dirname "${path}")" "${path}"
 }
 
 postgres_physical_backup_to_dir() {

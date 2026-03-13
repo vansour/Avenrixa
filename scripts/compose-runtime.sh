@@ -185,7 +185,7 @@ compose_write_host_file() {
   relative_target="$(compose_host_path_relative_to_dir "${resolved_base_dir}" "${resolved_target}")"
 
   mkdir -p "$(dirname "${resolved_target}")" 2>/dev/null || true
-  if printf '%s\n' "${content}" > "${resolved_target}" 2>/dev/null; then
+  if (printf '%s\n' "${content}" > "${resolved_target}") 2>/dev/null; then
     return 0
   fi
 
@@ -221,6 +221,59 @@ compose_read_host_file() {
     --entrypoint sh \
     "${helper_image}" \
     -lc 'set -eu; cat "/target/${RELATIVE_TARGET}"'
+}
+
+compose_read_optional_host_file() {
+  local base_dir="$1"
+  local target="$2"
+  local resolved_base_dir
+  local resolved_target
+  local relative_target
+  local helper_image
+
+  resolved_base_dir="$(compose_resolve_host_path "${base_dir}")"
+  resolved_target="$(compose_resolve_host_path "${target}")"
+  relative_target="$(compose_host_path_relative_to_dir "${resolved_base_dir}" "${resolved_target}")"
+
+  if [[ -f "${resolved_target}" ]] && (tr -d '\r' < "${resolved_target}") 2>/dev/null; then
+    return 0
+  fi
+
+  helper_image="${COMPOSE_FS_HELPER_IMAGE:-busybox:1.37.0}"
+  docker run --rm \
+    -v "${resolved_base_dir}:/target:ro" \
+    -e RELATIVE_TARGET="${relative_target}" \
+    --entrypoint sh \
+    "${helper_image}" \
+    -lc 'set -eu; target="/target/${RELATIVE_TARGET}"; if [ -f "${target}" ]; then tr -d "\r" < "${target}"; fi'
+}
+
+compose_directory_size_bytes() {
+  local base_dir="$1"
+  local target="$2"
+  local resolved_base_dir
+  local resolved_target
+  local relative_target
+  local helper_image
+  local size
+
+  resolved_base_dir="$(compose_resolve_host_path "${base_dir}")"
+  resolved_target="$(compose_resolve_host_path "${target}")"
+  relative_target="$(compose_host_path_relative_to_dir "${resolved_base_dir}" "${resolved_target}")"
+
+  size="$(du -sb "${resolved_target}" 2>/dev/null | awk '{print $1}')" || true
+  if [[ -n "${size}" ]]; then
+    printf '%s' "${size}"
+    return 0
+  fi
+
+  helper_image="${COMPOSE_FS_HELPER_IMAGE:-busybox:1.37.0}"
+  docker run --rm \
+    -v "${resolved_base_dir}:/target:ro" \
+    -e RELATIVE_TARGET="${relative_target}" \
+    --entrypoint sh \
+    "${helper_image}" \
+    -lc 'set -eu; du -sb "/target/${RELATIVE_TARGET}" | awk "{print \$1}"'
 }
 
 compose_variant_default_postgres_wal_archive_host_dir() {
