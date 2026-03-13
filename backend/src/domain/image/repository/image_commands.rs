@@ -1,4 +1,3 @@
-use chrono::Utc;
 use sqlx::{MySql, QueryBuilder, Sqlite};
 use uuid::Uuid;
 
@@ -63,42 +62,6 @@ impl PostgresImageRepository {
         .await?;
 
         Ok(())
-    }
-
-    pub(super) async fn soft_delete_images_by_user_impl(
-        &self,
-        user_id: Uuid,
-        image_ids: &[Uuid],
-    ) -> Result<u64, sqlx::Error> {
-        let result = sqlx::query(
-            "UPDATE images
-             SET deleted_at = NOW()
-             WHERE user_id = $1 AND id = ANY($2) AND deleted_at IS NULL",
-        )
-        .bind(user_id)
-        .bind(image_ids)
-        .execute(&self.pool)
-        .await?;
-
-        Ok(result.rows_affected())
-    }
-
-    pub(super) async fn restore_images_by_user_impl(
-        &self,
-        user_id: Uuid,
-        image_ids: &[Uuid],
-    ) -> Result<u64, sqlx::Error> {
-        let result = sqlx::query(
-            "UPDATE images
-             SET deleted_at = NULL
-             WHERE user_id = $1 AND id = ANY($2) AND deleted_at IS NOT NULL",
-        )
-        .bind(user_id)
-        .bind(image_ids)
-        .execute(&self.pool)
-        .await?;
-
-        Ok(result.rows_affected())
     }
 
     pub(super) async fn hard_delete_images_by_user_impl(
@@ -174,57 +137,6 @@ impl MySqlImageRepository {
         .await?;
 
         Ok(())
-    }
-
-    pub(super) async fn soft_delete_images_by_user_impl(
-        &self,
-        user_id: Uuid,
-        image_ids: &[Uuid],
-    ) -> Result<u64, sqlx::Error> {
-        if image_ids.is_empty() {
-            return Ok(0);
-        }
-
-        let mut builder = QueryBuilder::<MySql>::new("UPDATE images SET deleted_at = ");
-        builder.push_bind(Utc::now());
-        builder.push(" WHERE user_id = ");
-        builder.push_bind(user_id);
-        builder.push(" AND id IN (");
-        {
-            let mut separated = builder.separated(", ");
-            for image_id in image_ids {
-                separated.push_bind(image_id);
-            }
-        }
-        builder.push(") AND deleted_at IS NULL");
-
-        let result = builder.build().execute(&self.pool).await?;
-        Ok(result.rows_affected())
-    }
-
-    pub(super) async fn restore_images_by_user_impl(
-        &self,
-        user_id: Uuid,
-        image_ids: &[Uuid],
-    ) -> Result<u64, sqlx::Error> {
-        if image_ids.is_empty() {
-            return Ok(0);
-        }
-
-        let mut builder =
-            QueryBuilder::<MySql>::new("UPDATE images SET deleted_at = NULL WHERE user_id = ");
-        builder.push_bind(user_id);
-        builder.push(" AND id IN (");
-        {
-            let mut separated = builder.separated(", ");
-            for image_id in image_ids {
-                separated.push_bind(image_id);
-            }
-        }
-        builder.push(") AND deleted_at IS NOT NULL");
-
-        let result = builder.build().execute(&self.pool).await?;
-        Ok(result.rows_affected())
     }
 
     pub(super) async fn hard_delete_images_by_user_impl(
@@ -310,57 +222,6 @@ impl SqliteImageRepository {
         .await?;
 
         Ok(())
-    }
-
-    pub(super) async fn soft_delete_images_by_user_impl(
-        &self,
-        user_id: Uuid,
-        image_ids: &[Uuid],
-    ) -> Result<u64, sqlx::Error> {
-        if image_ids.is_empty() {
-            return Ok(0);
-        }
-
-        let mut builder = QueryBuilder::<Sqlite>::new("UPDATE images SET deleted_at = ");
-        builder.push_bind(Utc::now());
-        builder.push(" WHERE user_id = ");
-        builder.push_bind(user_id);
-        builder.push(" AND id IN (");
-        {
-            let mut separated = builder.separated(", ");
-            for image_id in image_ids {
-                separated.push_bind(image_id);
-            }
-        }
-        builder.push(") AND deleted_at IS NULL");
-
-        let result = builder.build().execute(&self.pool).await?;
-        Ok(result.rows_affected())
-    }
-
-    pub(super) async fn restore_images_by_user_impl(
-        &self,
-        user_id: Uuid,
-        image_ids: &[Uuid],
-    ) -> Result<u64, sqlx::Error> {
-        if image_ids.is_empty() {
-            return Ok(0);
-        }
-
-        let mut builder =
-            QueryBuilder::<Sqlite>::new("UPDATE images SET deleted_at = NULL WHERE user_id = ");
-        builder.push_bind(user_id);
-        builder.push(" AND id IN (");
-        {
-            let mut separated = builder.separated(", ");
-            for image_id in image_ids {
-                separated.push_bind(image_id);
-            }
-        }
-        builder.push(") AND deleted_at IS NOT NULL");
-
-        let result = builder.build().execute(&self.pool).await?;
-        Ok(result.rows_affected())
     }
 
     pub(super) async fn hard_delete_images_by_user_impl(

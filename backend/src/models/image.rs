@@ -53,14 +53,8 @@ impl From<Image> for ImageResponse {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct RestoreRequest {
-    pub image_keys: Vec<String>,
-}
-
-#[derive(Debug, Deserialize)]
 pub struct DeleteRequest {
     pub image_keys: Vec<String>,
-    pub permanent: bool,
 }
 
 #[derive(Debug, Deserialize)]

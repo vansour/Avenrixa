@@ -492,7 +492,6 @@ run_postgres_image_smoke() {
   local image_key
   local images_page
   local image_detail
-  local deleted_page
   local expires_at
   local stats
   local health_payload
@@ -534,23 +533,10 @@ run_postgres_image_smoke() {
     "${expires_at}" \
     "image detail should expose the configured expiry timestamp"
 
-  log_step "Soft deleting and restoring image"
+  log_step "Deleting image"
   curl -fsS \
     -b "${ADMIN_COOKIE_JAR}" \
     -X DELETE "${api_base}/images" \
-    -H 'Content-Type: application/json' \
-    -d "$(jq -n --arg image_key "${image_key}" '{image_keys: [$image_key], permanent: false}')" \
-    >/dev/null
-
-  deleted_page="$(curl -fsS -b "${ADMIN_COOKIE_JAR}" "${api_base}/images/deleted?page=1&page_size=20")"
-  expect_eq \
-    "$(page_has_image "${deleted_page}" "${image_key}")" \
-    "1" \
-    "deleted image list should contain soft deleted image"
-
-  curl -fsS \
-    -b "${ADMIN_COOKIE_JAR}" \
-    -X POST "${api_base}/images/restore" \
     -H 'Content-Type: application/json' \
     -d "$(jq -n --arg image_key "${image_key}" '{image_keys: [$image_key]}')" \
     >/dev/null
@@ -558,48 +544,22 @@ run_postgres_image_smoke() {
   images_page="$(curl -fsS -b "${ADMIN_COOKIE_JAR}" "${api_base}/images?page=1&page_size=20")"
   expect_eq \
     "$(page_has_image "${images_page}" "${image_key}")" \
-    "1" \
-    "active image list should contain restored image"
+    "0" \
+    "active image list should not contain deleted image"
 
   stats="$(curl -fsS -b "${ADMIN_COOKIE_JAR}" "${api_base}/stats")"
   expect_eq "$(printf '%s' "${stats}" | jq -r '.total_users')" "1" "system stats should report a single admin user"
-  expect_eq "$(printf '%s' "${stats}" | jq -r '.total_images')" "1" "system stats should count the restored image"
+  expect_eq "$(printf '%s' "${stats}" | jq -r '.total_images')" "0" "system stats should report zero active images after delete"
   expect_eq "$(printf '%s' "${stats}" | jq -r '.images_last_24h')" "1" "system stats should count the new image in the last 24 hours"
   expect_eq "$(printf '%s' "${stats}" | jq -r '.images_last_7d')" "1" "system stats should count the new image in the last 7 days"
-  expect_positive_integer \
-    "$(printf '%s' "${stats}" | jq -r '.total_storage')" \
-    "system stats should report positive storage after upload"
+  expect_eq "$(printf '%s' "${stats}" | jq -r '.total_storage')" "0" "system stats should report zero active storage after delete"
 
   health_payload="$(curl -fsS "${health_url}")"
   expect_eq "$(printf '%s' "${health_payload}" | jq -r '.database.status')" "healthy" "database health should remain healthy after image operations"
   expect_eq "$(printf '%s' "${health_payload}" | jq -r '.cache.status')" "healthy" "cache health should remain healthy after image operations"
   expect_eq "$(printf '%s' "${health_payload}" | jq -r '.storage.status')" "healthy" "storage health should remain healthy after image operations"
   expect_eq "$(printf '%s' "${health_payload}" | jq -r '.metrics.users_count')" "1" "health metrics should report one user"
-  expect_eq "$(printf '%s' "${health_payload}" | jq -r '.metrics.images_count')" "1" "health metrics should report one active image"
-
-  log_step "Permanently deleting image"
-  curl -fsS \
-    -b "${ADMIN_COOKIE_JAR}" \
-    -X DELETE "${api_base}/images" \
-    -H 'Content-Type: application/json' \
-    -d "$(jq -n --arg image_key "${image_key}" '{image_keys: [$image_key], permanent: true}')" \
-    >/dev/null
-
-  images_page="$(curl -fsS -b "${ADMIN_COOKIE_JAR}" "${api_base}/images?page=1&page_size=20")"
-  expect_eq \
-    "$(page_has_image "${images_page}" "${image_key}")" \
-    "0" \
-    "active image list should not contain permanently deleted image"
-
-  deleted_page="$(curl -fsS -b "${ADMIN_COOKIE_JAR}" "${api_base}/images/deleted?page=1&page_size=20")"
-  expect_eq \
-    "$(page_has_image "${deleted_page}" "${image_key}")" \
-    "0" \
-    "deleted image list should not contain permanently deleted image"
-
-  stats="$(curl -fsS -b "${ADMIN_COOKIE_JAR}" "${api_base}/stats")"
-  expect_eq "$(printf '%s' "${stats}" | jq -r '.total_images')" "0" "system stats should report zero active images after permanent delete"
-  expect_eq "$(printf '%s' "${stats}" | jq -r '.total_storage')" "0" "system stats should report zero active storage after permanent delete"
+  expect_eq "$(printf '%s' "${health_payload}" | jq -r '.metrics.images_count')" "0" "health metrics should report zero active images after delete"
 }
 
 run_postgres_settings_smoke() {
@@ -973,7 +933,6 @@ run_mysql_image_smoke() {
   local image_key
   local images_page
   local image_detail
-  local deleted_page
 
   log_step "Uploading image"
   upload_response="$(
@@ -997,23 +956,10 @@ run_mysql_image_smoke() {
     "${image_key}" \
     "image detail should return uploaded image"
 
-  log_step "Soft deleting and restoring image"
+  log_step "Deleting image"
   curl -fsS \
     -b "${ADMIN_COOKIE_JAR}" \
     -X DELETE "${api_base}/images" \
-    -H 'Content-Type: application/json' \
-    -d "$(jq -n --arg image_key "${image_key}" '{image_keys: [$image_key], permanent: false}')" \
-    >/dev/null
-
-  deleted_page="$(curl -fsS -b "${ADMIN_COOKIE_JAR}" "${api_base}/images/deleted?page=1&page_size=20")"
-  expect_eq \
-    "$(page_has_image "${deleted_page}" "${image_key}")" \
-    "1" \
-    "deleted image list should contain soft deleted image"
-
-  curl -fsS \
-    -b "${ADMIN_COOKIE_JAR}" \
-    -X POST "${api_base}/images/restore" \
     -H 'Content-Type: application/json' \
     -d "$(jq -n --arg image_key "${image_key}" '{image_keys: [$image_key]}')" \
     >/dev/null
@@ -1021,28 +967,8 @@ run_mysql_image_smoke() {
   images_page="$(curl -fsS -b "${ADMIN_COOKIE_JAR}" "${api_base}/images?page=1&page_size=20")"
   expect_eq \
     "$(page_has_image "${images_page}" "${image_key}")" \
-    "1" \
-    "active image list should contain restored image"
-
-  log_step "Permanently deleting image"
-  curl -fsS \
-    -b "${ADMIN_COOKIE_JAR}" \
-    -X DELETE "${api_base}/images" \
-    -H 'Content-Type: application/json' \
-    -d "$(jq -n --arg image_key "${image_key}" '{image_keys: [$image_key], permanent: true}')" \
-    >/dev/null
-
-  images_page="$(curl -fsS -b "${ADMIN_COOKIE_JAR}" "${api_base}/images?page=1&page_size=20")"
-  expect_eq \
-    "$(page_has_image "${images_page}" "${image_key}")" \
     "0" \
-    "active image list should not contain permanently deleted image"
-
-  deleted_page="$(curl -fsS -b "${ADMIN_COOKIE_JAR}" "${api_base}/images/deleted?page=1&page_size=20")"
-  expect_eq \
-    "$(page_has_image "${deleted_page}" "${image_key}")" \
-    "0" \
-    "deleted image list should not contain permanently deleted image"
+    "active image list should not contain deleted image"
 }
 
 run_mysql_backup_smoke() {

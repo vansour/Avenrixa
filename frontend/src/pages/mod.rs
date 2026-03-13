@@ -1,6 +1,5 @@
 pub mod api_page;
 pub mod bootstrap_database_page;
-pub mod deleted_images_page;
 pub mod image_list_page;
 pub mod install_wizard_page;
 pub mod login_page;
@@ -8,7 +7,6 @@ pub mod settings_page;
 pub mod upload_page;
 pub use api_page::ApiPage;
 pub use bootstrap_database_page::BootstrapDatabasePage;
-pub use deleted_images_page::DeletedImagesPage;
 pub use image_list_page::ImageListPage;
 pub use install_wizard_page::InstallWizardPage;
 pub use login_page::LoginPage;

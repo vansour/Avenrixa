@@ -20,7 +20,7 @@ pub fn spawn_cleanup_tasks(state: &AppState) {
     let expiry_check_interval = config.cleanup.expiry_check_interval_seconds;
     let cleanup_pool = state.postgres_pool_owned().ok();
 
-    // 启动清理已删除文件任务（每天）
+    // 启动历史已删除图片清理任务（兼容移除回收站前遗留的数据）
     if cleanup_pool.is_none() && state.admin_domain_service.is_none() {
         info!("Skipping background cleanup tasks because no cleanup executor is available",);
         return;
@@ -30,6 +30,7 @@ pub fn spawn_cleanup_tasks(state: &AppState) {
         .active_settings()
         .local_storage_path
         .clone();
+    let expiry_storage_path = cleanup_storage_path.clone();
     let cleanup_retention_days = config.cleanup.deleted_images_retention_days;
     let admin_service_for_cleanup = state.admin_domain_service.clone();
     let installed_state_for_cleanup = state.database.clone();
@@ -46,10 +47,10 @@ pub fn spawn_cleanup_tasks(state: &AppState) {
             {
                 continue;
             }
-            info!("Running cleanup task...");
+            info!("Running deleted-image purge task...");
             if let Some(service) = admin_service_for_cleanup.as_ref() {
                 if let Err(e) = service.cleanup_deleted_files(ADMIN_USER_ID, "system").await {
-                    tracing::error!("Cleanup task failed: {}", e);
+                    tracing::error!("Deleted-image purge task failed: {}", e);
                 }
             } else if let Some(pool) = cleanup_pool_for_deleted.as_ref() {
                 if let Err(e) = tasks::cleanup_expired_images(
@@ -59,10 +60,10 @@ pub fn spawn_cleanup_tasks(state: &AppState) {
                 )
                 .await
                 {
-                    tracing::error!("Cleanup task failed: {}", e);
+                    tracing::error!("Deleted-image purge task failed: {}", e);
                 }
             } else {
-                tracing::warn!("Cleanup task skipped: no executor available");
+                tracing::warn!("Deleted-image purge task skipped: no executor available");
             }
         }
     });
@@ -93,7 +94,7 @@ pub fn spawn_cleanup_tasks(state: &AppState) {
                     tracing::error!("Expiry check failed: {}", e);
                 }
             } else if let Some(pool) = expiry_pool.as_ref() {
-                if let Err(e) = tasks::move_expired_to_trash(pool).await {
+                if let Err(e) = tasks::delete_expired_images(pool, &expiry_storage_path).await {
                     tracing::error!("Expiry check failed: {}", e);
                 }
             } else {

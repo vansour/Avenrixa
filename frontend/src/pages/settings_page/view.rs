@@ -269,16 +269,13 @@ pub fn MaintenanceSettingsSection(
     last_backup: Option<BackupResponse>,
     backup_files: Vec<(BackupFileSummary, String)>,
     restore_status: Option<BackupRestoreStatusResponse>,
-    last_deleted_cleanup_count: Option<usize>,
     last_expired_cleanup_count: Option<i64>,
-    is_cleaning_deleted: bool,
     is_cleaning_expired: bool,
     is_backing_up: bool,
     deleting_backup_filename: Option<String>,
     processing_restore_filename: Option<String>,
     is_loading_backups: bool,
     is_loading_restore_status: bool,
-    #[props(default)] on_cleanup_deleted: EventHandler<MouseEvent>,
     #[props(default)] on_cleanup_expired: EventHandler<MouseEvent>,
     #[props(default)] on_backup: EventHandler<MouseEvent>,
     #[props(default)] on_refresh_backups: EventHandler<MouseEvent>,
@@ -294,9 +291,6 @@ pub fn MaintenanceSettingsSection(
         .as_ref()
         .map(|backup| format_timestamp(backup.created_at))
         .unwrap_or_else(|| "未生成".to_string());
-    let deleted_cleanup_summary = last_deleted_cleanup_count
-        .map(|count| format!("{} 个文件", count))
-        .unwrap_or_else(|| "未执行".to_string());
     let expired_cleanup_summary = last_expired_cleanup_count
         .map(|count| format!("{} 张图片", count))
         .unwrap_or_else(|| "未执行".to_string());
@@ -323,8 +317,7 @@ pub fn MaintenanceSettingsSection(
         .as_ref()
         .map(|item| format_timestamp(item.finished_at))
         .unwrap_or_else(|| "未执行".to_string());
-    let maintenance_busy = is_cleaning_deleted
-        || is_cleaning_expired
+    let maintenance_busy = is_cleaning_expired
         || is_backing_up
         || deleting_backup_filename.is_some()
         || processing_restore_filename.is_some();
@@ -342,46 +335,29 @@ pub fn MaintenanceSettingsSection(
             }
 
             div { class: "settings-banner settings-banner-neutral",
-                "维护工具已启用分级确认：回收站清理属于高风险操作，需要输入确认词；过期图片处理属于警告级操作，需要二次确认；数据库备份可直接执行。"
+                "维护工具已启用分级确认：过期图片永久删除和数据库恢复都属于高风险操作，需要输入确认词；数据库备份可直接执行。"
             }
 
             div { class: "settings-metric-grid",
                 {render_metric_card("最近备份文件", last_backup_name)}
                 {render_metric_card("最近备份时间", last_backup_time)}
-                {render_metric_card("最近永久清理", deleted_cleanup_summary)}
-                {render_metric_card("最近过期处理", expired_cleanup_summary)}
+                {render_metric_card("最近过期删除", expired_cleanup_summary)}
             }
 
             div { class: "settings-action-grid",
-                article { class: "settings-action-card settings-action-card-danger",
+                article { class: "settings-action-card",
                     div { class: "settings-action-copy",
                         div { class: "settings-action-meta",
                             span { class: "settings-risk-badge is-danger", "Danger" }
                         }
-                        h3 { "清理已删除文件" }
-                        p { class: "settings-action-note", "彻底删除回收站中的文件和记录，无法撤销。" }
+                        h3 { "永久删除过期图片" }
+                        p { class: "settings-action-note", "批量删除所有已过期图片，并同步移除文件与数据库记录。" }
                     }
                     button {
                         class: "btn btn-danger",
                         disabled: maintenance_busy,
-                        onclick: move |event| on_cleanup_deleted.call(event),
-                        if is_cleaning_deleted { "清理中..." } else { "执行清理" }
-                    }
-                }
-
-                article { class: "settings-action-card",
-                    div { class: "settings-action-copy",
-                        div { class: "settings-action-meta",
-                            span { class: "settings-risk-badge is-warning", "Warning" }
-                        }
-                        h3 { "清理过期图片" }
-                        p { class: "settings-action-note", "把已过期图片批量移入回收站，后续仍可恢复。" }
-                    }
-                    button {
-                        class: "btn",
-                        disabled: maintenance_busy,
                         onclick: move |event| on_cleanup_expired.call(event),
-                        if is_cleaning_expired { "处理中..." } else { "处理过期图片" }
+                        if is_cleaning_expired { "删除中..." } else { "执行删除" }
                     }
                 }
 
@@ -1692,16 +1668,16 @@ fn humanize_action(action: &str) -> String {
 fn audit_title(log: &AuditLog) -> String {
     match log.action.as_str() {
         "admin.maintenance.deleted_files_cleanup.completed" | "cleanup_completed" => {
-            "已永久清理回收站文件".to_string()
+            "已清理历史已删除图片".to_string()
         }
         "admin.maintenance.deleted_files_cleanup.failed" | "cleanup_failed" => {
-            "永久清理回收站失败".to_string()
+            "清理历史已删除图片失败".to_string()
         }
         "admin.maintenance.expired_images_cleanup.completed" | "expire_completed" => {
-            "已批量处理过期图片".to_string()
+            "已永久删除过期图片".to_string()
         }
         "admin.maintenance.expired_images_cleanup.failed" | "expire_failed" => {
-            "批量处理过期图片失败".to_string()
+            "永久删除过期图片失败".to_string()
         }
         "admin.maintenance.database_backup.created" | "backup_created" => {
             "已创建数据库备份".to_string()
@@ -1731,25 +1707,25 @@ fn audit_summary(log: &AuditLog) -> String {
     match log.action.as_str() {
         "admin.maintenance.deleted_files_cleanup.completed" | "cleanup_completed" => {
             if let Some(count) = audit_detail_i64(log.details.as_ref(), "removed_count") {
-                format!("共永久移除 {} 个已删除文件。", count)
+                format!("共清理 {} 个历史已删除文件。", count)
             } else {
-                "已完成回收站文件永久清理。".to_string()
+                "已完成历史已删除图片清理。".to_string()
             }
         }
         "admin.maintenance.deleted_files_cleanup.failed" | "cleanup_failed" => {
             audit_error_summary(log)
-                .unwrap_or_else(|| "回收站文件永久清理失败，请检查数据库与存储状态。".to_string())
+                .unwrap_or_else(|| "历史已删除图片清理失败，请检查数据库与存储状态。".to_string())
         }
         "admin.maintenance.expired_images_cleanup.completed" | "expire_completed" => {
             if let Some(count) = audit_detail_i64(log.details.as_ref(), "affected_count") {
-                format!("共处理 {} 张已过期图片，并移入回收站。", count)
+                format!("共永久删除 {} 张已过期图片。", count)
             } else {
-                "已处理所有符合条件的过期图片。".to_string()
+                "已永久删除所有符合条件的过期图片。".to_string()
             }
         }
         "admin.maintenance.expired_images_cleanup.failed" | "expire_failed" => {
             audit_error_summary(log)
-                .unwrap_or_else(|| "过期图片批量处理失败，请检查图片数据与数据库状态。".to_string())
+                .unwrap_or_else(|| "过期图片永久删除失败，请检查图片数据与数据库状态。".to_string())
         }
         "admin.maintenance.database_backup.created" | "backup_created" => {
             audit_detail_str(log.details.as_ref(), "filename")

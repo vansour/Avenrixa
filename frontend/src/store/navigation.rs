@@ -6,7 +6,6 @@ use std::rc::Rc;
 pub enum DashboardPage {
     Upload,
     History,
-    Trash,
     Api,
     Settings,
 }
@@ -16,7 +15,6 @@ impl DashboardPage {
         match self {
             DashboardPage::Upload => "上传中心",
             DashboardPage::History => "历史图库",
-            DashboardPage::Trash => "回收站",
             DashboardPage::Api => "API 接入",
             DashboardPage::Settings => "系统设置",
         }

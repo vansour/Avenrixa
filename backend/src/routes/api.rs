@@ -65,7 +65,6 @@ fn throttled_public_routes() -> Router<AppState> {
 
 fn admin_routes() -> Router<AppState> {
     Router::new()
-        .route("/cleanup", routing::post(admin::cleanup_deleted_files))
         .route(
             "/cleanup/expired",
             routing::post(admin::cleanup_expired_images),
@@ -119,8 +118,6 @@ fn protected_routes() -> Router<AppState> {
             "/images/{image_key}/expiry",
             routing::put(images::set_expiry),
         )
-        .route("/images/deleted", routing::get(images::get_deleted_images))
-        .route("/images/restore", routing::post(images::restore_images))
         .route("/auth/me", routing::get(auth::get_current_user))
         .route(
             "/auth/change-password",

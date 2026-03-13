@@ -2,8 +2,8 @@ use crate::app_context::AppContext;
 use crate::components::{Modal, Toast};
 use crate::config::Config;
 use crate::pages::{
-    ApiPage, BootstrapDatabasePage, DeletedImagesPage, ImageListPage, InstallWizardPage, LoginPage,
-    SettingsPage, UploadPage,
+    ApiPage, BootstrapDatabasePage, ImageListPage, InstallWizardPage, LoginPage, SettingsPage,
+    UploadPage,
 };
 use crate::store::{DashboardPage, SettingsAnchor};
 use crate::types::api::{BootstrapStatusResponse, InstallStatusResponse};
@@ -212,7 +212,6 @@ pub fn App() -> Element {
                             match navigation_store.current_page() {
                                 DashboardPage::Upload => rsx! { UploadPage {} },
                                 DashboardPage::History => rsx! { ImageListPage {} },
-                                DashboardPage::Trash => rsx! { DeletedImagesPage {} },
                                 DashboardPage::Api => rsx! { ApiPage {} },
                                 DashboardPage::Settings => rsx! {
                                     SettingsPage {
@@ -236,7 +235,6 @@ pub fn App() -> Element {
                         match navigation_store.current_page() {
                             DashboardPage::Upload => rsx! { UploadPage {} },
                             DashboardPage::History => rsx! { ImageListPage {} },
-                            DashboardPage::Trash => rsx! { DeletedImagesPage {} },
                             DashboardPage::Api => rsx! { ApiPage {} },
                             DashboardPage::Settings => rsx! {
                                 SettingsPage {
@@ -399,7 +397,7 @@ fn FirstRunGuideModal(
                     article { class: "guide-task-card" ,
                         p { class: "guide-step", "Step 3" }
                         h3 { "验证上传链路" }
-                        p { "去上传中心上传一张测试图片，再检查历史图库、回收站和访问链接是否正常。" }
+                        p { "去上传中心上传一张测试图片，再检查历史图库、删除流程和访问链接是否正常。" }
                         button {
                             class: "btn",
                             onclick: move |event| on_go_upload.call(event),

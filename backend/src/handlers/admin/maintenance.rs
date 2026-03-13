@@ -13,17 +13,6 @@ use axum::{
     response::{IntoResponse, Response},
 };
 
-pub async fn cleanup_deleted_files(
-    State(state): State<AppState>,
-    admin_user: AdminUser,
-) -> Result<Json<Vec<String>>, AppError> {
-    let service = admin_service(&state)?;
-    let removed = service
-        .cleanup_deleted_files(admin_user.id, &admin_user.email)
-        .await?;
-    Ok(Json(removed))
-}
-
 pub async fn cleanup_expired_images(
     State(state): State<AppState>,
     admin_user: AdminUser,

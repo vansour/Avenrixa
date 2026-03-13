@@ -15,5 +15,6 @@
 /data-*/
 /ops-backups/
 /pg_data/
+/tmp/runtime-tmp/
 /cookie.txt
 /test-results/

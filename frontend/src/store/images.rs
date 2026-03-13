@@ -7,7 +7,6 @@ use std::rc::Rc;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ImageCollectionKind {
     Active,
-    Deleted,
 }
 
 #[derive(Clone, Default)]
@@ -27,21 +26,18 @@ pub struct ImageCollectionSnapshot {
 #[derive(Clone, Default)]
 struct ImageCollectionsState {
     active: ImageCollectionSnapshot,
-    deleted: ImageCollectionSnapshot,
 }
 
 impl ImageCollectionsState {
     fn collection(&self, kind: ImageCollectionKind) -> &ImageCollectionSnapshot {
         match kind {
             ImageCollectionKind::Active => &self.active,
-            ImageCollectionKind::Deleted => &self.deleted,
         }
     }
 
     fn collection_mut(&mut self, kind: ImageCollectionKind) -> &mut ImageCollectionSnapshot {
         match kind {
             ImageCollectionKind::Active => &mut self.active,
-            ImageCollectionKind::Deleted => &mut self.deleted,
         }
     }
 }
@@ -58,9 +54,6 @@ impl ImageStore {
         initial_state.active.current_page = 1;
         initial_state.active.page_size = 20;
         initial_state.active.has_more = true;
-        initial_state.deleted.current_page = 1;
-        initial_state.deleted.page_size = 20;
-        initial_state.deleted.has_more = true;
 
         Self {
             state: Rc::new(RefCell::new(Signal::new(initial_state))),
@@ -237,14 +230,10 @@ mod tests {
         let store = &harness.store;
 
         let active = store.collection(ImageCollectionKind::Active);
-        let deleted = store.collection(ImageCollectionKind::Deleted);
 
         assert_eq!(active.current_page, 1);
         assert_eq!(active.page_size, 20);
         assert!(active.has_more);
-        assert_eq!(deleted.current_page, 1);
-        assert_eq!(deleted.page_size, 20);
-        assert!(deleted.has_more);
     }
 
     #[test]
@@ -275,7 +264,7 @@ mod tests {
         let harness = TestImageStoreHarness::new();
         let store = &harness.store;
         store.replace_page(
-            ImageCollectionKind::Deleted,
+            ImageCollectionKind::Active,
             vec![
                 sample_image("first", "first.png"),
                 sample_image("second", "second.png"),
@@ -285,17 +274,17 @@ mod tests {
             2,
             false,
         );
-        store.toggle_selection(ImageCollectionKind::Deleted, "off-page");
+        store.toggle_selection(ImageCollectionKind::Active, "off-page");
 
-        store.toggle_all_visible(ImageCollectionKind::Deleted);
-        let selected_once = store.collection(ImageCollectionKind::Deleted);
+        store.toggle_all_visible(ImageCollectionKind::Active);
+        let selected_once = store.collection(ImageCollectionKind::Active);
         assert_eq!(selected_once.selected_ids.len(), 3);
         assert!(selected_once.selected_ids.contains("first"));
         assert!(selected_once.selected_ids.contains("second"));
         assert!(selected_once.selected_ids.contains("off-page"));
 
-        store.toggle_all_visible(ImageCollectionKind::Deleted);
-        let selected_twice = store.collection(ImageCollectionKind::Deleted);
+        store.toggle_all_visible(ImageCollectionKind::Active);
+        let selected_twice = store.collection(ImageCollectionKind::Active);
         assert_eq!(selected_twice.selected_ids.len(), 1);
         assert!(selected_twice.selected_ids.contains("off-page"));
     }

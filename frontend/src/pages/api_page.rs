@@ -21,8 +21,7 @@ pub fn ApiPage() -> Element {
                 ul { class: "api-list",
                     li { code { "POST /api/v1/upload" } " - 上传图片（multipart, 字段名 file）" }
                     li { code { "GET /api/v1/images?page=1&page_size=20" } " - 获取历史图片列表（按上传时间倒序）" }
-                    li { code { "DELETE /api/v1/images" } " - 批量删除，参数 image_keys" }
-                    li { code { "POST /api/v1/images/restore" } " - 批量恢复，参数 image_keys" }
+                    li { code { "DELETE /api/v1/images" } " - 批量永久删除，参数 image_keys" }
                     li { code { "GET /api/v1/settings/config" } " - 获取管理员结构化设置" }
                     li { code { "PUT /api/v1/settings/config" } " - 更新管理员结构化设置" }
                     li { code { "GET /thumbnails/:hash.webp" } " - 动态缩略图（不落盘）" }

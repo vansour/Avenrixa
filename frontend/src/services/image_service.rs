@@ -1,8 +1,7 @@
 use crate::services::api_client::ApiClient;
 use crate::store::images::{ImageCollectionKind, ImageStore};
 use crate::types::api::{
-    DeleteRequest, Paginated, PaginationParams, RestoreRequest, SetExpiryRequest,
-    UpdateImageRequest,
+    DeleteRequest, Paginated, PaginationParams, SetExpiryRequest, UpdateImageRequest,
 };
 use crate::types::errors::Result;
 use crate::types::models::ImageItem;
@@ -82,47 +81,10 @@ impl ImageService {
     }
 
     /// 批量删除图片
-    pub async fn delete_images(&self, image_keys: Vec<String>, permanent: bool) -> Result<()> {
+    pub async fn delete_images(&self, image_keys: Vec<String>) -> Result<()> {
         let url = "/api/v1/images".to_string();
-        let body = DeleteRequest {
-            image_keys,
-            permanent,
-        };
+        let body = DeleteRequest { image_keys };
         self.api_client.delete_json(&url, &body).await
-    }
-
-    /// 获取已删除图片
-    pub async fn get_deleted_images(
-        &self,
-        params: PaginationParams,
-    ) -> Result<Paginated<ImageItem>> {
-        let query_params = Self::build_query_params(&params);
-        let url = if query_params.is_empty() {
-            "/api/v1/images/deleted".to_string()
-        } else {
-            format!("/api/v1/images/deleted?{}", query_params)
-        };
-
-        let result = self
-            .api_client
-            .get_json::<Paginated<ImageItem>>(&url)
-            .await?;
-        self.image_store.replace_page(
-            ImageCollectionKind::Deleted,
-            result.data.clone(),
-            result.page.max(1) as u32,
-            params.page_size.unwrap_or(result.page_size).max(1) as u32,
-            result.total.max(0) as u64,
-            result.has_next,
-        );
-        Ok(result)
-    }
-
-    /// 恢复图片
-    pub async fn restore_images(&self, image_keys: Vec<String>) -> Result<()> {
-        let url = "/api/v1/images/restore".to_string();
-        let req = RestoreRequest { image_keys };
-        self.api_client.post_json_no_response(&url, &req).await
     }
 
     /// 构建 URL 查询参数

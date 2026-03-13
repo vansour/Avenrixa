@@ -57,13 +57,6 @@ pub struct Paginated<T> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeleteRequest {
     pub image_keys: Vec<String>,
-    pub permanent: bool,
-}
-
-/// 恢复请求
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RestoreRequest {
-    pub image_keys: Vec<String>,
 }
 
 /// 设置过期请求

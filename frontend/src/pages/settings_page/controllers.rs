@@ -30,7 +30,6 @@ struct ConfirmationPlan {
 
 #[derive(Clone, PartialEq, Eq)]
 enum MaintenanceAction {
-    CleanupDeleted,
     CleanupExpired,
     DeleteBackup(String),
     RestoreBackup(String),
@@ -90,33 +89,19 @@ fn setting_requires_restart(key: &str) -> bool {
 
 fn maintenance_confirmation_plan(action: MaintenanceAction) -> ConfirmationPlan {
     match action {
-        MaintenanceAction::CleanupDeleted => ConfirmationPlan {
-            title: "永久清理已删除文件".to_string(),
-            summary: "这会从存储和数据库记录中彻底移除已删除文件，执行后无法恢复。".to_string(),
+        MaintenanceAction::CleanupExpired => ConfirmationPlan {
+            title: "批量处理过期图片".to_string(),
+            summary: "系统会永久删除所有已过期图片，并同步移除对应文件与数据库记录。".to_string(),
             consequences: vec![
-                "只处理已经进入删除状态的文件和记录。".to_string(),
-                "一旦执行完成，这批文件将不能再从回收站恢复。".to_string(),
-                "建议在清理前先做数据库备份。".to_string(),
+                "只影响已经到期的图片。".to_string(),
+                "处理完成后图片将无法恢复。".to_string(),
+                "如果过期策略配置不正确，可能一次影响较多图片。".to_string(),
             ],
-            confirm_label: "确认永久清理".to_string(),
+            confirm_label: "确认永久删除".to_string(),
             cancel_label: "取消".to_string(),
             tone: ConfirmationTone::Danger,
             confirm_phrase: Some("DELETE".to_string()),
-            confirm_hint: Some("请输入 DELETE 以确认永久清理".to_string()),
-        },
-        MaintenanceAction::CleanupExpired => ConfirmationPlan {
-            title: "批量处理过期图片".to_string(),
-            summary: "系统会把所有已过期图片批量移入回收站，后续仍可在回收站恢复。".to_string(),
-            consequences: vec![
-                "只影响已经到期的图片。".to_string(),
-                "处理后图片不会立刻永久删除，而是进入回收站。".to_string(),
-                "如果过期策略配置不正确，可能一次影响较多图片。".to_string(),
-            ],
-            confirm_label: "继续处理".to_string(),
-            cancel_label: "取消".to_string(),
-            tone: ConfirmationTone::Warning,
-            confirm_phrase: None,
-            confirm_hint: None,
+            confirm_hint: Some("请输入 DELETE 以确认永久删除过期图片".to_string()),
         },
         MaintenanceAction::DeleteBackup(filename) => ConfirmationPlan {
             title: "删除备份文件".to_string(),
@@ -695,9 +680,7 @@ pub fn MaintenanceSectionController() -> Element {
     let mut last_backup = use_signal(|| None::<BackupResponse>);
     let mut backup_files = use_signal(Vec::<BackupFileSummary>::new);
     let mut restore_status = use_signal(|| None::<BackupRestoreStatusResponse>);
-    let mut last_deleted_cleanup_count = use_signal(|| None::<usize>);
     let mut last_expired_cleanup_count = use_signal(|| None::<i64>);
-    let mut is_cleaning_deleted = use_signal(|| false);
     let mut is_cleaning_expired = use_signal(|| false);
     let mut is_backing_up = use_signal(|| false);
     let mut deleting_backup_filename = use_signal(|| None::<String>);
@@ -778,60 +761,6 @@ pub fn MaintenanceSectionController() -> Element {
         }
     });
 
-    let admin_service_for_deleted_cleanup = admin_service.clone();
-    let auth_store_for_deleted_cleanup = auth_store.clone();
-    let toast_store_for_deleted_cleanup = toast_store.clone();
-    let run_cleanup_deleted = move || {
-        let admin_service = admin_service_for_deleted_cleanup.clone();
-        let auth_store = auth_store_for_deleted_cleanup.clone();
-        let toast_store = toast_store_for_deleted_cleanup.clone();
-        spawn(async move {
-            is_cleaning_deleted.set(true);
-            error_message.set(String::new());
-            success_message.set(String::new());
-
-            match admin_service.cleanup_deleted_files().await {
-                Ok(removed) => {
-                    let count = removed.len();
-                    last_deleted_cleanup_count.set(Some(count));
-                    let message = if count == 0 {
-                        "当前没有可清理的已删除文件".to_string()
-                    } else {
-                        format!("已永久清理 {} 个已删除文件", count)
-                    };
-                    success_message.set(message.clone());
-                    toast_store.show_success(message);
-                }
-                Err(err) => {
-                    set_settings_action_error(
-                        &auth_store,
-                        &toast_store,
-                        error_message,
-                        &err,
-                        "清理已删除文件失败",
-                    );
-                }
-            }
-
-            is_cleaning_deleted.set(false);
-        });
-    };
-
-    let handle_cleanup_deleted = move |_| {
-        if is_cleaning_deleted()
-            || is_cleaning_expired()
-            || is_backing_up()
-            || deleting_backup_filename().is_some()
-            || processing_restore_filename().is_some()
-        {
-            return;
-        }
-        pending_action.set(Some(PendingMaintenanceAction {
-            action: MaintenanceAction::CleanupDeleted,
-            plan: maintenance_confirmation_plan(MaintenanceAction::CleanupDeleted),
-        }));
-    };
-
     let admin_service_for_expired_cleanup = admin_service.clone();
     let auth_store_for_expired_cleanup = auth_store.clone();
     let toast_store_for_expired_cleanup = toast_store.clone();
@@ -848,9 +777,9 @@ pub fn MaintenanceSectionController() -> Element {
                 Ok(affected) => {
                     last_expired_cleanup_count.set(Some(affected));
                     let message = if affected <= 0 {
-                        "当前没有需要处理的过期图片".to_string()
+                        "当前没有需要永久删除的过期图片".to_string()
                     } else {
-                        format!("已处理 {} 张过期图片", affected)
+                        format!("已永久删除 {} 张过期图片", affected)
                     };
                     success_message.set(message.clone());
                     toast_store.show_success(message);
@@ -861,7 +790,7 @@ pub fn MaintenanceSectionController() -> Element {
                         &toast_store,
                         error_message,
                         &err,
-                        "处理过期图片失败",
+                        "永久删除过期图片失败",
                     );
                 }
             }
@@ -871,8 +800,7 @@ pub fn MaintenanceSectionController() -> Element {
     };
 
     let handle_cleanup_expired = move |_| {
-        if is_cleaning_deleted()
-            || is_cleaning_expired()
+        if is_cleaning_expired()
             || is_backing_up()
             || deleting_backup_filename().is_some()
             || processing_restore_filename().is_some()
@@ -889,8 +817,7 @@ pub fn MaintenanceSectionController() -> Element {
     let auth_store_for_backup = auth_store.clone();
     let toast_store_for_backup = toast_store.clone();
     let handle_backup_database = move |_| {
-        if is_cleaning_deleted()
-            || is_cleaning_expired()
+        if is_cleaning_expired()
             || is_backing_up()
             || deleting_backup_filename().is_some()
             || processing_restore_filename().is_some()
@@ -965,8 +892,7 @@ pub fn MaintenanceSectionController() -> Element {
     };
 
     let handle_delete_backup = move |filename: String| {
-        if is_cleaning_deleted()
-            || is_cleaning_expired()
+        if is_cleaning_expired()
             || is_backing_up()
             || deleting_backup_filename().is_some()
             || processing_restore_filename().is_some()
@@ -982,8 +908,7 @@ pub fn MaintenanceSectionController() -> Element {
     };
 
     let handle_refresh_backups = move |_| {
-        if is_cleaning_deleted()
-            || is_cleaning_expired()
+        if is_cleaning_expired()
             || is_backing_up()
             || deleting_backup_filename().is_some()
             || processing_restore_filename().is_some()
@@ -996,8 +921,7 @@ pub fn MaintenanceSectionController() -> Element {
     };
 
     let handle_refresh_restore_status = move |_| {
-        if is_cleaning_deleted()
-            || is_cleaning_expired()
+        if is_cleaning_expired()
             || is_backing_up()
             || deleting_backup_filename().is_some()
             || processing_restore_filename().is_some()
@@ -1050,8 +974,7 @@ pub fn MaintenanceSectionController() -> Element {
     let auth_store_for_restore_precheck = auth_store.clone();
     let toast_store_for_restore_precheck = toast_store.clone();
     let handle_restore_backup = move |backup: BackupFileSummary| {
-        if is_cleaning_deleted()
-            || is_cleaning_expired()
+        if is_cleaning_expired()
             || is_backing_up()
             || deleting_backup_filename().is_some()
             || processing_restore_filename().is_some()
@@ -1135,16 +1058,13 @@ pub fn MaintenanceSectionController() -> Element {
             last_backup: last_backup(),
             backup_files: backup_downloads,
             restore_status: restore_status(),
-            last_deleted_cleanup_count: last_deleted_cleanup_count(),
             last_expired_cleanup_count: last_expired_cleanup_count(),
-            is_cleaning_deleted: is_cleaning_deleted(),
             is_cleaning_expired: is_cleaning_expired(),
             is_backing_up: is_backing_up(),
             deleting_backup_filename: deleting_backup_filename(),
             processing_restore_filename: processing_restore_filename(),
             is_loading_backups: is_loading_backups(),
             is_loading_restore_status: is_loading_restore_status(),
-            on_cleanup_deleted: handle_cleanup_deleted,
             on_cleanup_expired: handle_cleanup_expired,
             on_backup: handle_backup_database,
             on_refresh_backups: handle_refresh_backups,
@@ -1163,8 +1083,7 @@ pub fn MaintenanceSectionController() -> Element {
                 tone: pending.plan.tone,
                 confirm_phrase: pending.plan.confirm_phrase.clone(),
                 confirm_hint: pending.plan.confirm_hint.clone(),
-                is_submitting: is_cleaning_deleted()
-                    || is_cleaning_expired()
+                is_submitting: is_cleaning_expired()
                     || is_backing_up()
                     || deleting_backup_filename().is_some()
                     || processing_restore_filename().is_some(),
@@ -1173,7 +1092,6 @@ pub fn MaintenanceSectionController() -> Element {
                     let action = pending.action.clone();
                     pending_action.set(None);
                     match action {
-                        MaintenanceAction::CleanupDeleted => run_cleanup_deleted(),
                         MaintenanceAction::CleanupExpired => run_cleanup_expired(),
                         MaintenanceAction::DeleteBackup(filename) => run_delete_backup(filename),
                         MaintenanceAction::RestoreBackup(filename) => run_schedule_restore(filename),

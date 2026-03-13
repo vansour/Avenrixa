@@ -49,23 +49,25 @@ pub fn ImageCard(
                     "{image.format.to_uppercase()}"
                 }
             }
-            div { class: "image-info",
-                div { class: "image-name", "{display_name}" }
-                div { class: "image-meta",
-                    span { class: "image-size", "{size_formatted}" }
-                    span { class: "image-date", "{created_at_label}" }
+            div { class: "image-content",
+                div { class: "image-info",
+                    div { class: "image-name", "{display_name}" }
+                    div { class: "image-meta",
+                        span { class: "image-size", "{size_formatted}" }
+                        span { class: "image-date", "{created_at_label}" }
+                    }
                 }
-            }
-            div { class: "image-actions",
-                button {
-                    class: "btn btn-card",
-                    onclick: handle_download,
-                    "下载"
-                }
-                button {
-                    class: "btn btn-card btn-card-danger",
-                    onclick: handle_delete,
-                    "删除"
+                div { class: "image-actions",
+                    button {
+                        class: "btn btn-card",
+                        onclick: handle_download,
+                        "下载"
+                    }
+                    button {
+                        class: "btn btn-card btn-card-danger",
+                        onclick: handle_delete,
+                        "永久删除"
+                    }
                 }
             }
         }

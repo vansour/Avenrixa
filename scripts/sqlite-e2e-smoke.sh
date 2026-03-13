@@ -362,53 +362,45 @@ EXPIRED_CLEANUP_COUNT="$(
 expect_eq \
   "${EXPIRED_CLEANUP_COUNT}" \
   "1" \
-  "expired image cleanup should move one image to trash"
+  "expired image cleanup should delete one expired image"
 
-DELETED_PAGE="$(curl -fsS -b "${USER_COOKIE_JAR}" "${api_base}/images/deleted?page=1&page_size=20")"
+IMAGES_PAGE_AFTER_EXPIRED_CLEANUP="$(curl -fsS -b "${USER_COOKIE_JAR}" "${api_base}/images?page=1&page_size=20")"
 expect_eq \
-  "$(printf '%s' "${DELETED_PAGE}" | jq -r '.total')" \
-  "1" \
-  "deleted list should contain the expired image"
+  "$(printf '%s' "${IMAGES_PAGE_AFTER_EXPIRED_CLEANUP}" | jq -r '.total')" \
+  "0" \
+  "expired image cleanup should remove the image from active list"
 
-curl -fsS \
-  -b "${USER_COOKIE_JAR}" \
-  -X POST "${api_base}/images/restore" \
-  -H 'Content-Type: application/json' \
-  -d "$(jq -n --arg image_key "${IMAGE_KEY}" '{image_keys: [$image_key]}')" \
-  >/dev/null
+log_step "Uploading replacement image for delete API"
+UPLOAD_RESPONSE="$(
+  curl -fsS \
+    -b "${USER_COOKIE_JAR}" \
+    -F "file=@${TINY_PNG_PATH};filename=tiny.png;type=image/png" \
+    "${api_base}/upload"
+)"
+IMAGE_KEY="$(printf '%s' "${UPLOAD_RESPONSE}" | jq -r '.image_key')"
+if [[ -z "${IMAGE_KEY}" || "${IMAGE_KEY}" == "null" ]]; then
+  echo "Replacement upload did not return image_key" >&2
+  exit 1
+fi
+
+IMAGES_PAGE="$(curl -fsS -b "${USER_COOKIE_JAR}" "${api_base}/images?page=1&page_size=20")"
+expect_eq \
+  "$(printf '%s' "${IMAGES_PAGE}" | jq -r '.total')" \
+  "1" \
+  "image list should contain the replacement uploaded image"
 
 curl -fsS \
   -b "${USER_COOKIE_JAR}" \
   -X DELETE "${api_base}/images" \
   -H 'Content-Type: application/json' \
-  -d "$(jq -n --arg image_key "${IMAGE_KEY}" '{image_keys: [$image_key], permanent: false}')" \
-  >/dev/null
-
-DELETED_PAGE_AFTER_SOFT_DELETE="$(curl -fsS -b "${USER_COOKIE_JAR}" "${api_base}/images/deleted?page=1&page_size=20")"
-expect_eq \
-  "$(printf '%s' "${DELETED_PAGE_AFTER_SOFT_DELETE}" | jq -r '.total')" \
-  "1" \
-  "soft delete should move the image into deleted list"
-
-curl -fsS \
-  -b "${USER_COOKIE_JAR}" \
-  -X POST "${api_base}/images/restore" \
-  -H 'Content-Type: application/json' \
   -d "$(jq -n --arg image_key "${IMAGE_KEY}" '{image_keys: [$image_key]}')" \
-  >/dev/null
-
-curl -fsS \
-  -b "${USER_COOKIE_JAR}" \
-  -X DELETE "${api_base}/images" \
-  -H 'Content-Type: application/json' \
-  -d "$(jq -n --arg image_key "${IMAGE_KEY}" '{image_keys: [$image_key], permanent: true}')" \
   >/dev/null
 
 IMAGES_PAGE_AFTER_DELETE="$(curl -fsS -b "${USER_COOKIE_JAR}" "${api_base}/images?page=1&page_size=20")"
 expect_eq \
   "$(printf '%s' "${IMAGES_PAGE_AFTER_DELETE}" | jq -r '.total')" \
   "0" \
-  "permanent delete should remove the image from active list"
+  "delete should remove the image from active list"
 
 log_step "Exercising logout and password reset"
 curl -fsS \

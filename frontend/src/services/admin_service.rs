@@ -58,12 +58,6 @@ impl AdminService {
             .await
     }
 
-    pub async fn cleanup_deleted_files(&self) -> Result<Vec<String>> {
-        self.api_client
-            .post_json_response("/api/v1/cleanup", &serde_json::json!({}))
-            .await
-    }
-
     pub async fn cleanup_expired_images(&self) -> Result<i64> {
         self.api_client
             .post_json_response("/api/v1/cleanup/expired", &serde_json::json!({}))

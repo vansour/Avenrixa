@@ -2,10 +2,9 @@ use crate::app_context::{use_auth_store, use_navigation_store};
 use crate::store::DashboardPage;
 use dioxus::prelude::*;
 
-const AUTH_NAV_PAGES: [DashboardPage; 5] = [
+const AUTH_NAV_PAGES: [DashboardPage; 4] = [
     DashboardPage::Upload,
     DashboardPage::History,
-    DashboardPage::Trash,
     DashboardPage::Api,
     DashboardPage::Settings,
 ];

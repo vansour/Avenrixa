@@ -137,23 +137,6 @@ impl PostgresImageRepository {
         .fetch_optional(&self.pool)
         .await
     }
-
-    pub(super) async fn find_deleted_images_by_user_paginated_impl(
-        &self,
-        user_id: Uuid,
-        limit: i32,
-        offset: i32,
-    ) -> Result<Vec<Image>, sqlx::Error> {
-        sqlx::query_as::<_, Image>(&format!(
-            "SELECT {} FROM images WHERE user_id = $1 AND deleted_at IS NOT NULL ORDER BY deleted_at DESC LIMIT $2 OFFSET $3",
-            IMAGE_SELECT_WITH_TOTAL_COUNT
-        ))
-        .bind(user_id)
-        .bind(limit)
-        .bind(offset)
-        .fetch_all(&self.pool)
-        .await
-    }
 }
 
 impl MySqlImageRepository {
@@ -324,45 +307,6 @@ impl MySqlImageRepository {
         .fetch_optional(&self.pool)
         .await
     }
-
-    pub(super) async fn find_deleted_images_by_user_paginated_impl(
-        &self,
-        user_id: Uuid,
-        limit: i32,
-        offset: i32,
-    ) -> Result<Vec<Image>, sqlx::Error> {
-        let total: i64 = sqlx::query_scalar(
-            "SELECT CAST(COUNT(*) AS SIGNED) FROM images WHERE user_id = ? AND deleted_at IS NOT NULL",
-        )
-        .bind(user_id)
-        .fetch_one(&self.pool)
-        .await?;
-
-        if total == 0 {
-            return Ok(Vec::new());
-        }
-
-        let mut builder = QueryBuilder::<MySql>::new("SELECT ");
-        builder.push(IMAGE_SELECT_COLUMNS);
-        builder.push(" FROM images WHERE images.user_id = ");
-        builder.push_bind(user_id);
-        builder.push(" AND images.deleted_at IS NOT NULL");
-        builder.push(" ORDER BY images.deleted_at DESC, images.id DESC");
-        builder.push(" LIMIT ");
-        builder.push_bind(limit);
-        builder.push(" OFFSET ");
-        builder.push_bind(offset);
-
-        let mut images = builder
-            .build_query_as::<Image>()
-            .fetch_all(&self.pool)
-            .await?;
-        for image in &mut images {
-            image.total_count = Some(total);
-        }
-
-        Ok(images)
-    }
 }
 
 impl SqliteImageRepository {
@@ -531,23 +475,6 @@ impl SqliteImageRepository {
         ))
         .bind(hash)
         .fetch_optional(&self.pool)
-        .await
-    }
-
-    pub(super) async fn find_deleted_images_by_user_paginated_impl(
-        &self,
-        user_id: Uuid,
-        limit: i32,
-        offset: i32,
-    ) -> Result<Vec<Image>, sqlx::Error> {
-        sqlx::query_as::<_, Image>(&format!(
-            "SELECT {} FROM images WHERE user_id = ?1 AND deleted_at IS NOT NULL ORDER BY deleted_at DESC LIMIT ?2 OFFSET ?3",
-            IMAGE_SELECT_WITH_TOTAL_COUNT
-        ))
-        .bind(user_id)
-        .bind(limit)
-        .bind(offset)
-        .fetch_all(&self.pool)
         .await
     }
 }

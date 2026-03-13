@@ -326,50 +326,7 @@ async fn test_list_images_ordered_by_created_at_desc() {
 }
 
 #[tokio::test]
-async fn test_list_deleted_images_ordered_desc() {
-    let service = setup_service().await.service;
-    let user_id = Uuid::new_v4();
-    let recently_deleted = build_image(
-        Uuid::new_v4(),
-        user_id,
-        "recent.jpg",
-        "hash-del-1",
-        Utc::now() - chrono::Duration::days(2),
-        Some(Utc::now()),
-    );
-    let older_deleted = build_image(
-        Uuid::new_v4(),
-        user_id,
-        "older.jpg",
-        "hash-del-2",
-        Utc::now() - chrono::Duration::days(5),
-        Some(Utc::now() - chrono::Duration::days(1)),
-    );
-
-    service
-        .image_repository
-        .create_image(&older_deleted)
-        .await
-        .unwrap();
-    service
-        .image_repository
-        .create_image(&recently_deleted)
-        .await
-        .unwrap();
-
-    let page = service
-        .get_deleted_images_paginated(user_id, 1, 20)
-        .await
-        .unwrap();
-
-    assert_eq!(page.data.len(), 2);
-    assert_eq!(page.data[0].id, recently_deleted.id);
-    assert_eq!(page.data[1].id, older_deleted.id);
-    assert_eq!(page.total, 2);
-}
-
-#[tokio::test]
-async fn test_bulk_delete_soft_marks_images_deleted() {
+async fn test_bulk_delete_removes_images_from_active_list() {
     let service = setup_service().await.service;
     let user_id = Uuid::new_v4();
     let image_a = build_image(
@@ -401,53 +358,21 @@ async fn test_bulk_delete_soft_marks_images_deleted() {
         .unwrap();
 
     service
-        .delete_images(&[image_a.id, image_b.id], user_id, false)
+        .delete_images(&[image_a.id, image_b.id], user_id)
         .await
         .unwrap();
 
-    let deleted_images = service
-        .get_deleted_images_paginated(user_id, 1, 20)
-        .await
-        .unwrap();
-    assert_eq!(deleted_images.total, 2);
+    let active_images = service.get_images(user_id, 1, 20, None).await.unwrap();
+    assert_eq!(active_images.total, 0);
 }
 
 #[tokio::test]
-async fn test_restore_images_reactivates_deleted_entries() {
-    let service = setup_service().await.service;
-    let user_id = Uuid::new_v4();
-    let deleted_image = build_image(
-        Uuid::new_v4(),
-        user_id,
-        "restore.jpg",
-        "hash-restore",
-        Utc::now() - chrono::Duration::hours(3),
-        Some(Utc::now()),
-    );
-
-    service
-        .image_repository
-        .create_image(&deleted_image)
-        .await
-        .unwrap();
-
-    service
-        .restore_images(&[deleted_image.id], user_id)
-        .await
-        .unwrap();
-
-    let active = service.get_images(user_id, 1, 20, None).await.unwrap();
-    assert_eq!(active.total, 1);
-    assert!(active.data.iter().all(|image| image.deleted_at.is_none()));
-}
-
-#[tokio::test]
-async fn test_restore_images_rejects_invalid_key() {
+async fn test_delete_images_by_keys_rejects_invalid_key() {
     let service = setup_service().await.service;
     let user_id = Uuid::new_v4();
 
     let result = service
-        .restore_images_by_keys(&["invalid-key".to_string()], user_id)
+        .delete_images_by_keys(&["invalid-key".to_string()], user_id)
         .await;
 
     assert!(matches!(
@@ -530,7 +455,7 @@ async fn test_hard_delete_preserves_shared_file_until_last_reference_is_removed(
     assert!(tokio::fs::try_exists(&file_path).await.unwrap());
 
     service
-        .delete_images(&[first.id], user_a, true)
+        .delete_images(&[first.id], user_a)
         .await
         .expect("first hard delete should succeed");
 
@@ -540,7 +465,7 @@ async fn test_hard_delete_preserves_shared_file_until_last_reference_is_removed(
     );
 
     service
-        .delete_images(&[second.id], user_b, true)
+        .delete_images(&[second.id], user_b)
         .await
         .expect("second hard delete should succeed");
 

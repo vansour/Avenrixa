@@ -70,7 +70,7 @@ async function waitForText(page, matcher, description = String(matcher), timeout
 }
 
 async function waitForAuthenticatedNav(page, timeout = PHASE_TIMEOUT_MS) {
-  const authNavLabels = ["上传中心", "历史图库", "回收站", "API 接入", "系统设置"];
+  const authNavLabels = ["上传中心", "历史图库", "API 接入", "系统设置"];
   const deadline = Date.now() + timeout;
   let lastBodyText = "";
 

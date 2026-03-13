@@ -16,16 +16,6 @@ pub trait ImageRepository: Send + Sync {
     ) -> Result<Vec<Image>, sqlx::Error>;
     async fn create_image(&self, image: &Image) -> Result<(), sqlx::Error>;
     async fn update_image(&self, image: &Image) -> Result<(), sqlx::Error>;
-    async fn soft_delete_images_by_user(
-        &self,
-        user_id: Uuid,
-        image_ids: &[Uuid],
-    ) -> Result<u64, sqlx::Error>;
-    async fn restore_images_by_user(
-        &self,
-        user_id: Uuid,
-        image_ids: &[Uuid],
-    ) -> Result<u64, sqlx::Error>;
     async fn find_images_by_user_and_ids(
         &self,
         user_id: Uuid,
@@ -52,10 +42,4 @@ pub trait ImageRepository: Send + Sync {
         user_id: Uuid,
     ) -> Result<Option<Image>, sqlx::Error>;
     async fn find_image_by_hash_global(&self, hash: &str) -> Result<Option<Image>, sqlx::Error>;
-    async fn find_deleted_images_by_user_paginated(
-        &self,
-        user_id: Uuid,
-        limit: i32,
-        offset: i32,
-    ) -> Result<Vec<Image>, sqlx::Error>;
 }

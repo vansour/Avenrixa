@@ -32,23 +32,6 @@ impl ImageRepository for PostgresImageRepository {
         self.update_image_impl(image).await
     }
 
-    async fn soft_delete_images_by_user(
-        &self,
-        user_id: Uuid,
-        image_ids: &[Uuid],
-    ) -> Result<u64, sqlx::Error> {
-        self.soft_delete_images_by_user_impl(user_id, image_ids)
-            .await
-    }
-
-    async fn restore_images_by_user(
-        &self,
-        user_id: Uuid,
-        image_ids: &[Uuid],
-    ) -> Result<u64, sqlx::Error> {
-        self.restore_images_by_user_impl(user_id, image_ids).await
-    }
-
     async fn find_images_by_user_and_ids(
         &self,
         user_id: Uuid,
@@ -95,16 +78,6 @@ impl ImageRepository for PostgresImageRepository {
 
     async fn find_image_by_hash_global(&self, hash: &str) -> Result<Option<Image>, sqlx::Error> {
         self.find_image_by_hash_global_impl(hash).await
-    }
-
-    async fn find_deleted_images_by_user_paginated(
-        &self,
-        user_id: Uuid,
-        limit: i32,
-        offset: i32,
-    ) -> Result<Vec<Image>, sqlx::Error> {
-        self.find_deleted_images_by_user_paginated_impl(user_id, limit, offset)
-            .await
     }
 }
 
@@ -133,23 +106,6 @@ impl ImageRepository for MySqlImageRepository {
         self.update_image_impl(image).await
     }
 
-    async fn soft_delete_images_by_user(
-        &self,
-        user_id: Uuid,
-        image_ids: &[Uuid],
-    ) -> Result<u64, sqlx::Error> {
-        self.soft_delete_images_by_user_impl(user_id, image_ids)
-            .await
-    }
-
-    async fn restore_images_by_user(
-        &self,
-        user_id: Uuid,
-        image_ids: &[Uuid],
-    ) -> Result<u64, sqlx::Error> {
-        self.restore_images_by_user_impl(user_id, image_ids).await
-    }
-
     async fn find_images_by_user_and_ids(
         &self,
         user_id: Uuid,
@@ -196,16 +152,6 @@ impl ImageRepository for MySqlImageRepository {
 
     async fn find_image_by_hash_global(&self, hash: &str) -> Result<Option<Image>, sqlx::Error> {
         self.find_image_by_hash_global_impl(hash).await
-    }
-
-    async fn find_deleted_images_by_user_paginated(
-        &self,
-        user_id: Uuid,
-        limit: i32,
-        offset: i32,
-    ) -> Result<Vec<Image>, sqlx::Error> {
-        self.find_deleted_images_by_user_paginated_impl(user_id, limit, offset)
-            .await
     }
 }
 
@@ -234,23 +180,6 @@ impl ImageRepository for SqliteImageRepository {
         self.update_image_impl(image).await
     }
 
-    async fn soft_delete_images_by_user(
-        &self,
-        user_id: Uuid,
-        image_ids: &[Uuid],
-    ) -> Result<u64, sqlx::Error> {
-        self.soft_delete_images_by_user_impl(user_id, image_ids)
-            .await
-    }
-
-    async fn restore_images_by_user(
-        &self,
-        user_id: Uuid,
-        image_ids: &[Uuid],
-    ) -> Result<u64, sqlx::Error> {
-        self.restore_images_by_user_impl(user_id, image_ids).await
-    }
-
     async fn find_images_by_user_and_ids(
         &self,
         user_id: Uuid,
@@ -297,16 +226,6 @@ impl ImageRepository for SqliteImageRepository {
 
     async fn find_image_by_hash_global(&self, hash: &str) -> Result<Option<Image>, sqlx::Error> {
         self.find_image_by_hash_global_impl(hash).await
-    }
-
-    async fn find_deleted_images_by_user_paginated(
-        &self,
-        user_id: Uuid,
-        limit: i32,
-        offset: i32,
-    ) -> Result<Vec<Image>, sqlx::Error> {
-        self.find_deleted_images_by_user_paginated_impl(user_id, limit, offset)
-            .await
     }
 }
 
@@ -356,30 +275,6 @@ impl ImageRepository for DatabaseImageRepository {
             Self::Postgres(repo) => repo.update_image(image).await,
             Self::MySql(repo) => repo.update_image(image).await,
             Self::Sqlite(repo) => repo.update_image(image).await,
-        }
-    }
-
-    async fn soft_delete_images_by_user(
-        &self,
-        user_id: Uuid,
-        image_ids: &[Uuid],
-    ) -> Result<u64, sqlx::Error> {
-        match self {
-            Self::Postgres(repo) => repo.soft_delete_images_by_user(user_id, image_ids).await,
-            Self::MySql(repo) => repo.soft_delete_images_by_user(user_id, image_ids).await,
-            Self::Sqlite(repo) => repo.soft_delete_images_by_user(user_id, image_ids).await,
-        }
-    }
-
-    async fn restore_images_by_user(
-        &self,
-        user_id: Uuid,
-        image_ids: &[Uuid],
-    ) -> Result<u64, sqlx::Error> {
-        match self {
-            Self::Postgres(repo) => repo.restore_images_by_user(user_id, image_ids).await,
-            Self::MySql(repo) => repo.restore_images_by_user(user_id, image_ids).await,
-            Self::Sqlite(repo) => repo.restore_images_by_user(user_id, image_ids).await,
         }
     }
 
@@ -466,28 +361,6 @@ impl ImageRepository for DatabaseImageRepository {
             Self::Postgres(repo) => repo.find_image_by_hash_global(hash).await,
             Self::MySql(repo) => repo.find_image_by_hash_global(hash).await,
             Self::Sqlite(repo) => repo.find_image_by_hash_global(hash).await,
-        }
-    }
-
-    async fn find_deleted_images_by_user_paginated(
-        &self,
-        user_id: Uuid,
-        limit: i32,
-        offset: i32,
-    ) -> Result<Vec<Image>, sqlx::Error> {
-        match self {
-            Self::Postgres(repo) => {
-                repo.find_deleted_images_by_user_paginated(user_id, limit, offset)
-                    .await
-            }
-            Self::MySql(repo) => {
-                repo.find_deleted_images_by_user_paginated(user_id, limit, offset)
-                    .await
-            }
-            Self::Sqlite(repo) => {
-                repo.find_deleted_images_by_user_paginated(user_id, limit, offset)
-                    .await
-            }
         }
     }
 }

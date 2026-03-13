@@ -35,33 +35,27 @@ impl AdminDomainService {
         admin_user_id: Uuid,
         admin_email: &str,
     ) -> Result<Vec<String>, AppError> {
-        let now = Utc::now();
-        let retention_days = self.config.cleanup.deleted_images_retention_days;
-        let days_ago = now - chrono::Duration::days(retention_days);
         let database = self.database.clone();
 
         let result = match &self.database {
             DatabasePool::Postgres(pool) => {
                 sqlx::query_as::<_, (Uuid, String)>(
-                    "SELECT id, filename FROM images WHERE deleted_at < $1",
+                    "SELECT id, filename FROM images WHERE deleted_at IS NOT NULL",
                 )
-                .bind(days_ago)
                 .fetch_all(pool)
                 .await
             }
             DatabasePool::MySql(pool) => {
                 sqlx::query_as::<_, (Uuid, String)>(
-                    "SELECT id, filename FROM images WHERE deleted_at < ?",
+                    "SELECT id, filename FROM images WHERE deleted_at IS NOT NULL",
                 )
-                .bind(days_ago)
                 .fetch_all(pool)
                 .await
             }
             DatabasePool::Sqlite(pool) => {
                 sqlx::query_as::<_, (Uuid, String)>(
-                    "SELECT id, filename FROM images WHERE deleted_at < ?1",
+                    "SELECT id, filename FROM images WHERE deleted_at IS NOT NULL",
                 )
-                .bind(days_ago)
                 .fetch_all(pool)
                 .await
             }
@@ -237,29 +231,40 @@ impl AdminDomainService {
         let now = Utc::now();
         let database = self.database.clone();
 
-        let affected = match &self.database {
-            DatabasePool::Postgres(pool) => sqlx::query(
-                "UPDATE images SET deleted_at = $1 WHERE expires_at < $1 AND deleted_at IS NULL",
-            )
-            .bind(now)
-            .execute(pool)
-            .await
-            .map(|result| result.rows_affected() as i64),
-            DatabasePool::MySql(pool) => sqlx::query(
-                "UPDATE images SET deleted_at = ? WHERE expires_at < ? AND deleted_at IS NULL",
-            )
-            .bind(now)
-            .bind(now)
-            .execute(pool)
-            .await
-            .map(|result| result.rows_affected() as i64),
-            DatabasePool::Sqlite(pool) => sqlx::query(
-                "UPDATE images SET deleted_at = ?1 WHERE expires_at < ?1 AND deleted_at IS NULL",
-            )
-            .bind(now)
-            .execute(pool)
-            .await
-            .map(|result| result.rows_affected() as i64),
+        let result = match &self.database {
+            DatabasePool::Postgres(pool) => {
+                sqlx::query_as::<_, (Uuid, String)>(
+                    "SELECT id, filename
+                     FROM images
+                     WHERE expires_at < $1
+                       AND deleted_at IS NULL",
+                )
+                .bind(now)
+                .fetch_all(pool)
+                .await
+            }
+            DatabasePool::MySql(pool) => {
+                sqlx::query_as::<_, (Uuid, String)>(
+                    "SELECT id, filename
+                     FROM images
+                     WHERE expires_at < ?
+                       AND deleted_at IS NULL",
+                )
+                .bind(now)
+                .fetch_all(pool)
+                .await
+            }
+            DatabasePool::Sqlite(pool) => {
+                sqlx::query_as::<_, (Uuid, String)>(
+                    "SELECT id, filename
+                     FROM images
+                     WHERE expires_at < ?1
+                       AND deleted_at IS NULL",
+                )
+                .bind(now)
+                .fetch_all(pool)
+                .await
+            }
         }
         .map_err(|e: sqlx::Error| {
             error!("Failed to expire images: {}", e);
@@ -276,8 +281,132 @@ impl AdminDomainService {
             );
             AppError::DatabaseError(e)
         })?;
-        if affected > 0 {
-            info!("Expired images moved to trash: {}", affected);
+
+        let delete_ids: Vec<Uuid> = result.iter().map(|(id, _)| *id).collect();
+        let candidate_filenames: Vec<String> = result
+            .iter()
+            .map(|(_, filename)| filename.clone())
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+        let referenced_filenames: HashSet<String> = match &self.database {
+            DatabasePool::Postgres(pool) => {
+                sqlx::query_scalar::<_, String>(
+                    "SELECT DISTINCT filename
+                     FROM images
+                     WHERE filename = ANY($1)
+                       AND NOT (id = ANY($2))",
+                )
+                .bind(&candidate_filenames)
+                .bind(&delete_ids)
+                .fetch_all(pool)
+                .await?
+            }
+            DatabasePool::MySql(pool) => {
+                if candidate_filenames.is_empty() {
+                    Vec::new()
+                } else {
+                    let mut builder = QueryBuilder::<MySql>::new(
+                        "SELECT DISTINCT filename FROM images WHERE filename IN (",
+                    );
+                    {
+                        let mut separated = builder.separated(", ");
+                        for filename in &candidate_filenames {
+                            separated.push_bind(filename);
+                        }
+                    }
+                    builder.push(")");
+                    if !delete_ids.is_empty() {
+                        builder.push(" AND id NOT IN (");
+                        {
+                            let mut separated = builder.separated(", ");
+                            for image_id in &delete_ids {
+                                separated.push_bind(image_id);
+                            }
+                        }
+                        builder.push(")");
+                    }
+                    builder.build_query_scalar().fetch_all(pool).await?
+                }
+            }
+            DatabasePool::Sqlite(pool) => {
+                if candidate_filenames.is_empty() {
+                    Vec::new()
+                } else {
+                    let mut builder = QueryBuilder::<Sqlite>::new(
+                        "SELECT DISTINCT filename FROM images WHERE filename IN (",
+                    );
+                    {
+                        let mut separated = builder.separated(", ");
+                        for filename in &candidate_filenames {
+                            separated.push_bind(filename);
+                        }
+                    }
+                    builder.push(")");
+                    if !delete_ids.is_empty() {
+                        builder.push(" AND id NOT IN (");
+                        {
+                            let mut separated = builder.separated(", ");
+                            for image_id in &delete_ids {
+                                separated.push_bind(image_id);
+                            }
+                        }
+                        builder.push(")");
+                    }
+                    builder.build_query_scalar().fetch_all(pool).await?
+                }
+            }
+        }
+        .into_iter()
+        .collect();
+
+        let removable_filenames: HashSet<String> = candidate_filenames
+            .into_iter()
+            .filter(|filename| !referenced_filenames.contains(filename))
+            .collect();
+
+        let mut removed_rows = 0_i64;
+        let mut file_delete_results = HashMap::new();
+        for (id, filename) in &result {
+            let can_delete_row = if removable_filenames.contains(filename) {
+                if let Some(result) = file_delete_results.get(filename) {
+                    *result
+                } else {
+                    let delete_ok = self.storage_manager.delete(filename).await.is_ok();
+                    file_delete_results.insert(filename.clone(), delete_ok);
+                    delete_ok
+                }
+            } else {
+                true
+            };
+
+            if can_delete_row {
+                match &self.database {
+                    DatabasePool::Postgres(pool) => {
+                        let _ = sqlx::query("DELETE FROM images WHERE id = $1")
+                            .bind(id)
+                            .execute(pool)
+                            .await;
+                    }
+                    DatabasePool::MySql(pool) => {
+                        let _ = sqlx::query("DELETE FROM images WHERE id = ?")
+                            .bind(id)
+                            .execute(pool)
+                            .await;
+                    }
+                    DatabasePool::Sqlite(pool) => {
+                        let _ = sqlx::query("DELETE FROM images WHERE id = ?1")
+                            .bind(id)
+                            .execute(pool)
+                            .await;
+                    }
+                }
+                removed_rows += 1;
+            }
+        }
+
+        if removed_rows > 0 {
+            info!("Expired images permanently deleted: {}", removed_rows);
         }
 
         spawn_maintenance_audit(
@@ -286,12 +415,12 @@ impl AdminDomainService {
             "admin.maintenance.expired_images_cleanup.completed",
             serde_json::json!({
                 "admin_email": admin_email,
-                "affected_count": affected,
+                "affected_count": removed_rows,
                 "result": "completed",
                 "risk_level": "warning",
             }),
         );
 
-        Ok(affected)
+        Ok(removed_rows)
     }
 }

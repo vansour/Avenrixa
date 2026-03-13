@@ -18,6 +18,18 @@ fn open_in_new_tab(_url: &str) -> bool {
     false
 }
 
+#[cfg(target_arch = "wasm32")]
+fn confirm_delete(message: &str) -> bool {
+    web_sys::window()
+        .and_then(|window| window.confirm_with_message(message).ok())
+        .unwrap_or(false)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn confirm_delete(_message: &str) -> bool {
+    true
+}
+
 /// 图片列表页面组件
 #[component]
 pub fn ImageListPage() -> Element {
@@ -131,6 +143,12 @@ pub fn ImageListPage() -> Element {
         if state.is_processing {
             return;
         }
+        if !confirm_delete(&format!(
+            "确定要永久删除 {} 吗？删除后无法恢复。",
+            image.display_name()
+        )) {
+            return;
+        }
 
         let image_service = image_service_for_delete.clone();
         let auth_store = auth_store_for_delete.clone();
@@ -140,11 +158,11 @@ pub fn ImageListPage() -> Element {
             image_store.set_processing(kind, true);
 
             match image_service
-                .delete_images(vec![image.image_key.clone()], false)
+                .delete_images(vec![image.image_key.clone()])
                 .await
             {
                 Ok(_) => {
-                    toast_store.show_success(format!("已删除: {}", image.display_name()));
+                    toast_store.show_success(format!("已永久删除: {}", image.display_name()));
                     image_store.remove_selection(kind, &image.image_key);
                     image_store.mark_for_reload(kind);
                 }
@@ -192,6 +210,12 @@ pub fn ImageListPage() -> Element {
 
         let delete_list: Vec<String> = state.selected_ids.iter().cloned().collect();
         let count = delete_list.len();
+        if !confirm_delete(&format!(
+            "确定要永久删除选中的 {} 张图片吗？删除后无法恢复。",
+            count
+        )) {
+            return;
+        }
         let image_service = image_service_for_batch_delete.clone();
         let auth_store = auth_store_for_batch_delete.clone();
         let image_store = image_store_for_batch_delete.clone();
@@ -200,9 +224,9 @@ pub fn ImageListPage() -> Element {
         spawn(async move {
             image_store.set_processing(kind, true);
 
-            match image_service.delete_images(delete_list, false).await {
+            match image_service.delete_images(delete_list).await {
                 Ok(_) => {
-                    toast_store.show_success(format!("已删除 {} 张图片", count));
+                    toast_store.show_success(format!("已永久删除 {} 张图片", count));
                     image_store.clear_selection(kind);
                     image_store.mark_for_reload(kind);
                 }
@@ -233,7 +257,7 @@ pub fn ImageListPage() -> Element {
                 div { class: "image-hero-main",
                     h1 { "上传历史" }
                     p { class: "image-hero-subtitle",
-                        "按上传时间查看已上传的图片"
+                        "按上传时间查看已上传的图片，删除后不可恢复"
                     }
                 }
 
@@ -243,7 +267,7 @@ pub fn ImageListPage() -> Element {
                             class: "btn btn-danger",
                             disabled: state.is_loading || state.is_processing,
                             onclick: handle_delete_selected,
-                            "删除所选 ({selected_count})"
+                            "永久删除所选 ({selected_count})"
                         }
                     }
                     button {
