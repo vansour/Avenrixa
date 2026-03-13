@@ -284,8 +284,7 @@ run_drill() {
   install_mysql_app
 
   log_step "Writing baseline marker"
-  mkdir -p "$(dirname "${DRILL_MARKER_PATH}")"
-  printf 'baseline-marker\n' > "${DRILL_MARKER_PATH}"
+  compose_write_host_file "${DATA_DIR}" "${DRILL_MARKER_PATH}" "baseline-marker"
   expect_eq "$(mysql_site_name)" "${DRILL_SITE_NAME_BASELINE}" "baseline site name should be installed value"
 
   log_step "Creating MySQL/MariaDB physical backup base"
@@ -322,9 +321,9 @@ run_drill() {
 
   log_step "Mutating database and local data"
   set_mysql_site_name "${DRILL_SITE_NAME_MUTATED}"
-  printf 'mutated-marker\n' > "${DRILL_MARKER_PATH}"
+  compose_write_host_file "${DATA_DIR}" "${DRILL_MARKER_PATH}" "mutated-marker"
   expect_eq "$(mysql_site_name)" "${DRILL_SITE_NAME_MUTATED}" "mutated site name should be visible before restore"
-  expect_eq "$(cat "${DRILL_MARKER_PATH}")" "mutated-marker" "marker should be mutated before restore"
+  expect_eq "$(compose_read_host_file "${DATA_DIR}" "${DRILL_MARKER_PATH}")" "mutated-marker" "marker should be mutated before restore"
 
   log_step "Restoring from physical manifest"
   COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME}" \
@@ -335,7 +334,7 @@ run_drill() {
 
   log_step "Validating restored state"
   expect_eq "$(mysql_site_name)" "${DRILL_SITE_NAME_BASELINE}" "site name should return to baseline after restore"
-  expect_eq "$(cat "${DRILL_MARKER_PATH}")" "baseline-marker" "marker file should return to baseline after restore"
+  expect_eq "$(compose_read_host_file "${DATA_DIR}" "${DRILL_MARKER_PATH}")" "baseline-marker" "marker file should return to baseline after restore"
   expect_eq "$(jq -r '.status' "${DATA_DIR}/backup/mysql_last_restore_result.json")" "completed" "restore result should be completed"
   expect_eq "$(jq -r '.restore_method' "${DATA_DIR}/backup/mysql_last_restore_result.json")" "physical" "restore result should report physical restore method"
   wait_for_url "${health_url}" 180

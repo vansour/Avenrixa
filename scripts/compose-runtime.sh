@@ -151,6 +151,78 @@ compose_reset_host_dir() {
   mkdir -p "${resolved_target}"
 }
 
+compose_host_path_relative_to_dir() {
+  local base_dir="$1"
+  local target="$2"
+  local resolved_base_dir
+  local resolved_target
+
+  resolved_base_dir="$(compose_resolve_host_path "${base_dir}")"
+  resolved_target="$(compose_resolve_host_path "${target}")"
+
+  case "${resolved_target}" in
+    "${resolved_base_dir}"/*)
+      printf '%s' "${resolved_target#${resolved_base_dir}/}"
+      ;;
+    *)
+      echo "Path ${resolved_target} is not within base dir ${resolved_base_dir}" >&2
+      return 1
+      ;;
+  esac
+}
+
+compose_write_host_file() {
+  local base_dir="$1"
+  local target="$2"
+  local content="$3"
+  local resolved_base_dir
+  local resolved_target
+  local relative_target
+  local helper_image
+
+  resolved_base_dir="$(compose_resolve_host_path "${base_dir}")"
+  resolved_target="$(compose_resolve_host_path "${target}")"
+  relative_target="$(compose_host_path_relative_to_dir "${resolved_base_dir}" "${resolved_target}")"
+
+  mkdir -p "$(dirname "${resolved_target}")" 2>/dev/null || true
+  if printf '%s\n' "${content}" > "${resolved_target}" 2>/dev/null; then
+    return 0
+  fi
+
+  helper_image="${COMPOSE_FS_HELPER_IMAGE:-busybox:1.37.0}"
+  printf '%s\n' "${content}" | docker run --rm -i \
+    -v "${resolved_base_dir}:/target" \
+    -e RELATIVE_TARGET="${relative_target}" \
+    --entrypoint sh \
+    "${helper_image}" \
+    -lc 'set -eu; mkdir -p "$(dirname "/target/${RELATIVE_TARGET}")"; cat > "/target/${RELATIVE_TARGET}"'
+}
+
+compose_read_host_file() {
+  local base_dir="$1"
+  local target="$2"
+  local resolved_base_dir
+  local resolved_target
+  local relative_target
+  local helper_image
+
+  resolved_base_dir="$(compose_resolve_host_path "${base_dir}")"
+  resolved_target="$(compose_resolve_host_path "${target}")"
+  relative_target="$(compose_host_path_relative_to_dir "${resolved_base_dir}" "${resolved_target}")"
+
+  if cat "${resolved_target}" 2>/dev/null; then
+    return 0
+  fi
+
+  helper_image="${COMPOSE_FS_HELPER_IMAGE:-busybox:1.37.0}"
+  docker run --rm \
+    -v "${resolved_base_dir}:/target" \
+    -e RELATIVE_TARGET="${relative_target}" \
+    --entrypoint sh \
+    "${helper_image}" \
+    -lc 'set -eu; cat "/target/${RELATIVE_TARGET}"'
+}
+
 compose_variant_default_postgres_wal_archive_host_dir() {
   printf '%s/ops-backups/postgres-wal-archive' "${ROOT_DIR}"
 }
