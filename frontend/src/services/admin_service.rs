@@ -134,3 +134,42 @@ impl AdminService {
         query_parts.join("&")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_query_params_keeps_declared_pagination_order() {
+        let params = PaginationParams {
+            page: Some(3),
+            page_size: Some(50),
+            tag: None,
+        };
+
+        assert_eq!(AdminService::build_query_params(&params), "page=3&page_size=50");
+    }
+
+    #[test]
+    fn build_query_params_omits_absent_values() {
+        let params = PaginationParams {
+            page: None,
+            page_size: Some(25),
+            tag: Some("ignored".to_string()),
+        };
+
+        assert_eq!(AdminService::build_query_params(&params), "page_size=25");
+    }
+
+    #[test]
+    fn backup_download_url_encodes_filename_against_api_base() {
+        let service = AdminService::new(ApiClient::new("https://img.example.com/app/".to_string()));
+
+        let url = service.backup_download_url("nightly backup.sql.gz");
+
+        assert_eq!(
+            url,
+            "https://img.example.com/app/api/v1/backups/nightly%20backup.sql.gz"
+        );
+    }
+}

@@ -167,3 +167,43 @@ impl ApiClient {
         self.get(path).await
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn should_try_refresh_only_for_protected_unauthorized_requests() {
+        let client = ApiClient::new(String::new());
+
+        assert!(client.should_try_refresh("/api/v1/images", StatusCode::UNAUTHORIZED));
+        assert!(!client.should_try_refresh("/api/v1/images", StatusCode::FORBIDDEN));
+        assert!(!client.should_try_refresh("/api/v1/auth/login", StatusCode::UNAUTHORIZED));
+        assert!(!client.should_try_refresh("/api/v1/auth/refresh", StatusCode::UNAUTHORIZED));
+    }
+
+    #[test]
+    fn url_uses_root_relative_paths_when_base_is_empty() {
+        let client = ApiClient::new(String::new());
+
+        assert_eq!(client.url("api/v1/images"), "/api/v1/images");
+        assert_eq!(client.url("/api/v1/images"), "/api/v1/images");
+    }
+
+    #[test]
+    fn url_joins_absolute_origin_without_double_slashes() {
+        let client = ApiClient::new("https://img.example.com/app/".to_string());
+
+        assert_eq!(
+            client.url("/api/v1/images"),
+            "https://img.example.com/app/api/v1/images"
+        );
+    }
+
+    #[test]
+    fn url_normalizes_relative_base_paths() {
+        let client = ApiClient::new("console".to_string());
+
+        assert_eq!(client.url("api/v1/images"), "/console/api/v1/images");
+    }
+}

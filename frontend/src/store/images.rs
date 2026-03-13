@@ -197,3 +197,129 @@ impl Default for ImageStore {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+    use dioxus::prelude::{rsx, ScopeId, VirtualDom};
+
+    struct TestImageStoreHarness {
+        _dom: VirtualDom,
+        store: ImageStore,
+    }
+
+    impl TestImageStoreHarness {
+        fn new() -> Self {
+            let dom = VirtualDom::new(|| rsx! {});
+            let store = dom.in_scope(ScopeId::ROOT, ImageStore::new);
+            Self { _dom: dom, store }
+        }
+    }
+
+    fn sample_image(image_key: &str, filename: &str) -> ImageItem {
+        ImageItem {
+            image_key: image_key.to_string(),
+            filename: filename.to_string(),
+            size: 1024,
+            format: "png".to_string(),
+            views: 0,
+            status: "active".to_string(),
+            expires_at: None,
+            deleted_at: None,
+            created_at: Utc::now(),
+        }
+    }
+
+    #[test]
+    fn new_store_initializes_pagination_defaults() {
+        let harness = TestImageStoreHarness::new();
+        let store = &harness.store;
+
+        let active = store.collection(ImageCollectionKind::Active);
+        let deleted = store.collection(ImageCollectionKind::Deleted);
+
+        assert_eq!(active.current_page, 1);
+        assert_eq!(active.page_size, 20);
+        assert!(active.has_more);
+        assert_eq!(deleted.current_page, 1);
+        assert_eq!(deleted.page_size, 20);
+        assert!(deleted.has_more);
+    }
+
+    #[test]
+    fn replace_page_clamps_pagination_and_clears_selection() {
+        let harness = TestImageStoreHarness::new();
+        let store = &harness.store;
+        store.toggle_selection(ImageCollectionKind::Active, "first");
+
+        store.replace_page(
+            ImageCollectionKind::Active,
+            vec![sample_image("first", "first.png")],
+            0,
+            500,
+            12,
+            false,
+        );
+
+        let snapshot = store.collection(ImageCollectionKind::Active);
+        assert_eq!(snapshot.current_page, 1);
+        assert_eq!(snapshot.page_size, 100);
+        assert_eq!(snapshot.total_items, 12);
+        assert!(!snapshot.has_more);
+        assert!(snapshot.selected_ids.is_empty());
+    }
+
+    #[test]
+    fn toggle_all_visible_selects_then_clears_current_page() {
+        let harness = TestImageStoreHarness::new();
+        let store = &harness.store;
+        store.replace_page(
+            ImageCollectionKind::Deleted,
+            vec![
+                sample_image("first", "first.png"),
+                sample_image("second", "second.png"),
+            ],
+            1,
+            20,
+            2,
+            false,
+        );
+        store.toggle_selection(ImageCollectionKind::Deleted, "off-page");
+
+        store.toggle_all_visible(ImageCollectionKind::Deleted);
+        let selected_once = store.collection(ImageCollectionKind::Deleted);
+        assert_eq!(selected_once.selected_ids.len(), 3);
+        assert!(selected_once.selected_ids.contains("first"));
+        assert!(selected_once.selected_ids.contains("second"));
+        assert!(selected_once.selected_ids.contains("off-page"));
+
+        store.toggle_all_visible(ImageCollectionKind::Deleted);
+        let selected_twice = store.collection(ImageCollectionKind::Deleted);
+        assert_eq!(selected_twice.selected_ids.len(), 1);
+        assert!(selected_twice.selected_ids.contains("off-page"));
+    }
+
+    #[test]
+    fn status_helpers_update_collection_state() {
+        let harness = TestImageStoreHarness::new();
+        let store = &harness.store;
+
+        store.set_loading(ImageCollectionKind::Active, true);
+        store.set_processing(ImageCollectionKind::Active, true);
+        store.set_error_message(ImageCollectionKind::Active, "boom");
+        store.mark_for_reload(ImageCollectionKind::Active);
+        store.mark_for_reload(ImageCollectionKind::Active);
+        store.set_page(ImageCollectionKind::Active, 0);
+        store.set_page_size(ImageCollectionKind::Active, 0);
+        store.clear_error(ImageCollectionKind::Active);
+
+        let snapshot = store.collection(ImageCollectionKind::Active);
+        assert!(snapshot.is_loading);
+        assert!(snapshot.is_processing);
+        assert_eq!(snapshot.current_page, 1);
+        assert_eq!(snapshot.page_size, 1);
+        assert_eq!(snapshot.reload_token, 2);
+        assert!(snapshot.error_message.is_empty());
+    }
+}

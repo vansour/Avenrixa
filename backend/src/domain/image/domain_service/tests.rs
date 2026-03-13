@@ -1,15 +1,23 @@
 use super::*;
-use crate::config::Config;
-use crate::db::DatabasePool;
+use crate::config::{Config, DatabaseKind};
+use crate::db::{DatabasePool, run_migrations};
 use crate::domain::image::mock_repository::MockImageRepository;
+use crate::domain::image::repository::SqliteImageRepository;
 use crate::image_processor::ImageProcessor;
 use crate::runtime_settings::{RuntimeSettings, StorageBackend};
 use crate::storage_backend::StorageManager;
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use std::sync::Arc;
 use tempfile::TempDir;
 
 struct TestServiceContext {
     service: ImageDomainService<MockImageRepository>,
+    _temp_dir: TempDir,
+}
+
+struct SqliteTestServiceContext {
+    service: ImageDomainService<SqliteImageRepository>,
+    pool: sqlx::SqlitePool,
     _temp_dir: TempDir,
 }
 
@@ -58,6 +66,77 @@ async fn setup_service() -> TestServiceContext {
     }
 }
 
+async fn setup_sqlite_service() -> SqliteTestServiceContext {
+    let mut config = Config::default();
+    config.database.kind = DatabaseKind::Sqlite;
+    config.storage.enable_file_check = false;
+    let image_processor = ImageProcessor::new(1920, 1080, 80);
+
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let database_path = temp_dir.path().join("image-domain.db");
+    let local_storage_path = temp_dir.path().join("images");
+    config.database.url = database_path.to_string_lossy().into_owned();
+    config.storage.path = local_storage_path.to_string_lossy().into_owned();
+
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(
+            SqliteConnectOptions::new()
+                .filename(&database_path)
+                .create_if_missing(true)
+                .foreign_keys(true),
+        )
+        .await
+        .expect("sqlite pool should be created");
+
+    let database = DatabasePool::Sqlite(pool.clone());
+    run_migrations(&database)
+        .await
+        .expect("migrations should succeed");
+
+    let storage_manager = Arc::new(StorageManager::new(RuntimeSettings::from_defaults(&config)));
+    let dependencies = ImageDomainServiceDependencies::new(
+        database,
+        None,
+        config,
+        image_processor,
+        storage_manager,
+    );
+
+    SqliteTestServiceContext {
+        service: ImageDomainService::new(dependencies, SqliteImageRepository::new(pool.clone())),
+        pool,
+        _temp_dir: temp_dir,
+    }
+}
+
+async fn insert_sqlite_user(pool: &sqlx::SqlitePool, id: Uuid, email: &str) {
+    sqlx::query(
+        "INSERT INTO users (id, email, password_hash, role, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+    )
+    .bind(id)
+    .bind(email)
+    .bind("password-hash")
+    .bind("user")
+    .bind(Utc::now())
+    .execute(pool)
+    .await
+    .expect("user should be inserted");
+}
+
+async fn sqlite_image_tags(pool: &sqlx::SqlitePool, image_id: Uuid) -> Vec<String> {
+    sqlx::query_scalar::<_, String>("SELECT tag FROM image_tags WHERE image_id = ?1 ORDER BY tag")
+        .bind(image_id)
+        .fetch_all(pool)
+        .await
+        .expect("image tags should load")
+}
+
+fn valid_hash(seed: u64) -> String {
+    format!("{seed:064x}")
+}
+
 fn sample_png_bytes() -> Vec<u8> {
     let image = image::RgbaImage::from_pixel(1, 1, image::Rgba([255, 0, 0, 255]));
     let mut cursor = std::io::Cursor::new(Vec::new());
@@ -101,6 +180,82 @@ async fn test_get_image_not_found() {
     let image_id = Uuid::new_v4();
     let result = service.get_image_by_id(image_id, user_id).await;
     assert!(matches!(result, Err(AppError::ImageNotFound)));
+}
+
+#[tokio::test]
+async fn test_set_expiry_updates_owned_image() {
+    let context = setup_service().await;
+    let service = &context.service;
+    let user_id = Uuid::new_v4();
+    let image_id = Uuid::new_v4();
+    let image = build_image(
+        image_id,
+        user_id,
+        "expires.jpg",
+        &valid_hash(1),
+        Utc::now(),
+        None,
+    );
+    let expires_at = Utc::now() + chrono::Duration::days(7);
+
+    service.image_repository.create_image(&image).await.unwrap();
+    service
+        .set_expiry(image_id, user_id, Some(expires_at))
+        .await
+        .expect("expiry update should succeed");
+
+    let updated = service
+        .get_image_by_id(image_id, user_id)
+        .await
+        .expect("image should remain accessible");
+    assert_eq!(updated.expires_at, Some(expires_at));
+}
+
+#[tokio::test]
+async fn test_set_expiry_by_key_updates_owned_image() {
+    let context = setup_service().await;
+    let service = &context.service;
+    let user_id = Uuid::new_v4();
+    let hash = valid_hash(2);
+    let image = build_image(Uuid::new_v4(), user_id, "expires-key.jpg", &hash, Utc::now(), None);
+    let expires_at = Utc::now() + chrono::Duration::hours(12);
+
+    service.image_repository.create_image(&image).await.unwrap();
+    service
+        .set_expiry_by_key(&hash, user_id, Some(expires_at))
+        .await
+        .expect("expiry update by key should succeed");
+
+    let updated = service
+        .get_image_by_id(image.id, user_id)
+        .await
+        .expect("image should remain accessible");
+    assert_eq!(updated.expires_at, Some(expires_at));
+}
+
+#[tokio::test]
+async fn test_set_expiry_rejects_foreign_image() {
+    let context = setup_service().await;
+    let service = &context.service;
+    let owner_id = Uuid::new_v4();
+    let other_user_id = Uuid::new_v4();
+    let image = build_image(
+        Uuid::new_v4(),
+        owner_id,
+        "foreign.jpg",
+        &valid_hash(3),
+        Utc::now(),
+        None,
+    );
+
+    service.image_repository.create_image(&image).await.unwrap();
+
+    let error = service
+        .set_expiry(image.id, other_user_id, Some(Utc::now()))
+        .await
+        .expect_err("foreign user should not update expiry");
+
+    assert!(matches!(error, AppError::ImageNotFound));
 }
 
 #[tokio::test]
@@ -386,4 +541,103 @@ async fn test_hard_delete_preserves_shared_file_until_last_reference_is_removed(
         !tokio::fs::try_exists(&file_path).await.unwrap(),
         "shared file should be removed after last reference is deleted"
     );
+}
+
+#[tokio::test]
+async fn test_update_image_tags_sqlite_normalizes_and_clears_tags() {
+    let context = setup_sqlite_service().await;
+    let service = &context.service;
+    let user_id = Uuid::new_v4();
+    let hash = valid_hash(10);
+    let image = build_image(
+        Uuid::new_v4(),
+        user_id,
+        "sqlite-tags.jpg",
+        &hash,
+        Utc::now(),
+        None,
+    );
+    let tags = vec![
+        "  Cover ".to_string(),
+        "cover".to_string(),
+        "Gallery".to_string(),
+        "".to_string(),
+    ];
+    let empty_tags: Vec<String> = Vec::new();
+
+    insert_sqlite_user(&context.pool, user_id, "sqlite-tags@example.com").await;
+    service.image_repository.create_image(&image).await.unwrap();
+
+    service
+        .update_image_tags(image.id, user_id, Some(&tags))
+        .await
+        .expect("tag update should succeed");
+    assert_eq!(
+        sqlite_image_tags(&context.pool, image.id).await,
+        vec!["cover".to_string(), "gallery".to_string()]
+    );
+
+    service
+        .update_image_tags(image.id, user_id, Some(&empty_tags))
+        .await
+        .expect("clearing tags should succeed");
+    assert!(sqlite_image_tags(&context.pool, image.id).await.is_empty());
+}
+
+#[tokio::test]
+async fn test_update_image_tags_by_key_sqlite_updates_tags() {
+    let context = setup_sqlite_service().await;
+    let service = &context.service;
+    let user_id = Uuid::new_v4();
+    let hash = valid_hash(11);
+    let image = build_image(
+        Uuid::new_v4(),
+        user_id,
+        "sqlite-tags-key.jpg",
+        &hash,
+        Utc::now(),
+        None,
+    );
+    let tags = vec!["Featured".to_string(), " featured ".to_string()];
+
+    insert_sqlite_user(&context.pool, user_id, "sqlite-tags-key@example.com").await;
+    service.image_repository.create_image(&image).await.unwrap();
+
+    service
+        .update_image_tags_by_key(&hash, user_id, Some(&tags))
+        .await
+        .expect("tag update by key should succeed");
+
+    assert_eq!(
+        sqlite_image_tags(&context.pool, image.id).await,
+        vec!["featured".to_string()]
+    );
+}
+
+#[tokio::test]
+async fn test_update_image_tags_sqlite_rejects_foreign_image() {
+    let context = setup_sqlite_service().await;
+    let service = &context.service;
+    let owner_id = Uuid::new_v4();
+    let other_user_id = Uuid::new_v4();
+    let image = build_image(
+        Uuid::new_v4(),
+        owner_id,
+        "sqlite-foreign.jpg",
+        &valid_hash(12),
+        Utc::now(),
+        None,
+    );
+    let tags = vec!["private".to_string()];
+
+    insert_sqlite_user(&context.pool, owner_id, "sqlite-owner@example.com").await;
+    service.image_repository.create_image(&image).await.unwrap();
+
+    let error = service
+        .update_image_tags(image.id, other_user_id, Some(&tags))
+        .await
+        .expect_err("foreign user should not update tags");
+
+    assert!(matches!(error, AppError::ImageNotFound));
+    assert!(sqlite_image_tags(&context.pool, image.id).await.is_empty());
 }
