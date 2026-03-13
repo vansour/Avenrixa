@@ -2,6 +2,12 @@ use crate::app_context::{use_auth_store, use_image_service, use_toast_store};
 use crate::auth_session::{auth_session_expired_message, handle_auth_session_error};
 use dioxus::html::FileData;
 use dioxus::prelude::*;
+#[cfg(target_arch = "wasm32")]
+use dioxus::web::WebEventExt;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::JsCast;
+
+const UPLOAD_PASTE_TARGET_ID: &str = "upload-paste-target";
 
 fn format_bytes(size: u64) -> String {
     const KB: f64 = 1024.0;
@@ -33,6 +39,44 @@ fn extension_from_mime(mime: &str) -> &'static str {
         "image/heic" => "heic",
         _ => "png",
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn read_image_from_web_file(
+    file: web_sys::File,
+) -> Result<(String, Option<String>, Vec<u8>), String> {
+    use js_sys::{Date, Uint8Array};
+    use wasm_bindgen_futures::JsFuture;
+
+    let blob: web_sys::Blob = file.clone().unchecked_into();
+    let mime = blob.type_();
+    let buffer_js = JsFuture::from(blob.array_buffer())
+        .await
+        .map_err(|_| "读取剪贴板图片内容失败".to_string())?;
+    let buffer = Uint8Array::new(&buffer_js);
+    let mut bytes = vec![0_u8; buffer.length() as usize];
+    buffer.copy_to(&mut bytes);
+
+    if bytes.is_empty() {
+        return Err("剪贴板图片内容为空".to_string());
+    }
+
+    let filename = if file.name().trim().is_empty() {
+        format!(
+            "paste-{}.{}",
+            Date::now() as u64,
+            extension_from_mime(&mime)
+        )
+    } else {
+        file.name()
+    };
+    let content_type = if mime.trim().is_empty() {
+        None
+    } else {
+        Some(mime)
+    };
+
+    Ok((filename, content_type, bytes))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -113,6 +157,76 @@ async fn read_image_from_clipboard() -> Result<(String, Option<String>, Vec<u8>)
     Err("当前运行环境不支持剪贴板图片读取".to_string())
 }
 
+#[cfg(target_arch = "wasm32")]
+fn first_pasted_image_file(event: &web_sys::ClipboardEvent) -> Result<web_sys::File, String> {
+    let Some(data) = event.clipboard_data() else {
+        return Err("浏览器没有提供剪贴板数据".to_string());
+    };
+    let Some(files) = data.files() else {
+        return Err("剪贴板中没有可上传的图片".to_string());
+    };
+
+    for index in 0..files.length() {
+        let Some(file) = files.get(index) else {
+            continue;
+        };
+        let blob: web_sys::Blob = file.clone().unchecked_into();
+        if blob.type_().starts_with("image/") {
+            return Ok(file);
+        }
+    }
+
+    Err("剪贴板中没有可上传的图片".to_string())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn focus_upload_paste_target() {
+    if let Some(document) = web_sys::window().and_then(|window| window.document())
+        && let Some(element) = document.get_element_by_id(UPLOAD_PASTE_TARGET_ID)
+        && let Some(target) = element.dyn_ref::<web_sys::HtmlElement>()
+    {
+        let _ = target.focus();
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn focus_upload_paste_target() {}
+
+async fn submit_upload(
+    image_service: crate::services::ImageService,
+    auth_store: crate::store::auth::AuthStore,
+    toast_store: crate::store::toast_store::ToastStore,
+    mut selected_file: Signal<Option<FileData>>,
+    mut success_message: Signal<String>,
+    mut error_message: Signal<String>,
+    filename: String,
+    content_type: Option<String>,
+    bytes: Vec<u8>,
+    success_prefix: &'static str,
+    failure_prefix: &'static str,
+) {
+    match image_service
+        .upload_image(filename, content_type, bytes)
+        .await
+    {
+        Ok(image) => {
+            let message = format!("{success_prefix}: {}", image.filename);
+            success_message.set(message.clone());
+            toast_store.show_success(message);
+            selected_file.set(None);
+        }
+        Err(err) => {
+            if handle_auth_session_error(&auth_store, &toast_store, &err) {
+                error_message.set(auth_session_expired_message());
+            } else {
+                let message = format!("{failure_prefix}: {}", err);
+                error_message.set(message.clone());
+                toast_store.show_error(message);
+            }
+        }
+    }
+}
+
 /// 上传页面组件
 #[component]
 pub fn UploadPage() -> Element {
@@ -125,6 +239,10 @@ pub fn UploadPage() -> Element {
     let mut is_drag_over = use_signal(|| false);
     let mut success_message = use_signal(String::new);
     let mut error_message = use_signal(String::new);
+
+    use_effect(move || {
+        focus_upload_paste_target();
+    });
 
     let handle_pick_file = move |event: Event<FormData>| {
         let mut files = event.files().into_iter();
@@ -177,6 +295,79 @@ pub fn UploadPage() -> Element {
     let clipboard_image_service = image_service.clone();
     let clipboard_auth_store = auth_store.clone();
     let clipboard_toast_store = toast_store.clone();
+    #[cfg(target_arch = "wasm32")]
+    let paste_image_service = clipboard_image_service.clone();
+    #[cfg(target_arch = "wasm32")]
+    let paste_auth_store = clipboard_auth_store.clone();
+    #[cfg(target_arch = "wasm32")]
+    let paste_toast_store = clipboard_toast_store.clone();
+    let handle_paste = move |event: dioxus::events::ClipboardEvent| {
+        if is_uploading() {
+            return;
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            event.prevent_default();
+
+            let data = event.data();
+            let Some(web_event): Option<web_sys::Event> = data.try_as_web_event() else {
+                return;
+            };
+            let Ok(clipboard_event) = web_event.dyn_into::<web_sys::ClipboardEvent>() else {
+                return;
+            };
+            let pasted_file = match first_pasted_image_file(&clipboard_event) {
+                Ok(file) => file,
+                Err(message) => {
+                    error_message.set(message.clone());
+                    return;
+                }
+            };
+
+            let image_service = paste_image_service.clone();
+            let auth_store = paste_auth_store.clone();
+            let toast_store = paste_toast_store.clone();
+            spawn(async move {
+                is_uploading.set(true);
+                error_message.set(String::new());
+                success_message.set(String::new());
+
+                let (filename, content_type, bytes) =
+                    match read_image_from_web_file(pasted_file).await {
+                        Ok(payload) => payload,
+                        Err(err) => {
+                            error_message.set(err.clone());
+                            toast_store.show_error(err);
+                            is_uploading.set(false);
+                            return;
+                        }
+                    };
+
+                submit_upload(
+                    image_service,
+                    auth_store,
+                    toast_store,
+                    selected_file,
+                    success_message,
+                    error_message,
+                    filename,
+                    content_type,
+                    bytes,
+                    "剪贴板上传成功",
+                    "剪贴板上传失败",
+                )
+                .await;
+
+                is_uploading.set(false);
+            });
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let _ = event;
+        }
+    };
     let handle_clipboard_upload = move |event: dioxus::events::MouseEvent| {
         event.prevent_default();
         if is_uploading() {
@@ -201,26 +392,20 @@ pub fn UploadPage() -> Element {
                 }
             };
 
-            match image_service
-                .upload_image(filename, content_type, bytes)
-                .await
-            {
-                Ok(image) => {
-                    let message = format!("剪贴板上传成功: {}", image.filename);
-                    success_message.set(message.clone());
-                    toast_store.show_success(message);
-                    selected_file.set(None);
-                }
-                Err(err) => {
-                    if handle_auth_session_error(&auth_store, &toast_store, &err) {
-                        error_message.set(auth_session_expired_message());
-                    } else {
-                        let message = format!("剪贴板上传失败: {}", err);
-                        error_message.set(message.clone());
-                        toast_store.show_error(message);
-                    }
-                }
-            }
+            submit_upload(
+                image_service,
+                auth_store,
+                toast_store,
+                selected_file,
+                success_message,
+                error_message,
+                filename,
+                content_type,
+                bytes,
+                "剪贴板上传成功",
+                "剪贴板上传失败",
+            )
+            .await;
 
             is_uploading.set(false);
         });
@@ -268,26 +453,20 @@ pub fn UploadPage() -> Element {
                 return;
             }
 
-            match image_service
-                .upload_image(filename, content_type, bytes)
-                .await
-            {
-                Ok(image) => {
-                    let message = format!("上传成功: {}", image.filename);
-                    success_message.set(message.clone());
-                    toast_store.show_success(message);
-                    selected_file.set(None);
-                }
-                Err(err) => {
-                    if handle_auth_session_error(&auth_store, &toast_store, &err) {
-                        error_message.set(auth_session_expired_message());
-                    } else {
-                        let message = format!("上传失败: {}", err);
-                        error_message.set(message.clone());
-                        toast_store.show_error(message);
-                    }
-                }
-            }
+            submit_upload(
+                image_service,
+                auth_store,
+                toast_store,
+                selected_file,
+                success_message,
+                error_message,
+                filename,
+                content_type,
+                bytes,
+                "上传成功",
+                "上传失败",
+            )
+            .await;
 
             is_uploading.set(false);
         });
@@ -306,7 +485,10 @@ pub fn UploadPage() -> Element {
         div { class: "dashboard-page upload-page",
             section { class: "upload-scene",
                 section {
+                    id: UPLOAD_PASTE_TARGET_ID,
                     class: format!("upload-card {}", if is_drag_over() { "is-drag-over" } else { "" }),
+                    tabindex: "0",
+                    onpaste: handle_paste,
 
                     input {
                         id: "upload-file",
@@ -328,8 +510,8 @@ pub fn UploadPage() -> Element {
                         ondrop: handle_drop,
 
                         div { class: "upload-folder-icon" }
-                        h2 { class: "upload-drop-title", "点击或拖拽上传图片" }
-                        p { class: "upload-drop-desc", "支持 JPG / PNG / WEBP / GIF，单文件最大 100MB" }
+                        h2 { class: "upload-drop-title", "点击、拖拽或粘贴上传图片" }
+                        p { class: "upload-drop-desc", "支持 JPG / PNG / WEBP / GIF，单文件最大 100MB，也支持直接按 Ctrl+V" }
                         p { class: "upload-drop-note", "上传后会自动按时间排序展示在历史页面" }
                     }
 
@@ -343,7 +525,7 @@ pub fn UploadPage() -> Element {
                     p { class: "upload-tip-line",
                         span { class: "upload-tip-icon", "💡" }
                         span {
-                            "你也可以直接"
+                            "你也可以直接按 Ctrl+V，或"
                             button {
                                 class: format!("upload-tip-link {}", if is_uploading() { "is-disabled" } else { "" }),
                                 r#type: "button",

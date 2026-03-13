@@ -43,7 +43,6 @@ pub fn NavBar(site_name: String) -> Element {
                         brand_navigation_store.reset();
                         is_mobile_menu_open.set(false);
                     },
-                    span { class: "navbar-brand-mark", "VI" }
                     span { class: "navbar-brand-title", "{site_name}" }
                 }
 

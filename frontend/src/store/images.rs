@@ -202,7 +202,7 @@ impl Default for ImageStore {
 mod tests {
     use super::*;
     use chrono::Utc;
-    use dioxus::prelude::{rsx, ScopeId, VirtualDom};
+    use dioxus::prelude::{ScopeId, VirtualDom, rsx};
 
     struct TestImageStoreHarness {
         _dom: VirtualDom,

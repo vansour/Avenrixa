@@ -147,7 +147,10 @@ mod tests {
             tag: None,
         };
 
-        assert_eq!(AdminService::build_query_params(&params), "page=3&page_size=50");
+        assert_eq!(
+            AdminService::build_query_params(&params),
+            "page=3&page_size=50"
+        );
     }
 
     #[test]

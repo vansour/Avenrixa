@@ -217,7 +217,14 @@ async fn test_set_expiry_by_key_updates_owned_image() {
     let service = &context.service;
     let user_id = Uuid::new_v4();
     let hash = valid_hash(2);
-    let image = build_image(Uuid::new_v4(), user_id, "expires-key.jpg", &hash, Utc::now(), None);
+    let image = build_image(
+        Uuid::new_v4(),
+        user_id,
+        "expires-key.jpg",
+        &hash,
+        Utc::now(),
+        None,
+    );
     let expires_at = Utc::now() + chrono::Duration::hours(12);
 
     service.image_repository.create_image(&image).await.unwrap();
