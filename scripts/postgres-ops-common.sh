@@ -54,6 +54,16 @@ absolute_existing_dir() {
   )
 }
 
+absolute_dir_path() {
+  local path="$1"
+
+  mkdir -p "${path}"
+  (
+    cd "${path}"
+    pwd -P
+  )
+}
+
 ensure_directory_nonempty() {
   local path="$1"
   local label="$2"
@@ -445,22 +455,25 @@ postgres_wal_remote_aws() {
 copy_missing_files_between_dirs() {
   local source_dir="$1"
   local target_dir="$2"
+  local resolved_source_dir=""
+  local resolved_target_dir=""
   local copied=0
   local source_file=""
   local target_file=""
   local file_name=""
   local helper_image=""
 
-  mkdir -p "${target_dir}"
+  resolved_source_dir="$(absolute_existing_dir "${source_dir}")"
+  resolved_target_dir="$(absolute_dir_path "${target_dir}")"
   helper_image="${COMPOSE_FS_HELPER_IMAGE:-busybox:1.37.0}"
   while IFS= read -r -d '' source_file; do
     file_name="$(basename "${source_file}")"
-    target_file="${target_dir}/${file_name}"
+    target_file="${resolved_target_dir}/${file_name}"
     if [[ ! -f "${target_file}" ]]; then
       if ! cp -p "${source_file}" "${target_file}" 2>/dev/null; then
         docker run --rm \
-          -v "${source_dir}:/source:ro" \
-          -v "${target_dir}:/target" \
+          -v "${resolved_source_dir}:/source:ro" \
+          -v "${resolved_target_dir}:/target" \
           -e FILE_NAME="${file_name}" \
           --entrypoint sh \
           "${helper_image}" \
@@ -468,7 +481,7 @@ copy_missing_files_between_dirs() {
       fi
       copied=1
     fi
-  done < <(find "${source_dir}" -maxdepth 1 -type f -print0)
+  done < <(find "${resolved_source_dir}" -maxdepth 1 -type f -print0)
 
   return 0
 }
