@@ -273,13 +273,19 @@ run_browser_phase() {
 seed_second_admin_for_demotion_regression() {
   local second_admin_uuid
   local escaped_email
+  local database_cli
 
   second_admin_uuid="$(cat /proc/sys/kernel/random/uuid)"
   escaped_email="$(escape_sql_string "${SECOND_ADMIN_EMAIL}")"
+  if compose_variant_uses_mariadb; then
+    database_cli="mariadb"
+  else
+    database_cli="mysql"
+  fi
 
-  compose exec -T mysql mysql -uuser -ppass image -e "
+  compose exec -T mysql "${database_cli}" -uuser -ppass image -e "
 INSERT INTO users (id, email, email_verified_at, password_hash, role, created_at)
-VALUES (UUID_TO_BIN('${second_admin_uuid}'), '${escaped_email}', UTC_TIMESTAMP(6), 'browser-regression-placeholder-hash', 'admin', UTC_TIMESTAMP(6));
+VALUES (UNHEX(REPLACE('${second_admin_uuid}', '-', '')), '${escaped_email}', UTC_TIMESTAMP(6), 'browser-regression-placeholder-hash', 'admin', UTC_TIMESTAMP(6));
 "
 }
 
