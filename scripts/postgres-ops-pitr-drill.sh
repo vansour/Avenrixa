@@ -278,6 +278,18 @@ run_drill() {
   set_postgres_site_name "${DRILL_SITE_NAME_AFTER_TARGET}"
   expect_eq "$(postgres_site_name)" "${DRILL_SITE_NAME_AFTER_TARGET}" "site name should advance past PITR target before restore"
 
+  if [[ "${PITR_TARGET_MODE}" == "time" ]]; then
+    # Time-based PITR needs at least one later WAL boundary archived remotely;
+    # otherwise PostgreSQL can keep waiting for WAL beyond the target timestamp.
+    log_step "Syncing WAL generated after PITR target"
+    postgres_force_wal_switch_and_wait "${POSTGRES_WAL_ARCHIVE_HOST_DIR}" 60
+    COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME}" \
+    COMPOSE_VARIANT="${COMPOSE_VARIANT}" \
+    POSTGRES_WAL_ARCHIVE_DIR="${POSTGRES_WAL_ARCHIVE_HOST_DIR}" \
+    POSTGRES_WAL_REMOTE_URI="${POSTGRES_WAL_REMOTE_URI}" \
+    ./scripts/postgres-ops-wal-sync.sh push
+  fi
+
   log_step "Clearing local WAL archive to force remote pull during restore"
   compose_reset_host_dir "${POSTGRES_WAL_ARCHIVE_HOST_DIR}"
 
