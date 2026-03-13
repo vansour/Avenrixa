@@ -448,12 +448,24 @@ copy_missing_files_between_dirs() {
   local copied=0
   local source_file=""
   local target_file=""
+  local file_name=""
+  local helper_image=""
 
   mkdir -p "${target_dir}"
+  helper_image="${COMPOSE_FS_HELPER_IMAGE:-busybox:1.37.0}"
   while IFS= read -r -d '' source_file; do
-    target_file="${target_dir}/$(basename "${source_file}")"
+    file_name="$(basename "${source_file}")"
+    target_file="${target_dir}/${file_name}"
     if [[ ! -f "${target_file}" ]]; then
-      cp -p "${source_file}" "${target_file}"
+      if ! cp -p "${source_file}" "${target_file}" 2>/dev/null; then
+        docker run --rm \
+          -v "${source_dir}:/source:ro" \
+          -v "${target_dir}:/target" \
+          -e FILE_NAME="${file_name}" \
+          --entrypoint sh \
+          "${helper_image}" \
+          -lc 'set -eu; if [ ! -f "/target/${FILE_NAME}" ]; then cp -p "/source/${FILE_NAME}" "/target/${FILE_NAME}"; fi'
+      fi
       copied=1
     fi
   done < <(find "${source_dir}" -maxdepth 1 -type f -print0)

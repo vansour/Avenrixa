@@ -279,7 +279,7 @@ run_drill() {
   expect_eq "$(postgres_site_name)" "${DRILL_SITE_NAME_AFTER_TARGET}" "site name should advance past PITR target before restore"
 
   log_step "Clearing local WAL archive to force remote pull during restore"
-  find "${POSTGRES_WAL_ARCHIVE_HOST_DIR}" -mindepth 1 -maxdepth 1 -type f -delete
+  compose_reset_host_dir "${POSTGRES_WAL_ARCHIVE_HOST_DIR}"
 
   if [[ "${PITR_TARGET_MODE}" == "name" ]]; then
     log_step "Restoring to named PITR restore point"
