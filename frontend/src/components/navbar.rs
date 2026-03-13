@@ -65,8 +65,10 @@ pub fn NavBar(site_name: String) -> Element {
                                         r#type: "button",
                                         class: "{class_name}",
                                         onclick: move |_| {
-                                            close_menu.set(false);
                                             navigation_store.navigate(page);
+                                            spawn(async move {
+                                                close_menu.set(false);
+                                            });
                                         },
                                         strong { class: "nav-tab-title", "{page.label()}" }
                                     }

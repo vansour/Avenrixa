@@ -22,6 +22,7 @@ MYSQL_DATABASE_URL="${MYSQL_DATABASE_URL:-}"
 BROWSER_BASE_URL="${BROWSER_BASE_URL:-http://127.0.0.1:${APP_HOST_PORT}}"
 BROWSER_PHASE_TIMEOUT_MS="${BROWSER_PHASE_TIMEOUT_MS:-45000}"
 MYSQL_DATA_DIR="${MYSQL_DATA_DIR:-}"
+BROWSER_TMP_PARENT_DIR="${BROWSER_TMP_PARENT_DIR:-${TMPDIR:-${ROOT_DIR}/tmp}}"
 
 source "${ROOT_DIR}/scripts/compose-runtime.sh"
 
@@ -151,7 +152,8 @@ trap on_error ERR
 trap cleanup EXIT
 
 prepare_workspace() {
-  TMP_ROOT="$(mktemp -d /tmp/vansour-browser-regression-XXXXXX)"
+  mkdir -p "${BROWSER_TMP_PARENT_DIR}"
+  TMP_ROOT="$(mktemp -d "${BROWSER_TMP_PARENT_DIR%/}/vansour-browser-regression-XXXXXX")"
   BROWSER_REGRESSION_ARTIFACT_DIR="${TMP_ROOT}/artifacts"
   BROWSER_STORAGE_STATE_PATH="${TMP_ROOT}/browser-storage-state.json"
   mkdir -p "${BROWSER_REGRESSION_ARTIFACT_DIR}"
@@ -220,6 +222,34 @@ ensure_playwright_browser() {
   )
 }
 
+expected_browser_database_connection() {
+  case "${MYSQL_DATABASE_URL}" in
+    mariadb://*)
+      printf 'mariadb://******'
+      ;;
+    mysql://*)
+      printf 'mysql://******'
+      ;;
+    *)
+      printf '******'
+      ;;
+  esac
+}
+
+expected_browser_cache_connection() {
+  case "${CACHE_MODE}" in
+    redis8|dragonfly)
+      printf 'redis://******'
+      ;;
+    none)
+      printf '未配置 REDIS_URL'
+      ;;
+    *)
+      printf '******'
+      ;;
+  esac
+}
+
 run_browser_phase() {
   local phase="$1"
   shift || true
@@ -234,6 +264,8 @@ run_browser_phase() {
     BROWSER_PHASE_TIMEOUT_MS="${BROWSER_PHASE_TIMEOUT_MS}" \
     BROWSER_REGRESSION_ARTIFACT_DIR="${BROWSER_REGRESSION_ARTIFACT_DIR}" \
     BROWSER_STORAGE_STATE_PATH="${BROWSER_STORAGE_STATE_PATH}" \
+    BROWSER_EXPECT_DATABASE_CONNECTION="$(expected_browser_database_connection)" \
+    BROWSER_EXPECT_CACHE_CONNECTION="$(expected_browser_cache_connection)" \
     "$@" \
     node scripts/browser-regression/run.mjs "${phase}"
 }

@@ -20,6 +20,7 @@ ARTIFACT_DIR="${ARTIFACT_DIR:-ops-backups/postgres-pitr-drill-${PITR_TARGET_MODE
 POSTGRES_ENABLE_WAL_ARCHIVE="${POSTGRES_ENABLE_WAL_ARCHIVE:-1}"
 POSTGRES_WAL_ARCHIVE_HOST_DIR="${POSTGRES_WAL_ARCHIVE_HOST_DIR:-${ARTIFACT_DIR}/wal-archive}"
 POSTGRES_WAL_REMOTE_URI="${POSTGRES_WAL_REMOTE_URI:-file://${ARTIFACT_DIR}/wal-remote}"
+TMP_PARENT_DIR="${TMP_PARENT_DIR:-${TMPDIR:-${ROOT_DIR}/tmp}}"
 
 source "${ROOT_DIR}/scripts/postgres-ops-common.sh"
 
@@ -76,8 +77,8 @@ cleanup() {
     fi
   else
     compose down -v --remove-orphans >/dev/null 2>&1 || true
-    rm -rf "${DATA_DIR}" >/dev/null 2>&1 || true
-    rm -rf "${ARTIFACT_DIR}" >/dev/null 2>&1 || true
+    compose_remove_host_path "${DATA_DIR}" >/dev/null 2>&1 || true
+    compose_remove_host_path "${ARTIFACT_DIR}" >/dev/null 2>&1 || true
     if [[ -n "${TMP_ROOT}" ]]; then
       rm -rf "${TMP_ROOT}"
     fi
@@ -88,10 +89,12 @@ trap on_error ERR
 trap cleanup EXIT
 
 prepare_fixture() {
-  TMP_ROOT="$(mktemp -d /tmp/vansour-postgres-pitr-drill-XXXXXX)"
+  mkdir -p "${TMP_PARENT_DIR}"
+  TMP_ROOT="$(mktemp -d "${TMP_PARENT_DIR%/}/vansour-postgres-pitr-drill-XXXXXX")"
   COOKIE_JAR="${TMP_ROOT}/admin.cookies.txt"
-  rm -rf "${DATA_DIR}" "${ARTIFACT_DIR}"
-  mkdir -p "${ARTIFACT_DIR}" "${POSTGRES_WAL_ARCHIVE_HOST_DIR}"
+  compose_reset_host_dir "${DATA_DIR}"
+  compose_reset_host_dir "${ARTIFACT_DIR}"
+  mkdir -p "${POSTGRES_WAL_ARCHIVE_HOST_DIR}"
   chmod 0777 "${POSTGRES_WAL_ARCHIVE_HOST_DIR}"
 }
 

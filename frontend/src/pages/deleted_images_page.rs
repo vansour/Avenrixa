@@ -26,22 +26,33 @@ pub fn DeletedImagesPage() -> Element {
     let image_store = use_image_store();
     let toast_store = use_toast_store();
     let kind = ImageCollectionKind::Deleted;
+    let state = image_store.collection(kind);
+    let request_key = (
+        state.current_page.max(1),
+        state.page_size.clamp(1, 100),
+        state.reload_token,
+    );
+    let mut last_request_key = use_signal(|| None::<(u32, u32, u64)>);
 
-    let _load_deleted_images = use_resource({
+    use_effect({
         let auth_store = auth_store.clone();
         let image_service = image_service.clone();
         let image_store = image_store.clone();
         let toast_store = toast_store.clone();
         move || {
-            let state = image_store.collection(kind);
-            let page = state.current_page.max(1) as i32;
-            let size = state.page_size.clamp(1, 100) as i32;
-            let _ = state.reload_token;
+            if last_request_key() == Some(request_key) {
+                return;
+            }
+
+            last_request_key.set(Some(request_key));
+
             let auth_store = auth_store.clone();
             let image_service = image_service.clone();
             let image_store = image_store.clone();
             let toast_store = toast_store.clone();
-            async move {
+            let page = request_key.0 as i32;
+            let size = request_key.1 as i32;
+            spawn(async move {
                 image_store.set_loading(kind, true);
                 image_store.clear_error(kind);
 
@@ -71,7 +82,7 @@ pub fn DeletedImagesPage() -> Element {
                 }
 
                 image_store.set_loading(kind, false);
-            }
+            });
         }
     });
 
@@ -200,7 +211,6 @@ pub fn DeletedImagesPage() -> Element {
         });
     };
 
-    let state = image_store.collection(kind);
     let selected_count = state.selected_ids.len();
     let all_selected_on_page = !state.images.is_empty()
         && state

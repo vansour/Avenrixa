@@ -16,6 +16,7 @@ DRILL_LINK_BASE_URL="${DRILL_LINK_BASE_URL:-http://127.0.0.1:${APP_HOST_PORT}/lo
 POSTGRES_DATABASE_URL="${POSTGRES_DATABASE_URL:-}"
 DRILL_MARKER_PATH="${DRILL_MARKER_PATH:-}"
 ARTIFACT_DIR="${ARTIFACT_DIR:-}"
+TMP_PARENT_DIR="${TMP_PARENT_DIR:-${TMPDIR:-${ROOT_DIR}/tmp}}"
 
 source "${ROOT_DIR}/scripts/compose-runtime.sh"
 
@@ -100,7 +101,7 @@ cleanup() {
     fi
   else
     compose down -v --remove-orphans >/dev/null 2>&1 || true
-    rm -rf "${DATA_DIR}" >/dev/null 2>&1 || true
+    compose_remove_host_path "${DATA_DIR}" >/dev/null 2>&1 || true
     if [[ -n "${TMP_ROOT}" ]]; then
       rm -rf "${TMP_ROOT}"
     fi
@@ -111,9 +112,10 @@ trap on_error ERR
 trap cleanup EXIT
 
 prepare_fixture() {
-  TMP_ROOT="$(mktemp -d /tmp/vansour-postgres-ops-drill-XXXXXX)"
+  mkdir -p "${TMP_PARENT_DIR}"
+  TMP_ROOT="$(mktemp -d "${TMP_PARENT_DIR%/}/vansour-postgres-ops-drill-XXXXXX")"
   COOKIE_JAR="${TMP_ROOT}/admin.cookies.txt"
-  rm -rf "${DATA_DIR}"
+  compose_reset_host_dir "${DATA_DIR}"
   mkdir -p "${ARTIFACT_DIR}"
 }
 

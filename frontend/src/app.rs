@@ -233,7 +233,19 @@ pub fn App() -> Element {
                     }
                 } else if let Some(status) = install_status() {
                     if status.installed && is_authenticated {
-                        UploadPage {}
+                        match navigation_store.current_page() {
+                            DashboardPage::Upload => rsx! { UploadPage {} },
+                            DashboardPage::History => rsx! { ImageListPage {} },
+                            DashboardPage::Trash => rsx! { DeletedImagesPage {} },
+                            DashboardPage::Api => rsx! { ApiPage {} },
+                            DashboardPage::Settings => rsx! {
+                                SettingsPage {
+                                    is_admin,
+                                    requested_section: navigation_store.current_settings_anchor(),
+                                    on_site_name_updated: move |name| site_name.set(name),
+                                }
+                            },
+                        }
                     } else {
                         LoginPage { mail_enabled: status.config.mail_enabled }
                     }
@@ -267,29 +279,29 @@ pub fn App() -> Element {
                         if let Some(user) = auth_store_for_guide_settings.user() {
                             dismiss_first_run_guide(&user.email);
                         }
-                        show_first_run_guide.set(false);
                         navigation_store_for_guide_settings.open_settings(SettingsAnchor::General);
+                        show_first_run_guide.set(false);
                     },
                     on_go_storage: move |_| {
                         if let Some(user) = auth_store_for_guide_storage.user() {
                             dismiss_first_run_guide(&user.email);
                         }
-                        show_first_run_guide.set(false);
                         navigation_store_for_guide_storage.open_settings(SettingsAnchor::Storage);
+                        show_first_run_guide.set(false);
                     },
                     on_go_upload: move |_| {
                         if let Some(user) = auth_store_for_guide_upload.user() {
                             dismiss_first_run_guide(&user.email);
                         }
-                        show_first_run_guide.set(false);
                         navigation_store_for_guide_upload.navigate(DashboardPage::Upload);
+                        show_first_run_guide.set(false);
                     },
                     on_go_audit: move |_| {
                         if let Some(user) = auth_store_for_guide_audit.user() {
                             dismiss_first_run_guide(&user.email);
                         }
-                        show_first_run_guide.set(false);
                         navigation_store_for_guide_audit.open_settings(SettingsAnchor::Audit);
+                        show_first_run_guide.set(false);
                     },
                     on_close: move |_| {
                         if let Some(user) = auth_store_for_guide_close.user() {

@@ -87,6 +87,70 @@ compose_variant_default_database_url() {
   esac
 }
 
+compose_resolve_host_path() {
+  local path="$1"
+
+  if [[ "${path}" != /* ]]; then
+    path="${ROOT_DIR}/${path}"
+  fi
+
+  printf '%s' "${path}"
+}
+
+compose_remove_host_path() {
+  local target="$1"
+  local resolved_target
+  local helper_image
+
+  resolved_target="$(compose_resolve_host_path "${target}")"
+
+  case "${resolved_target}" in
+    ""|"/")
+      echo "Refusing to remove unsafe path: ${resolved_target}" >&2
+      return 1
+      ;;
+  esac
+
+  if [[ ! -e "${resolved_target}" ]]; then
+    return 0
+  fi
+
+  if rm -rf "${resolved_target}" 2>/dev/null; then
+    return 0
+  fi
+
+  if command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
+    sudo rm -rf "${resolved_target}"
+    return 0
+  fi
+
+  if [[ -d "${resolved_target}" ]] && command -v docker >/dev/null 2>&1; then
+    helper_image="${COMPOSE_FS_HELPER_IMAGE:-busybox:1.37.0}"
+    docker run --rm \
+      -v "${resolved_target}:/target" \
+      --entrypoint sh \
+      "${helper_image}" \
+      -c 'find /target -mindepth 1 -maxdepth 1 -exec rm -rf {} +'
+    rmdir "${resolved_target}" 2>/dev/null || true
+    rm -rf "${resolved_target}" 2>/dev/null || true
+    if [[ ! -e "${resolved_target}" ]]; then
+      return 0
+    fi
+  fi
+
+  echo "Failed to remove host path: ${resolved_target}" >&2
+  return 1
+}
+
+compose_reset_host_dir() {
+  local target="$1"
+  local resolved_target
+
+  resolved_target="$(compose_resolve_host_path "${target}")"
+  compose_remove_host_path "${resolved_target}"
+  mkdir -p "${resolved_target}"
+}
+
 compose_variant_default_postgres_wal_archive_host_dir() {
   printf '%s/ops-backups/postgres-wal-archive' "${ROOT_DIR}"
 }

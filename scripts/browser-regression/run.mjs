@@ -17,6 +17,8 @@ const config = {
   backupFilename: process.env.BROWSER_BACKUP_FILENAME || "",
   storageStatePath: process.env.BROWSER_STORAGE_STATE_PATH || "",
   executablePath: process.env.BROWSER_EXECUTABLE_PATH || undefined,
+  expectedDatabaseConnection: process.env.BROWSER_EXPECT_DATABASE_CONNECTION || "",
+  expectedCacheConnection: process.env.BROWSER_EXPECT_CACHE_CONNECTION || "",
   artifactDir:
     process.env.BROWSER_REGRESSION_ARTIFACT_DIR ||
     path.join(process.cwd(), "tmp", "browser-regression-artifacts"),
@@ -181,24 +183,31 @@ async function clickNavButton(page, name) {
     if (!button) {
       return false;
     }
-    dispatchClick(button);
+    window.setTimeout(() => dispatchClick(button), 0);
     return true;
   }, name);
 
   assert.equal(clicked, true, `navigation button ${name} should exist`);
+  await page.waitForTimeout(50);
+}
+
+async function ensureNavButtonVisible(page, name) {
+  const button = page.getByRole("button", { name, exact: true }).first();
+  if (await button.isVisible().catch(() => false)) {
+    return button;
+  }
+
+  const toggle = page.locator("button.navbar-toggle").first();
+  if (await toggle.isVisible().catch(() => false)) {
+    await toggle.click();
+    await button.waitFor({ state: "visible", timeout: 3_000 }).catch(() => {});
+  }
+
+  return button;
 }
 
 async function clickNavButtonRobust(page, name) {
-  const button = page.getByRole("button", { name, exact: true }).first();
-  if ((await button.count().catch(() => 0)) > 0) {
-    try {
-      await button.dispatchEvent("click");
-      return;
-    } catch (error) {
-      log(`navigation dispatch fallback for ${name}: ${error}`);
-    }
-  }
-
+  await ensureNavButtonVisible(page, name);
   await clickNavButton(page, name);
 }
 
@@ -352,15 +361,15 @@ async function phaseInstallAndBackup(page) {
   assert.equal(await environmentInputs.count(), 2, "wizard should show database and cache inputs");
   assert.equal(await environmentInputs.nth(0).isDisabled(), true, "database input should be readonly");
   assert.equal(await environmentInputs.nth(1).isDisabled(), true, "cache input should be readonly");
-  assert.match(
+  assert.equal(
     await environmentInputs.nth(0).inputValue(),
-    /postgres/i,
-    "database summary should mention postgres"
+    config.expectedDatabaseConnection,
+    "database summary should match the masked runtime connection"
   );
-  assert.match(
+  assert.equal(
     await environmentInputs.nth(1).inputValue(),
-    /redis/i,
-    "cache summary should mention redis"
+    config.expectedCacheConnection,
+    "cache summary should match the masked runtime connection"
   );
 
   await fillInputByLabel(page, "管理员邮箱", config.adminEmail);
@@ -559,7 +568,7 @@ async function phaseAuthSemantics(page) {
   await waitForText(page, "上传历史", "非管理员历史图库");
   log("auth phase: opened history page as non-admin");
   await page.context().clearCookies();
-  await clickButtonRobust(page, "刷新");
+  await page.reload({ waitUntil: "domcontentloaded" });
   await waitForText(page, "登录控制台", "非设置后台页会话失效后返回登录页");
   log("auth phase: expired session redirected from history page");
 
@@ -587,8 +596,18 @@ async function writeFailureArtifact(page, error) {
     config.artifactDir,
     `${phase || "unknown-phase"}-failure.png`
   );
+  const failureUrl = page.url();
+  const failureBodyText = ((await page.locator("body").textContent().catch(() => "")) || "")
+    .replace(/\s+/g, " ")
+    .slice(0, 800);
+  const failureHtml = ((await page.content().catch(() => "")) || "")
+    .replace(/\s+/g, " ")
+    .slice(0, 800);
   await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => {});
   console.error(error.stack || String(error));
+  console.error(`[browser-regression] failure url: ${failureUrl}`);
+  console.error(`[browser-regression] failure body: ${failureBodyText}`);
+  console.error(`[browser-regression] failure html: ${failureHtml}`);
   console.error(`[browser-regression] failure screenshot: ${screenshotPath}`);
 }
 
@@ -615,6 +634,14 @@ async function main() {
     context = await browser.newContext(contextOptions);
     page = await context.newPage();
     page.setDefaultTimeout(PHASE_TIMEOUT_MS);
+    page.on("pageerror", (error) => {
+      log(`pageerror: ${error.stack || String(error)}`);
+    });
+    page.on("console", (message) => {
+      if (message.type() === "error") {
+        log(`console.${message.type()}: ${message.text()}`);
+      }
+    });
 
     const result = await runPhase(page);
     if (config.storageStatePath) {
