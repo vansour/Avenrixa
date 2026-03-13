@@ -1379,6 +1379,11 @@ body {
     line-height: 1.45;
 }
 
+.settings-field-hint-error {
+    color: #b42345;
+    font-weight: 600;
+}
+
 .settings-field-full {
     grid-column: 1 / -1;
 }
@@ -1406,6 +1411,17 @@ body {
     outline: none;
     border-color: var(--brand);
     box-shadow: 0 0 0 4px var(--brand-soft);
+}
+
+.settings-field input.is-invalid,
+.settings-field select.is-invalid {
+    border-color: rgba(180, 35, 69, 0.72);
+}
+
+.settings-field input.is-invalid:focus,
+.settings-field select.is-invalid:focus {
+    border-color: rgba(180, 35, 69, 0.82);
+    box-shadow: 0 0 0 4px rgba(180, 35, 69, 0.14);
 }
 
 .settings-check {

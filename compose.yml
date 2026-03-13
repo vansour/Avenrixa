@@ -155,7 +155,7 @@ services:
 
   postgres:
     container_name: vansour-image-postgres
-    image: postgres:17
+    image: ${POSTGRES_IMAGE:-postgres:18}
     environment:
       POSTGRES_DB: image
       POSTGRES_USER: user

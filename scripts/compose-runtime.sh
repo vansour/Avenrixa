@@ -10,6 +10,7 @@ fi
 : "${COMPOSE_ENABLE_MAILPIT:=0}"
 : "${APP_HOST_PORT:=8080}"
 : "${APP_IMAGE_REF:=ghcr.io/vansour/vansour-image:latest}"
+: "${POSTGRES_IMAGE:=postgres:18}"
 : "${MAILPIT_HTTP_PORT:=18025}"
 : "${MAILPIT_SMTP_PORT:=11025}"
 : "${POSTGRES_ENABLE_WAL_ARCHIVE:=0}"
@@ -388,7 +389,7 @@ EOF
       database_service_block=$(cat <<EOF
   postgres:
     container_name: vansour-image-postgres
-    image: postgres:17
+    image: ${POSTGRES_IMAGE}
     environment:
       POSTGRES_DB: image
       POSTGRES_USER: user

@@ -207,26 +207,9 @@ pub fn InstallWizardPage(
         let email = admin_email().trim().to_string();
         let password = admin_password();
         let confirm = confirm_password();
-        if email.is_empty() {
-            let message = "请填写管理员邮箱".to_string();
-            error_message.set(message.clone());
-            toast_store.show_error(message);
-            return;
-        }
-        if password.trim().is_empty() {
-            let message = "请填写管理员密码".to_string();
-            error_message.set(message.clone());
-            toast_store.show_error(message);
-            return;
-        }
-        if password.trim().len() < MIN_ADMIN_PASSWORD_LENGTH {
-            let message = format!("管理员密码至少需要 {} 个字符", MIN_ADMIN_PASSWORD_LENGTH);
-            error_message.set(message.clone());
-            toast_store.show_error(message);
-            return;
-        }
-        if password != confirm {
-            let message = "两次输入的管理员密码不一致".to_string();
+        if let Some(message) =
+            install_admin_submit_error(email.as_str(), password.as_str(), confirm.as_str())
+        {
             error_message.set(message.clone());
             toast_store.show_error(message);
             return;
@@ -302,6 +285,15 @@ pub fn InstallWizardPage(
         }
     };
 
+    let admin_email_value = admin_email();
+    let admin_password_value = admin_password();
+    let confirm_password_value = confirm_password();
+    let admin_email_error = install_admin_email_error(admin_email_value.as_str());
+    let admin_password_error = install_admin_password_error(admin_password_value.as_str());
+    let confirm_password_error = install_admin_confirm_password_error(
+        admin_password_value.as_str(),
+        confirm_password_value.as_str(),
+    );
     let selected_favicon_name = selected_favicon()
         .as_ref()
         .map(|file| file.name())
@@ -312,7 +304,11 @@ pub fn InstallWizardPage(
     } else {
         "后续可再上传".to_string()
     };
-    let admin_ready = install_admin_ready(admin_email(), admin_password(), confirm_password());
+    let admin_ready = install_admin_ready(
+        admin_email_value.as_str(),
+        admin_password_value.as_str(),
+        confirm_password_value.as_str(),
+    );
     let site_ready = !(form.site_name)().trim().is_empty();
     let mail_ready = install_mail_ready(form);
     let general_ready = site_ready && mail_ready;
@@ -533,30 +529,46 @@ pub fn InstallWizardPage(
                                         label { class: "settings-field settings-field-full",
                                             span { "管理员邮箱" }
                                             input {
+                                                class: if admin_email_error.is_some() { "is-invalid" } else { "" },
                                                 r#type: "email",
-                                                value: "{admin_email()}",
+                                                value: "{admin_email_value}",
                                                 oninput: move |event| admin_email.set(event.value()),
                                                 disabled: is_installing(),
+                                            }
+                                            if let Some(message) = admin_email_error.clone() {
+                                                small { class: "settings-field-hint settings-field-hint-error", "{message}" }
                                             }
                                         }
 
                                         label { class: "settings-field",
                                             span { "管理员密码" }
                                             input {
+                                                class: if admin_password_error.is_some() { "is-invalid" } else { "" },
                                                 r#type: "password",
-                                                value: "{admin_password()}",
+                                                value: "{admin_password_value}",
                                                 oninput: move |event| admin_password.set(event.value()),
                                                 disabled: is_installing(),
+                                            }
+                                            if let Some(message) = admin_password_error.clone() {
+                                                small { class: "settings-field-hint settings-field-hint-error", "{message}" }
+                                            } else {
+                                                small { class: "settings-field-hint",
+                                                    "至少 12 位，建议包含大小写字母、数字与符号。"
+                                                }
                                             }
                                         }
 
                                         label { class: "settings-field",
                                             span { "确认密码" }
                                             input {
+                                                class: if confirm_password_error.is_some() { "is-invalid" } else { "" },
                                                 r#type: "password",
-                                                value: "{confirm_password()}",
+                                                value: "{confirm_password_value}",
                                                 oninput: move |event| confirm_password.set(event.value()),
                                                 disabled: is_installing(),
+                                            }
+                                            if let Some(message) = confirm_password_error.clone() {
+                                                small { class: "settings-field-hint settings-field-hint-error", "{message}" }
                                             }
                                         }
                                     }
@@ -757,7 +769,7 @@ pub fn InstallWizardPage(
                                 div { class: "settings-subcard install-compact-subcard",
                                     h3 { "安装摘要" }
                                     div { class: "install-review-list",
-                                        {render_install_review_row("管理员", summary_or_pending(admin_email()))}
+                                        {render_install_review_row("管理员", summary_or_pending(admin_email_value.clone()))}
                                         {render_install_review_row("站点名称", site_name_summary.clone())}
                                         {render_install_review_row("站点图标", favicon_summary.clone())}
                                         {render_install_review_row("邮件服务", mail_summary.clone())}
@@ -958,13 +970,55 @@ fn bootstrap_database_kind_label(kind: &str) -> &'static str {
     }
 }
 
-fn install_admin_ready(email: String, password: String, confirm: String) -> bool {
+fn install_admin_email_error(email: &str) -> Option<String> {
     let email = email.trim();
+    if email.is_empty() || email.contains('@') {
+        None
+    } else {
+        Some("请输入有效的管理员邮箱".to_string())
+    }
+}
+
+fn install_admin_password_error(password: &str) -> Option<String> {
     let password = password.trim();
-    !email.is_empty()
-        && email.contains('@')
-        && password.len() >= MIN_ADMIN_PASSWORD_LENGTH
-        && password == confirm
+    if password.is_empty() || password.len() >= MIN_ADMIN_PASSWORD_LENGTH {
+        None
+    } else {
+        Some(format!(
+            "管理员密码至少需要 {} 个字符",
+            MIN_ADMIN_PASSWORD_LENGTH
+        ))
+    }
+}
+
+fn install_admin_confirm_password_error(password: &str, confirm: &str) -> Option<String> {
+    if password.is_empty() || confirm.is_empty() || password == confirm {
+        None
+    } else {
+        Some("两次输入的管理员密码不一致".to_string())
+    }
+}
+
+fn install_admin_submit_error(email: &str, password: &str, confirm: &str) -> Option<String> {
+    let email = email.trim();
+    if email.is_empty() {
+        Some("请填写管理员邮箱".to_string())
+    } else if password.trim().is_empty() {
+        Some("请填写管理员密码".to_string())
+    } else if password.trim().len() < MIN_ADMIN_PASSWORD_LENGTH {
+        Some(format!(
+            "管理员密码至少需要 {} 个字符",
+            MIN_ADMIN_PASSWORD_LENGTH
+        ))
+    } else if password != confirm {
+        Some("两次输入的管理员密码不一致".to_string())
+    } else {
+        None
+    }
+}
+
+fn install_admin_ready(email: &str, password: &str, confirm: &str) -> bool {
+    email.trim().contains('@') && install_admin_submit_error(email, password, confirm).is_none()
 }
 
 fn install_mail_ready(form: SettingsFormState) -> bool {
@@ -1079,5 +1133,79 @@ fn summary_or_pending(value: String) -> String {
         "待填写".to_string()
     } else {
         value
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn install_admin_password_error_is_shown_only_for_short_non_empty_passwords() {
+        assert_eq!(install_admin_password_error(""), None);
+        assert_eq!(
+            install_admin_password_error("short"),
+            Some("管理员密码至少需要 12 个字符".to_string())
+        );
+        assert_eq!(install_admin_password_error("Password123!"), None);
+    }
+
+    #[test]
+    fn install_admin_confirm_password_error_waits_for_both_values_and_checks_match() {
+        assert_eq!(
+            install_admin_confirm_password_error("", "Password123!"),
+            None
+        );
+        assert_eq!(
+            install_admin_confirm_password_error("Password123!", ""),
+            None
+        );
+        assert_eq!(
+            install_admin_confirm_password_error("Password123!", "Password321!"),
+            Some("两次输入的管理员密码不一致".to_string())
+        );
+        assert_eq!(
+            install_admin_confirm_password_error("Password123!", "Password123!"),
+            None
+        );
+    }
+
+    #[test]
+    fn install_admin_submit_error_matches_install_requirements() {
+        assert_eq!(
+            install_admin_submit_error("", "Password123!", "Password123!"),
+            Some("请填写管理员邮箱".to_string())
+        );
+        assert_eq!(
+            install_admin_submit_error("admin@example.com", "", ""),
+            Some("请填写管理员密码".to_string())
+        );
+        assert_eq!(
+            install_admin_submit_error("admin@example.com", "short", "short"),
+            Some("管理员密码至少需要 12 个字符".to_string())
+        );
+        assert_eq!(
+            install_admin_submit_error("admin@example.com", "Password123!", "Password321!"),
+            Some("两次输入的管理员密码不一致".to_string())
+        );
+        assert_eq!(
+            install_admin_submit_error("admin@example.com", "Password123!", "Password123!"),
+            None
+        );
+    }
+
+    #[test]
+    fn install_admin_ready_requires_valid_email_and_matching_strong_password() {
+        assert!(!install_admin_ready(
+            "invalid-email",
+            "Password123!",
+            "Password123!"
+        ));
+        assert!(!install_admin_ready("admin@example.com", "short", "short"));
+        assert!(install_admin_ready(
+            "admin@example.com",
+            "Password123!",
+            "Password123!"
+        ));
     }
 }
