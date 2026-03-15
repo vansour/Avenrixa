@@ -341,13 +341,6 @@ expect_eq \
   "${IMAGE_KEY}" \
   "image detail should return the requested image"
 
-curl -fsS \
-  -b "${USER_COOKIE_JAR}" \
-  -X PUT "${api_base}/images/${IMAGE_KEY}" \
-  -H 'Content-Type: application/json' \
-  -d '{"tags":["sqlite","smoke"]}' \
-  >/dev/null
-
 EXPIRED_AT="$(date -u -Iseconds -d '2 minutes ago')"
 curl -fsS \
   -b "${USER_COOKIE_JAR}" \

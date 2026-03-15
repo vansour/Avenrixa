@@ -103,6 +103,42 @@ async function waitForHeading(page, matcher, timeout = PHASE_TIMEOUT_MS) {
   throw new Error(`Timed out waiting for heading: ${matcher}`);
 }
 
+async function waitForStorageBrowserPath(page, matcher = null, timeout = PHASE_TIMEOUT_MS) {
+  const currentPath = page.locator(".install-path-browser-current").first();
+  const deadline = Date.now() + timeout;
+  let lastPath = "";
+
+  while (Date.now() < deadline) {
+    const text = ((await currentPath.textContent().catch(() => "")) || "").trim();
+    if (text) {
+      lastPath = text;
+      if (!matcher || textMatches(text, matcher)) {
+        return text;
+      }
+    }
+    await page.waitForTimeout(250);
+  }
+
+  throw new Error(`Timed out waiting for storage browser path: ${matcher ?? "any"}; last=${lastPath}`);
+}
+
+async function selectInstallStorageDirectory(page) {
+  const currentPath = await waitForStorageBrowserPath(page);
+  if (currentPath === "/data/images") {
+    return currentPath;
+  }
+
+  if (currentPath === "/data") {
+    const imagesDirectoryButton = page.locator("button.install-path-browser-item", {
+      has: page.locator(".install-path-browser-name", { hasText: "images" }),
+    });
+    await imagesDirectoryButton.first().click();
+    return waitForStorageBrowserPath(page, "/data/images");
+  }
+
+  throw new Error(`Unexpected install storage browser path: ${currentPath}`);
+}
+
 async function gotoRoot(page) {
   await page.goto(`${config.baseUrl}/`, { waitUntil: "domcontentloaded" });
 }
@@ -397,7 +433,7 @@ async function phaseInstallAndBackup(page) {
   await waitForText(page, "当前步骤 3/4", "存储后端步骤进度");
   await clickButton(page, "选择文件夹");
   await waitForText(page, "选择本地存储目录", "本地目录选择器");
-  await waitForText(page, "/data/images", "本地目录默认路径");
+  await selectInstallStorageDirectory(page);
   await clickButton(page, "选择当前文件夹");
   await clickButton(page, "下一步：最终确认");
 

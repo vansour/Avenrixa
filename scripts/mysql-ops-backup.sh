@@ -180,9 +180,15 @@ case "${backup_mode}" in
     tool_family="$(mysql_physical_tool_family)"
     helper_image="$(mysql_physical_helper_image)"
     created_at="$(current_timestamp_utc)"
-    checkpoints_path="${physical_target_dir}/xtrabackup_checkpoints"
-    info_path="${physical_target_dir}/xtrabackup_info"
-    binlog_info_path="${physical_target_dir}/xtrabackup_binlog_info"
+    if uses_mariadb_compose_file; then
+      checkpoints_path="${physical_target_dir}/mariadb_backup_checkpoints"
+      info_path="${physical_target_dir}/mariadb_backup_info"
+      binlog_info_path="${physical_target_dir}/xtrabackup_binlog_pos_innodb"
+    else
+      checkpoints_path="${physical_target_dir}/xtrabackup_checkpoints"
+      info_path="${physical_target_dir}/xtrabackup_info"
+      binlog_info_path="${physical_target_dir}/xtrabackup_binlog_info"
+    fi
     backup_my_cnf_path="${physical_target_dir}/backup-my.cnf"
     backup_type="$(metadata_value_from_key "${checkpoints_path}" "backup_type")"
     from_lsn="$(metadata_value_from_key "${checkpoints_path}" "from_lsn")"
@@ -222,6 +228,9 @@ case "${backup_mode}" in
         --arg xtrabackup_info_raw "$(read_optional_file "${info_path}")" \
         --arg xtrabackup_checkpoints_raw "$(read_optional_file "${checkpoints_path}")" \
         --arg xtrabackup_binlog_info_raw "$(read_optional_file "${binlog_info_path}")" \
+        --arg mariadb_backup_info_raw "$(read_optional_file "${physical_target_dir}/mariadb_backup_info")" \
+        --arg mariadb_backup_checkpoints_raw "$(read_optional_file "${physical_target_dir}/mariadb_backup_checkpoints")" \
+        --arg xtrabackup_binlog_pos_innodb_raw "$(read_optional_file "${physical_target_dir}/xtrabackup_binlog_pos_innodb")" \
         --arg data_archive_path "${data_archive_path}" \
         --arg data_archive_sha256 "${data_archive_sha256:-}" \
         --argjson include_data_snapshot "$([[ "${INCLUDE_DATA_SNAPSHOT}" == "1" ]] && echo true || echo false)" \
@@ -256,7 +265,10 @@ case "${backup_mode}" in
               binlog_gtid: (if $binlog_gtid == "" then null else $binlog_gtid end),
               xtrabackup_info_raw: (if $xtrabackup_info_raw == "" then null else $xtrabackup_info_raw end),
               xtrabackup_checkpoints_raw: (if $xtrabackup_checkpoints_raw == "" then null else $xtrabackup_checkpoints_raw end),
-              xtrabackup_binlog_info_raw: (if $xtrabackup_binlog_info_raw == "" then null else $xtrabackup_binlog_info_raw end)
+              xtrabackup_binlog_info_raw: (if $xtrabackup_binlog_info_raw == "" then null else $xtrabackup_binlog_info_raw end),
+              mariadb_backup_info_raw: (if $mariadb_backup_info_raw == "" then null else $mariadb_backup_info_raw end),
+              mariadb_backup_checkpoints_raw: (if $mariadb_backup_checkpoints_raw == "" then null else $mariadb_backup_checkpoints_raw end),
+              xtrabackup_binlog_pos_innodb_raw: (if $xtrabackup_binlog_pos_innodb_raw == "" then null else $xtrabackup_binlog_pos_innodb_raw end)
             }
           },
           include_data_snapshot: $include_data_snapshot,

@@ -314,9 +314,24 @@ run_drill() {
     exit 1
   fi
 
-  if [[ "$(jq -r '.physical_backup.metadata.xtrabackup_binlog_info_raw // empty' "${physical_manifest_path}")" == "" ]]; then
-    echo "Physical backup manifest is missing xtrabackup_binlog_info_raw metadata" >&2
-    exit 1
+  if uses_mariadb_compose_file; then
+    if [[ "$(jq -r '.physical_backup.metadata.mariadb_backup_info_raw // empty' "${physical_manifest_path}")" == "" ]]; then
+      echo "Physical backup manifest is missing mariadb_backup_info_raw metadata" >&2
+      exit 1
+    fi
+    if [[ "$(jq -r '.physical_backup.metadata.mariadb_backup_checkpoints_raw // empty' "${physical_manifest_path}")" == "" ]]; then
+      echo "Physical backup manifest is missing mariadb_backup_checkpoints_raw metadata" >&2
+      exit 1
+    fi
+    if [[ "$(jq -r '.physical_backup.metadata.xtrabackup_binlog_pos_innodb_raw // empty' "${physical_manifest_path}")" == "" ]]; then
+      echo "Physical backup manifest is missing xtrabackup_binlog_pos_innodb_raw metadata" >&2
+      exit 1
+    fi
+  else
+    if [[ "$(jq -r '.physical_backup.metadata.xtrabackup_binlog_info_raw // empty' "${physical_manifest_path}")" == "" ]]; then
+      echo "Physical backup manifest is missing xtrabackup_binlog_info_raw metadata" >&2
+      exit 1
+    fi
   fi
 
   log_step "Mutating database and local data"

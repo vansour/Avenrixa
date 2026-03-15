@@ -98,10 +98,20 @@ ENV APP_REVISION=${APP_REVISION}
 ENV BUILD_DATE=${BUILD_DATE}
 
 # 安装运行时必需依赖（以 root 用户运行，避免卷权限问题）
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl default-mysql-client postgresql-client \
-    && rm -rf /var/lib/apt/lists/* \
-    && apt-get clean
+# PostgreSQL 备份依赖 pg_dump；Debian 默认客户端版本可能落后于运行中的数据库主版本，
+# 因此显式接入 PGDG 并安装 18.x 客户端以兼容 CI 中的 postgres:18。
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends ca-certificates curl default-mysql-client gnupg; \
+    install -d -m 0755 /usr/share/keyrings; \
+    curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+      | gpg --dearmor -o /usr/share/keyrings/postgresql.gpg; \
+    echo "deb [signed-by=/usr/share/keyrings/postgresql.gpg] https://apt.postgresql.org/pub/repos/apt trixie-pgdg main" \
+      > /etc/apt/sources.list.d/pgdg.list; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends postgresql-client-18; \
+    rm -rf /var/lib/apt/lists/*; \
+    apt-get clean
 
 WORKDIR /app
 

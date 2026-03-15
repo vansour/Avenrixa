@@ -19,8 +19,20 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  skip-prerelease-tag:
+    name: Skip GA Ship For Prerelease Tag
+    if: github.event_name == 'push' && contains(github.ref_name, '-')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Explain skipped GA ship
+        run: |
+          echo "Skipping GA ship for prerelease tag: ${GITHUB_REF_NAME}"
+          echo "Use the RC preflight workflow for release candidates."
+
   release-ga-ship:
     name: Release 0.1 GA Ship
+    if: github.event_name != 'push' || !contains(github.ref_name, '-')
     runs-on: ubuntu-latest
     timeout-minutes: 300
 

@@ -315,13 +315,13 @@ impl AdminDomainService {
                     .fetch_one(pool)
                     .await?,
                 images_last_24h: sqlx::query_scalar(
-                    "SELECT COUNT(*) FROM images WHERE created_at > $1 AND status = 'active'",
+                    "SELECT COUNT(*) FROM audit_logs WHERE action = 'image.upload' AND created_at > $1",
                 )
                 .bind(day_ago)
                 .fetch_one(pool)
                 .await?,
                 images_last_7d: sqlx::query_scalar(
-                    "SELECT COUNT(*) FROM images WHERE created_at > $1 AND status = 'active'",
+                    "SELECT COUNT(*) FROM audit_logs WHERE action = 'image.upload' AND created_at > $1",
                 )
                 .bind(week_ago)
                 .fetch_one(pool)
@@ -347,13 +347,13 @@ impl AdminDomainService {
                 .fetch_one(pool)
                 .await?,
                 images_last_24h: sqlx::query_scalar(
-                    "SELECT CAST(COUNT(*) AS SIGNED) FROM images WHERE created_at > ? AND status = 'active'",
+                    "SELECT CAST(COUNT(*) AS SIGNED) FROM audit_logs WHERE action = 'image.upload' AND created_at > ?",
                 )
                 .bind(day_ago)
                 .fetch_one(pool)
                 .await?,
                 images_last_7d: sqlx::query_scalar(
-                    "SELECT CAST(COUNT(*) AS SIGNED) FROM images WHERE created_at > ? AND status = 'active'",
+                    "SELECT CAST(COUNT(*) AS SIGNED) FROM audit_logs WHERE action = 'image.upload' AND created_at > ?",
                 )
                 .bind(week_ago)
                 .fetch_one(pool)
@@ -379,13 +379,13 @@ impl AdminDomainService {
                     .fetch_one(pool)
                     .await?,
                 images_last_24h: sqlx::query_scalar(
-                    "SELECT COUNT(*) FROM images WHERE created_at > ?1 AND status = 'active'",
+                    "SELECT COUNT(*) FROM audit_logs WHERE action = 'image.upload' AND created_at > ?1",
                 )
                 .bind(day_ago)
                 .fetch_one(pool)
                 .await?,
                 images_last_7d: sqlx::query_scalar(
-                    "SELECT COUNT(*) FROM images WHERE created_at > ?1 AND status = 'active'",
+                    "SELECT COUNT(*) FROM audit_logs WHERE action = 'image.upload' AND created_at > ?1",
                 )
                 .bind(week_ago)
                 .fetch_one(pool)
@@ -478,6 +478,59 @@ mod tests {
         .expect("user should be inserted");
     }
 
+    async fn insert_image(
+        pool: &sqlx::SqlitePool,
+        user_id: Uuid,
+        filename: &str,
+        hash: &str,
+        status: &str,
+        created_at: DateTime<Utc>,
+    ) {
+        sqlx::query(
+            "INSERT INTO images (id, user_id, filename, thumbnail, size, hash, format, views, status, expires_at, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        )
+        .bind(Uuid::new_v4())
+        .bind(user_id)
+        .bind(filename)
+        .bind(None::<String>)
+        .bind(128_i64)
+        .bind(hash)
+        .bind("png")
+        .bind(0_i64)
+        .bind(status)
+        .bind(None::<DateTime<Utc>>)
+        .bind(created_at)
+        .execute(pool)
+        .await
+        .expect("image should be inserted");
+    }
+
+    async fn insert_audit_log(
+        pool: &sqlx::SqlitePool,
+        user_id: Option<Uuid>,
+        action: &str,
+        target_type: &str,
+        target_id: Option<Uuid>,
+        created_at: DateTime<Utc>,
+    ) {
+        sqlx::query(
+            "INSERT INTO audit_logs (id, user_id, action, target_type, target_id, details, ip_address, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        )
+        .bind(Uuid::new_v4())
+        .bind(user_id)
+        .bind(action)
+        .bind(target_type)
+        .bind(target_id)
+        .bind(None::<String>)
+        .bind(None::<String>)
+        .bind(created_at)
+        .execute(pool)
+        .await
+        .expect("audit log should be inserted");
+    }
+
     #[tokio::test]
     async fn update_user_role_rejects_demoting_last_admin() {
         let (_temp_dir, pool, service) = sqlite_admin_service().await;
@@ -522,5 +575,54 @@ mod tests {
 
         assert_eq!(role, "user");
         assert_eq!(token_version, 1);
+    }
+
+    #[tokio::test]
+    async fn system_stats_count_recent_uploads_even_after_soft_delete() {
+        let (_temp_dir, pool, service) = sqlite_admin_service().await;
+        let user_id = Uuid::new_v4();
+        let image_id = Uuid::new_v4();
+        insert_user(&pool, user_id, "admin@example.com", "admin").await;
+        let uploaded_at = Utc::now();
+        insert_image(
+            &pool,
+            user_id,
+            "deleted.png",
+            &"d".repeat(64),
+            "active",
+            uploaded_at,
+        )
+        .await;
+        sqlx::query("UPDATE images SET id = ?1 WHERE filename = ?2")
+            .bind(image_id)
+            .bind("deleted.png")
+            .execute(&pool)
+            .await
+            .expect("image id should be updated");
+        insert_audit_log(
+            &pool,
+            Some(user_id),
+            "image.upload",
+            "image",
+            Some(image_id),
+            uploaded_at,
+        )
+        .await;
+        sqlx::query("DELETE FROM images WHERE id = ?1")
+            .bind(image_id)
+            .execute(&pool)
+            .await
+            .expect("image should be hard deleted");
+
+        let stats = service
+            .get_system_stats()
+            .await
+            .expect("system stats should load");
+
+        assert_eq!(stats.total_users, 1);
+        assert_eq!(stats.total_images, 0);
+        assert_eq!(stats.total_storage, 0);
+        assert_eq!(stats.images_last_24h, 1);
+        assert_eq!(stats.images_last_7d, 1);
     }
 }

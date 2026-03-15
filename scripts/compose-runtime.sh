@@ -454,6 +454,9 @@ EOF
     cache_url=""
   else
     cache_url="redis://cache:6379"
+    if [[ -z "${app_depends_on}" ]]; then
+      app_depends_on=$'    depends_on:'
+    fi
     app_depends_on="${app_depends_on}"$'\n      cache:\n        condition: service_healthy'
   fi
 
