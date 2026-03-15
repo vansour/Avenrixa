@@ -3,6 +3,7 @@ use crate::db::AppState;
 use crate::domain::auth::DefaultAuthDomainService;
 use crate::domain::auth::state_repository::{AuthStateRepository, AuthStateSnapshot, hash_token};
 use crate::error::AppError;
+use crate::models::UserRole;
 use axum::http::{HeaderMap, HeaderValue, header};
 use axum_extra::extract::cookie::CookieJar;
 use chrono::{Duration, Utc};
@@ -37,10 +38,7 @@ fn optional_mailbox_name(value: &str) -> Option<String> {
 pub(super) fn auth_domain_service(
     state: &AppState,
 ) -> Result<Arc<DefaultAuthDomainService>, AppError> {
-    state
-        .auth_domain_service
-        .clone()
-        .ok_or_else(|| AppError::Internal(anyhow::anyhow!("Auth domain service not initialized")))
+    Ok(state.auth_domain_service.clone())
 }
 
 pub(super) fn build_cookie(
@@ -139,7 +137,7 @@ pub(crate) async fn issue_session_tokens(
     state: &AppState,
     user_id: uuid::Uuid,
     email: &str,
-    role: &str,
+    role: &UserRole,
 ) -> Result<(String, String), AppError> {
     let snapshot = load_auth_state_snapshot(state, user_id).await?;
     let access_token = state.auth.generate_access_token(

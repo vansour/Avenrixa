@@ -170,8 +170,12 @@ pub async fn bootstrap_installation(
         }
     };
 
+    state
+        .storage_manager
+        .apply_runtime_settings(validated_settings.clone())
+        .await?;
     state.runtime_settings.invalidate_cache().await;
-    let settings = state.runtime_settings.get_runtime_settings().await?;
+    let settings = validated_settings;
     let user_response = crate::models::UserResponse::from(user);
 
     let (access_token, refresh_token) = issue_session_tokens(
@@ -302,6 +306,7 @@ fn public_install_status_config(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::StorageBackendKind;
     use crate::runtime_settings::StorageBackend;
 
     fn sample_runtime_settings() -> RuntimeSettings {
@@ -349,7 +354,7 @@ mod tests {
         let config = public_install_status_config(&sample_runtime_settings(), true, true);
 
         assert_eq!(config.site_name, "Vansour Image");
-        assert_eq!(config.storage_backend, "s3");
+        assert_eq!(config.storage_backend, StorageBackendKind::S3);
         assert!(config.mail_enabled);
         assert!(config.local_storage_path.is_empty());
         assert!(config.mail_smtp_host.is_empty());

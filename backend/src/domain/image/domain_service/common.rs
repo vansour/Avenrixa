@@ -11,35 +11,6 @@ impl<I: ImageRepository> ImageDomainService<I> {
         ))
     }
 
-    pub(super) fn normalize_tags(tags: &[String]) -> Result<Vec<String>, AppError> {
-        let mut seen = HashSet::new();
-        let mut normalized = Vec::new();
-
-        for raw_tag in tags {
-            let tag = raw_tag.trim();
-            if tag.is_empty() {
-                continue;
-            }
-            if tag.chars().count() > MAX_TAG_LENGTH || tag.chars().any(char::is_control) {
-                return Err(AppError::ValidationError("标签格式无效".to_string()));
-            }
-
-            let lowered = tag.to_lowercase();
-            if seen.insert(lowered.clone()) {
-                normalized.push(lowered);
-            }
-        }
-
-        if normalized.len() > MAX_TAGS_PER_IMAGE {
-            return Err(AppError::ValidationError(format!(
-                "标签数量不能超过 {}",
-                MAX_TAGS_PER_IMAGE
-            )));
-        }
-
-        Ok(normalized)
-    }
-
     pub fn new(deps: ImageDomainServiceDependencies, image_repository: I) -> Self {
         Self {
             database: deps.database,

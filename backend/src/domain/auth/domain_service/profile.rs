@@ -25,7 +25,7 @@ impl<R: AuthRepository> AuthDomainService<R> {
         }
 
         if let Some(new_password) = req.new_password {
-            if user.role.eq_ignore_ascii_case("admin") && new_password.len() < 12 {
+            if user.role.is_admin() && new_password.len() < 12 {
                 return Err(AppError::ValidationError(
                     "管理员密码至少需要 12 个字符".to_string(),
                 ));

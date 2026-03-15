@@ -20,9 +20,9 @@ pub struct AppState {
     pub auth_state_repository: DatabaseAuthStateRepository,
     pub config: Config,
     pub auth: AuthService,
-    pub auth_domain_service: Option<Arc<DefaultAuthDomainService>>,
-    pub image_domain_service: Option<Arc<DefaultImageDomainService>>,
-    pub admin_domain_service: Option<Arc<AdminDomainService>>,
+    pub auth_domain_service: Arc<DefaultAuthDomainService>,
+    pub image_domain_service: Arc<DefaultImageDomainService>,
+    pub admin_domain_service: Arc<AdminDomainService>,
     pub runtime_settings: Arc<RuntimeSettingsService>,
     pub storage_manager: Arc<StorageManager>,
     pub started_at: Instant,
@@ -35,10 +35,6 @@ impl AppState {
 
     pub fn postgres_pool(&self) -> anyhow::Result<&sqlx::PgPool> {
         self.database.postgres()
-    }
-
-    pub fn postgres_pool_owned(&self) -> anyhow::Result<sqlx::PgPool> {
-        Ok(self.postgres_pool()?.clone())
     }
 
     pub async fn invalidate_user_image_cache(&self, user_id: Uuid) -> Result<(), anyhow::Error> {

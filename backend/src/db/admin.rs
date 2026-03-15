@@ -1,5 +1,5 @@
 use crate::auth::AuthService;
-use crate::models::User;
+use crate::models::{User, UserRole};
 use chrono::Utc;
 use lettre::Address;
 use sqlx::{MySql, Postgres, Sqlite, Transaction};
@@ -201,7 +201,7 @@ pub async fn create_admin_account_mysql_tx(
         email: email.to_string(),
         email_verified_at: Some(verified_at),
         password_hash,
-        role: "admin".to_string(),
+        role: UserRole::Admin,
         created_at,
     })
 }
@@ -232,7 +232,7 @@ pub async fn create_admin_account_sqlite_tx(
         email: email.to_string(),
         email_verified_at: Some(verified_at),
         password_hash,
-        role: "admin".to_string(),
+        role: UserRole::Admin,
         created_at,
     })
 }

@@ -117,7 +117,7 @@ COMPOSE_VARIANT=mysql CACHE_MODE=none ./scripts/compose-smoke.sh
 - 检查 Compose 是否已预设 MySQL / MariaDB 数据库连接；如未预设则自动写入数据库引导兜底配置
 - 进入安装向导
 - 管理员创建与登录校验
-- 图片上传、软删除、恢复、永久删除
+- 图片上传、永久删除
 - MySQL 备份创建、下载
 - MySQL 恢复预检会明确返回“仅运维脚本恢复”
 - 后台列表与恢复语义字段会标记这类备份不支持页面恢复
@@ -282,7 +282,7 @@ MYSQL_BACKUP_MODE=logical ./scripts/mysql-ops-backup.sh
 - 未预设环境变量时的数据库引导兜底流程
 - 安装向导
 - 登录鉴权
-- 图片上传 / 软删 / 恢复 / 永久删除
+- 图片上传 / 永久删除
 - 后台创建、下载、删除 MySQL 备份
 - 后台页面把 MySQL 备份明确标记为“仅运维脚本恢复”
 - `scripts/compose-smoke.sh` 中的 MySQL 8.4 / MariaDB 12 主链路校验

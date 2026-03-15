@@ -2,6 +2,48 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub enum UserRole {
+    Admin,
+    User,
+    Unknown,
+}
+
+impl UserRole {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Admin => "admin",
+            Self::User => "user",
+            Self::Unknown => "unknown",
+        }
+    }
+
+    pub fn parse(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "admin" => Self::Admin,
+            "user" => Self::User,
+            _ => Self::Unknown,
+        }
+    }
+
+    pub fn is_admin(self) -> bool {
+        matches!(self, Self::Admin)
+    }
+}
+
+impl From<String> for UserRole {
+    fn from(value: String) -> Self {
+        Self::parse(&value)
+    }
+}
+
+impl From<UserRole> for String {
+    fn from(value: UserRole) -> Self {
+        value.as_str().to_string()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct User {
     pub id: Uuid,
@@ -9,7 +51,8 @@ pub struct User {
     #[sqlx(default)]
     pub email_verified_at: Option<DateTime<Utc>>,
     pub password_hash: String,
-    pub role: String,
+    #[sqlx(try_from = "String")]
+    pub role: UserRole,
     pub created_at: DateTime<Utc>,
 }
 
@@ -52,7 +95,7 @@ pub struct UserResponse {
     #[serde(skip_serializing)]
     pub id: Uuid,
     pub email: String,
-    pub role: String,
+    pub role: UserRole,
     pub created_at: DateTime<Utc>,
 }
 
@@ -77,7 +120,8 @@ impl axum::response::IntoResponse for UserResponse {
 pub struct AdminUserSummary {
     pub id: Uuid,
     pub email: String,
-    pub role: String,
+    #[sqlx(try_from = "String")]
+    pub role: UserRole,
     pub created_at: DateTime<Utc>,
 }
 
@@ -94,5 +138,29 @@ impl From<User> for AdminUserSummary {
 
 #[derive(Debug, Deserialize)]
 pub struct UserUpdateRequest {
-    pub role: Option<String>,
+    pub role: Option<UserRole>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::UserRole;
+
+    #[test]
+    fn user_role_parses_known_values_case_insensitively() {
+        assert_eq!(UserRole::parse("admin"), UserRole::Admin);
+        assert_eq!(UserRole::parse("USER"), UserRole::User);
+    }
+
+    #[test]
+    fn user_role_falls_back_to_unknown() {
+        assert_eq!(UserRole::parse("refresh"), UserRole::Unknown);
+        assert_eq!(UserRole::parse("moderator"), UserRole::Unknown);
+    }
+
+    #[test]
+    fn user_role_reports_admin_state() {
+        assert!(UserRole::Admin.is_admin());
+        assert!(!UserRole::User.is_admin());
+        assert!(!UserRole::Unknown.is_admin());
+    }
 }

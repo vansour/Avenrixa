@@ -7,14 +7,12 @@ use uuid::Uuid;
 
 use super::AdminDomainService;
 use crate::audit::log_audit_db;
-use crate::backup_manifest::{capture_backup_manifest, write_backup_manifest};
+use crate::backup_manifest::{backup_directory, capture_backup_manifest, write_backup_manifest};
 use crate::config::{DatabaseKind, normalize_mysql_compatible_url};
 use crate::db::DatabasePool;
 use crate::error::AppError;
 use crate::models::{BackupFileSummary, BackupResponse, BackupSemantics};
 use crate::runtime_settings::StorageSettingsSnapshot;
-
-const BACKUP_DIR: &str = "/data/backup";
 
 struct MySqlDumpTarget {
     host: String,
@@ -46,11 +44,12 @@ fn spawn_backup_audit(
 
 impl AdminDomainService {
     pub async fn list_backups(&self) -> Result<Vec<BackupFileSummary>, AppError> {
-        if !tokio::fs::try_exists(BACKUP_DIR).await.unwrap_or(false) {
+        let backup_dir = backup_directory();
+        if !tokio::fs::try_exists(&backup_dir).await.unwrap_or(false) {
             return Ok(Vec::new());
         }
 
-        let mut directory = tokio::fs::read_dir(BACKUP_DIR).await?;
+        let mut directory = tokio::fs::read_dir(&backup_dir).await?;
         let mut backups = Vec::new();
 
         while let Some(entry) = directory.next_entry().await? {
@@ -97,7 +96,7 @@ impl AdminDomainService {
         admin_user_id: Uuid,
         admin_email: &str,
     ) -> Result<BackupResponse, AppError> {
-        tokio::fs::create_dir_all(BACKUP_DIR).await?;
+        tokio::fs::create_dir_all(backup_directory()).await?;
         let storage_settings = self.storage_manager.active_settings().storage_settings();
 
         match &self.database {
@@ -787,7 +786,7 @@ fn backup_path(filename: &str) -> Result<PathBuf, AppError> {
         return Err(AppError::ValidationError("备份文件名无效".to_string()));
     }
 
-    Ok(Path::new(BACKUP_DIR).join(filename))
+    Ok(backup_directory().join(filename))
 }
 
 fn file_timestamp(metadata: &std::fs::Metadata) -> Option<DateTime<Utc>> {

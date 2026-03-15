@@ -1,5 +1,5 @@
 use crate::error::AppError;
-use crate::models::UpdateAdminSettingsConfigRequest;
+use crate::models::{StorageBackendKind, UpdateAdminSettingsConfigRequest};
 use lettre::Address;
 use reqwest::Url;
 
@@ -74,7 +74,9 @@ pub(crate) fn validate_and_merge(
     }
     current.site_name = site_name.to_string();
 
-    current.storage_backend = StorageBackend::parse(req.storage_backend.trim())
+    current.storage_backend = req
+        .storage_backend
+        .to_runtime()
         .ok_or_else(|| AppError::ValidationError("存储后端必须是 local 或 s3".to_string()))?;
 
     let local_path = req.local_storage_path.trim();
@@ -191,7 +193,7 @@ pub fn validate_raw_setting_update(
 ) -> Result<RuntimeSettings, AppError> {
     let mut req = UpdateAdminSettingsConfigRequest {
         site_name: current.site_name.clone(),
-        storage_backend: current.storage_backend.as_str().to_string(),
+        storage_backend: StorageBackendKind::from_runtime(current.storage_backend),
         local_storage_path: current.local_storage_path.clone(),
         mail_enabled: current.mail_enabled,
         mail_smtp_host: current.mail_smtp_host.clone(),
@@ -215,7 +217,7 @@ pub fn validate_raw_setting_update(
             req.site_name = value.to_string();
         }
         super::model::SETTING_STORAGE_BACKEND => {
-            req.storage_backend = value.trim().to_string();
+            req.storage_backend = StorageBackendKind::parse(value.trim());
         }
         super::model::SETTING_LOCAL_STORAGE_PATH => {
             req.local_storage_path = value.to_string();
@@ -320,7 +322,7 @@ mod tests {
     fn local_request() -> UpdateAdminSettingsConfigRequest {
         UpdateAdminSettingsConfigRequest {
             site_name: "New Site".to_string(),
-            storage_backend: "local".to_string(),
+            storage_backend: StorageBackendKind::Local,
             local_storage_path: "/srv/images".to_string(),
             mail_enabled: false,
             mail_smtp_host: "smtp.example.com".to_string(),
@@ -343,7 +345,7 @@ mod tests {
     #[test]
     fn validate_and_merge_rejects_invalid_storage_backend() {
         let mut req = local_request();
-        req.storage_backend = "ftp".to_string();
+        req.storage_backend = StorageBackendKind::Unknown;
 
         assert!(matches!(
             validate_and_merge(base_runtime_settings(), req),
@@ -355,7 +357,7 @@ mod tests {
     #[test]
     fn validate_and_merge_rejects_incomplete_s3_settings() {
         let mut req = local_request();
-        req.storage_backend = "s3".to_string();
+        req.storage_backend = StorageBackendKind::S3;
         req.s3_endpoint = Some("https://s3.example.com".to_string());
         req.s3_region = Some("us-east-1".to_string());
         req.s3_bucket = Some("images".to_string());
@@ -371,7 +373,7 @@ mod tests {
     #[test]
     fn validate_and_merge_normalizes_s3_prefix() {
         let mut req = local_request();
-        req.storage_backend = "s3".to_string();
+        req.storage_backend = StorageBackendKind::S3;
         req.s3_endpoint = Some("https://s3.example.com".to_string());
         req.s3_region = Some("us-east-1".to_string());
         req.s3_bucket = Some("images".to_string());

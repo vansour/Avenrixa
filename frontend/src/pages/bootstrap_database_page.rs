@@ -1,5 +1,7 @@
 use crate::app_context::{use_install_service, use_toast_store};
-use crate::types::api::{BootstrapStatusResponse, UpdateBootstrapDatabaseConfigRequest};
+use crate::types::api::{
+    BootstrapDatabaseKind, BootstrapStatusResponse, UpdateBootstrapDatabaseConfigRequest,
+};
 use dioxus::prelude::*;
 
 #[component]
@@ -9,22 +11,19 @@ pub fn BootstrapDatabasePage(
 ) -> Element {
     let install_service = use_install_service();
     let toast_store = use_toast_store();
-    let initial_database_kind = if status.database_kind.eq_ignore_ascii_case("sqlite") {
-        "sqlite"
-    } else if status.database_kind.eq_ignore_ascii_case("mysql") {
-        "mysql"
-    } else {
-        "postgresql"
+    let initial_database_kind = match status.database_kind {
+        BootstrapDatabaseKind::Unknown => BootstrapDatabaseKind::Postgres,
+        kind => kind,
     };
 
-    let mut database_kind = use_signal(|| initial_database_kind.to_string());
+    let mut database_kind = use_signal(|| initial_database_kind);
     let mut database_url = use_signal(String::new);
     let mut is_saving = use_signal(|| false);
     let mut error_message = use_signal(String::new);
     let mut success_message = use_signal(String::new);
     let selected_database_kind = database_kind();
-    let is_sqlite = selected_database_kind == "sqlite";
-    let is_mysql = selected_database_kind == "mysql";
+    let is_sqlite = selected_database_kind == BootstrapDatabaseKind::Sqlite;
+    let is_mysql = selected_database_kind == BootstrapDatabaseKind::MySql;
     let database_target_label = if is_sqlite {
         "数据库文件"
     } else {
@@ -60,12 +59,12 @@ pub fn BootstrapDatabasePage(
         let current_database_kind = database_kind();
         let url = database_url().trim().to_string();
         if url.is_empty() {
-            let message = if current_database_kind == "sqlite" {
-                "请填写 SQLite 数据库文件路径或 sqlite:// 连接".to_string()
-            } else if current_database_kind == "mysql" {
-                "请填写 MySQL / MariaDB 数据库连接 URL".to_string()
-            } else {
-                "请填写 PostgreSQL 数据库连接 URL".to_string()
+            let message = match current_database_kind {
+                BootstrapDatabaseKind::Sqlite => {
+                    "请填写 SQLite 数据库文件路径或 sqlite:// 连接".to_string()
+                }
+                BootstrapDatabaseKind::MySql => "请填写 MySQL / MariaDB 数据库连接 URL".to_string(),
+                _ => "请填写 PostgreSQL 数据库连接 URL".to_string(),
             };
             error_message.set(message.clone());
             toast_store.show_error(message);
@@ -82,18 +81,20 @@ pub fn BootstrapDatabasePage(
 
             match install_service
                 .update_bootstrap_database_config(UpdateBootstrapDatabaseConfigRequest {
-                    database_kind: current_database_kind.clone(),
+                    database_kind: current_database_kind,
                     database_url: url,
                 })
                 .await
             {
                 Ok(response) => {
-                    let message = if current_database_kind == "sqlite" {
-                        "SQLite 配置已保存，请重启服务后继续安装".to_string()
-                    } else if current_database_kind == "mysql" {
-                        "MySQL / MariaDB 配置已保存，请重启服务后继续安装".to_string()
-                    } else {
-                        "数据库配置已保存，请重启服务后继续安装".to_string()
+                    let message = match current_database_kind {
+                        BootstrapDatabaseKind::Sqlite => {
+                            "SQLite 配置已保存，请重启服务后继续安装".to_string()
+                        }
+                        BootstrapDatabaseKind::MySql => {
+                            "MySQL / MariaDB 配置已保存，请重启服务后继续安装".to_string()
+                        }
+                        _ => "数据库配置已保存，请重启服务后继续安装".to_string(),
                     };
                     success_message.set(message.clone());
                     toast_store.show_success(message);
@@ -136,8 +137,14 @@ pub fn BootstrapDatabasePage(
                     label { class: "settings-field",
                         span { "数据库类型" }
                         select {
-                            value: "{selected_database_kind}",
-                            onchange: move |event| database_kind.set(event.value()),
+                            value: "{selected_database_kind.as_str()}",
+                            onchange: move |event| {
+                                let next = BootstrapDatabaseKind::parse(&event.value());
+                                database_kind.set(match next {
+                                    BootstrapDatabaseKind::Unknown => BootstrapDatabaseKind::Postgres,
+                                    kind => kind,
+                                });
+                            },
                             disabled: is_saving(),
                             option { value: "postgresql", "PostgreSQL" }
                             option { value: "mysql", "MySQL / MariaDB" }

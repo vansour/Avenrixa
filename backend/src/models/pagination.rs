@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 pub struct PaginationParams {
     pub page: Option<i32>,
     pub page_size: Option<i32>,
-    pub tag: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

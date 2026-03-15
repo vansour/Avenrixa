@@ -113,7 +113,6 @@ fn protected_routes() -> Router<AppState> {
         .route("/images", routing::get(images::get_images))
         .route("/images", routing::delete(images::delete_images))
         .route("/images/{image_key}", routing::get(images::get_image))
-        .route("/images/{image_key}", routing::put(images::update_image))
         .route(
             "/images/{image_key}/expiry",
             routing::put(images::set_expiry),

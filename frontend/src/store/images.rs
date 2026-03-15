@@ -194,6 +194,7 @@ impl Default for ImageStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::models::ImageStatus;
     use chrono::Utc;
     use dioxus::prelude::{ScopeId, VirtualDom, rsx};
 
@@ -217,9 +218,8 @@ mod tests {
             size: 1024,
             format: "png".to_string(),
             views: 0,
-            status: "active".to_string(),
+            status: ImageStatus::Active,
             expires_at: None,
-            deleted_at: None,
             created_at: Utc::now(),
         }
     }

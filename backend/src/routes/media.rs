@@ -37,7 +37,6 @@ async fn find_active_filename_by_hash(
                  FROM images
                  WHERE hash = $1
                    AND user_id = $2
-                   AND deleted_at IS NULL
                    AND status = 'active'
                  LIMIT 1",
             )
@@ -52,7 +51,6 @@ async fn find_active_filename_by_hash(
                  FROM images
                  WHERE hash = ?
                    AND user_id = ?
-                   AND deleted_at IS NULL
                    AND status = 'active'
                  LIMIT 1",
             )
@@ -67,7 +65,6 @@ async fn find_active_filename_by_hash(
                  FROM images
                  WHERE hash = ?1
                    AND user_id = ?2
-                   AND deleted_at IS NULL
                    AND status = 'active'
                  LIMIT 1",
             )
@@ -91,7 +88,6 @@ async fn active_image_exists_by_filename(
                  FROM images
                  WHERE filename = $1
                    AND user_id = $2
-                   AND deleted_at IS NULL
                    AND status = 'active'
                  LIMIT 1",
             )
@@ -106,7 +102,6 @@ async fn active_image_exists_by_filename(
                  FROM images
                  WHERE filename = ?
                    AND user_id = ?
-                   AND deleted_at IS NULL
                    AND status = 'active'
                  LIMIT 1",
             )
@@ -121,7 +116,6 @@ async fn active_image_exists_by_filename(
                  FROM images
                  WHERE filename = ?1
                    AND user_id = ?2
-                   AND deleted_at IS NULL
                    AND status = 'active'
                  LIMIT 1",
             )

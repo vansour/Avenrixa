@@ -65,14 +65,12 @@ impl BootstrapConfigStore {
         req: &UpdateBootstrapDatabaseConfigRequest,
         connection_test_max_connections: u32,
     ) -> anyhow::Result<UpdateBootstrapDatabaseConfigResponse> {
-        let database_kind = DatabaseKind::parse(&req.database_kind)
-            .map_err(|error| anyhow::anyhow!(error.to_string()))?;
-        let database_url = normalize_database_target(database_kind, &req.database_url)
+        let database_url = normalize_database_target(req.database_kind, &req.database_url)
             .map_err(|error| anyhow::anyhow!(error.to_string()))?;
 
         let max_connections = connection_test_max_connections.max(1);
 
-        match database_kind {
+        match req.database_kind {
             DatabaseKind::Postgres => {
                 test_postgres_connection(&database_url, max_connections).await?
             }
@@ -81,7 +79,7 @@ impl BootstrapConfigStore {
         }
 
         let payload = BootstrapConfigFile {
-            database_kind,
+            database_kind: req.database_kind,
             database_url,
         };
 
@@ -92,7 +90,7 @@ impl BootstrapConfigStore {
         tokio::fs::write(self.path(), serialized).await?;
 
         Ok(UpdateBootstrapDatabaseConfigResponse {
-            database_kind: payload.database_kind.as_str().to_string(),
+            database_kind: payload.database_kind,
             database_configured: true,
             database_url_masked: mask_database_url(payload.database_kind, &payload.database_url),
             restart_required: true,
@@ -123,8 +121,8 @@ impl BootstrapConfigStore {
         BootstrapStatusResponse {
             mode: "bootstrap".to_string(),
             database_kind: file
-                .map(|file| file.database_kind.as_str().to_string())
-                .unwrap_or_else(|| config.database.kind.as_str().to_string()),
+                .map(|file| file.database_kind)
+                .unwrap_or(config.database.kind),
             database_configured: file.is_some(),
             database_url_masked: file
                 .map(|file| mask_database_url(file.database_kind, &file.database_url)),
@@ -138,7 +136,7 @@ impl BootstrapConfigStore {
     pub fn runtime_status(&self, config: &Config) -> BootstrapStatusResponse {
         BootstrapStatusResponse {
             mode: "runtime".to_string(),
-            database_kind: config.database.kind.as_str().to_string(),
+            database_kind: config.database.kind,
             database_configured: !config.database.url.trim().is_empty(),
             database_url_masked: (!config.database.url.trim().is_empty())
                 .then(|| mask_database_url(config.database.kind, &config.database.url)),
@@ -301,7 +299,7 @@ mod tests {
         let status = store.bootstrap_status(&config, Some(&file), None);
 
         assert_eq!(status.mode, "bootstrap");
-        assert_eq!(status.database_kind, "sqlite");
+        assert_eq!(status.database_kind, DatabaseKind::Sqlite);
         assert_eq!(status.database_url_masked.as_deref(), Some("******"));
         assert!(!status.cache_configured);
         assert_eq!(status.cache_url_masked, None);
@@ -320,7 +318,7 @@ mod tests {
         let status = store.runtime_status(&config);
 
         assert_eq!(status.mode, "runtime");
-        assert_eq!(status.database_kind, "mysql");
+        assert_eq!(status.database_kind, DatabaseKind::MySql);
         assert_eq!(
             status.database_url_masked.as_deref(),
             Some("mysql://******")

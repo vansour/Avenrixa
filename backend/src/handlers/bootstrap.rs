@@ -4,8 +4,8 @@ use crate::bootstrap::BootstrapAppState;
 use crate::db::AppState;
 use crate::error::AppError;
 use crate::models::{
-    BootstrapStatusResponse, ComponentStatus, HealthStatus, UpdateBootstrapDatabaseConfigRequest,
-    UpdateBootstrapDatabaseConfigResponse,
+    BootstrapStatusResponse, ComponentStatus, HealthState, HealthStatus,
+    UpdateBootstrapDatabaseConfigRequest, UpdateBootstrapDatabaseConfigResponse,
 };
 
 pub async fn get_bootstrap_status(
@@ -37,11 +37,11 @@ pub async fn bootstrap_health_check(
     let file = state.store.load().await.map_err(AppError::Internal)?;
     let configured_database_kind = file
         .as_ref()
-        .map(|file| file.database_kind.as_str())
-        .unwrap_or_else(|| state.config.database.kind.as_str());
+        .map(|file| file.database_kind)
+        .unwrap_or(state.config.database.kind);
     let database_message = match (&file, &state.runtime_error) {
         (_, Some(error)) => Some(format!("数据库连接失败: {}", error)),
-        (Some(_), None) if configured_database_kind == "sqlite" => {
+        (Some(_), None) if configured_database_kind == crate::config::DatabaseKind::Sqlite => {
             Some("SQLite 配置已保存，重启服务后会自动执行迁移并进入安装向导".to_string())
         }
         (Some(_), None) => Some("数据库配置已保存，重启服务后继续安装".to_string()),
@@ -49,14 +49,14 @@ pub async fn bootstrap_health_check(
     };
 
     Ok(Json(HealthStatus {
-        status: "bootstrapping".to_string(),
+        status: HealthState::Bootstrapping,
         timestamp: chrono::Utc::now(),
         database: ComponentStatus {
-            status: "unhealthy".to_string(),
+            status: HealthState::Unhealthy,
             message: database_message,
         },
         cache: ComponentStatus {
-            status: "disabled".to_string(),
+            status: HealthState::Disabled,
             message: Some("Bootstrap 模式未启用外部缓存".to_string()),
         },
         storage: ComponentStatus::healthy(),

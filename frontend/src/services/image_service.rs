@@ -1,8 +1,6 @@
 use crate::services::api_client::ApiClient;
 use crate::store::images::{ImageCollectionKind, ImageStore};
-use crate::types::api::{
-    DeleteRequest, Paginated, PaginationParams, SetExpiryRequest, UpdateImageRequest,
-};
+use crate::types::api::{DeleteRequest, Paginated, PaginationParams, SetExpiryRequest};
 use crate::types::errors::Result;
 use crate::types::models::ImageItem;
 
@@ -63,12 +61,6 @@ impl ImageService {
         self.api_client.get_json(&url).await
     }
 
-    /// 更新图片标签
-    pub async fn update_image(&self, image_key: &str, req: UpdateImageRequest) -> Result<()> {
-        let url = format!("/api/v1/images/{}", image_key);
-        self.api_client.put_json_no_response(&url, &req).await
-    }
-
     /// 设置过期时间
     pub async fn set_expiry(
         &self,
@@ -97,17 +89,8 @@ impl ImageService {
         if let Some(page_size) = params.page_size {
             query_parts.push(format!("page_size={}", page_size));
         }
-        push_query_param(&mut query_parts, "tag", params.tag.as_deref());
-
         query_parts.join("&")
     }
-}
-
-fn push_query_param(parts: &mut Vec<String>, key: &str, value: Option<&str>) {
-    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
-        return;
-    };
-    parts.push(format!("{}={}", key, urlencoding::encode(value)));
 }
 
 #[cfg(test)]
@@ -115,30 +98,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn build_query_params_encodes_filter_options() {
+    fn build_query_params_keeps_declared_pagination_order() {
         let params = PaginationParams {
             page: Some(2),
             page_size: Some(40),
-            tag: Some("cover art".to_string()),
         };
 
         let query = ImageService::build_query_params(&params);
 
-        assert!(query.contains("page=2"));
-        assert!(query.contains("page_size=40"));
-        assert!(query.contains("tag=cover%20art"));
+        assert_eq!(query, "page=2&page_size=40");
     }
 
     #[test]
-    fn build_query_params_omits_blank_values() {
+    fn build_query_params_omits_absent_values() {
         let params = PaginationParams {
-            page: Some(1),
+            page: None,
             page_size: Some(20),
-            tag: Some("   ".to_string()),
         };
 
         let query = ImageService::build_query_params(&params);
 
-        assert_eq!(query, "page=1&page_size=20");
+        assert_eq!(query, "page_size=20");
     }
 }

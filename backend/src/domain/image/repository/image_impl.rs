@@ -18,9 +18,8 @@ impl ImageRepository for PostgresImageRepository {
         user_id: Uuid,
         limit: i32,
         offset: i32,
-        tag: Option<&str>,
     ) -> Result<Vec<Image>, sqlx::Error> {
-        self.find_images_by_user_paginated_impl(user_id, limit, offset, tag)
+        self.find_images_by_user_paginated_impl(user_id, limit, offset)
             .await
     }
 
@@ -92,9 +91,8 @@ impl ImageRepository for MySqlImageRepository {
         user_id: Uuid,
         limit: i32,
         offset: i32,
-        tag: Option<&str>,
     ) -> Result<Vec<Image>, sqlx::Error> {
-        self.find_images_by_user_paginated_impl(user_id, limit, offset, tag)
+        self.find_images_by_user_paginated_impl(user_id, limit, offset)
             .await
     }
 
@@ -166,9 +164,8 @@ impl ImageRepository for SqliteImageRepository {
         user_id: Uuid,
         limit: i32,
         offset: i32,
-        tag: Option<&str>,
     ) -> Result<Vec<Image>, sqlx::Error> {
-        self.find_images_by_user_paginated_impl(user_id, limit, offset, tag)
+        self.find_images_by_user_paginated_impl(user_id, limit, offset)
             .await
     }
 
@@ -244,19 +241,18 @@ impl ImageRepository for DatabaseImageRepository {
         user_id: Uuid,
         limit: i32,
         offset: i32,
-        tag: Option<&str>,
     ) -> Result<Vec<Image>, sqlx::Error> {
         match self {
             Self::Postgres(repo) => {
-                repo.find_images_by_user_paginated(user_id, limit, offset, tag)
+                repo.find_images_by_user_paginated(user_id, limit, offset)
                     .await
             }
             Self::MySql(repo) => {
-                repo.find_images_by_user_paginated(user_id, limit, offset, tag)
+                repo.find_images_by_user_paginated(user_id, limit, offset)
                     .await
             }
             Self::Sqlite(repo) => {
-                repo.find_images_by_user_paginated(user_id, limit, offset, tag)
+                repo.find_images_by_user_paginated(user_id, limit, offset)
                     .await
             }
         }

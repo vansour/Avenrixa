@@ -2,7 +2,8 @@ use crate::services::api_client::ApiClient;
 use crate::types::api::{
     AdminUserSummary, AuditLogResponse, BackupFileSummary, BackupResponse,
     BackupRestorePrecheckResponse, BackupRestoreScheduleResponse, BackupRestoreStatusResponse,
-    HealthStatus, PaginationParams, Setting, SystemStats, UpdateSettingRequest, UserUpdateRequest,
+    HealthStatus, PaginationParams, Setting, SystemStats, UpdateSettingRequest, UserRole,
+    UserUpdateRequest,
 };
 use crate::types::errors::Result;
 
@@ -29,7 +30,7 @@ impl AdminService {
         self.api_client.get_json("/api/v1/users").await
     }
 
-    pub async fn update_user_role(&self, user_id: &str, role: String) -> Result<()> {
+    pub async fn update_user_role(&self, user_id: &str, role: UserRole) -> Result<()> {
         let url = format!("/api/v1/users/{}", urlencoding::encode(user_id));
         self.api_client
             .put_json_no_response(&url, &UserUpdateRequest { role: Some(role) })
@@ -138,7 +139,6 @@ mod tests {
         let params = PaginationParams {
             page: Some(3),
             page_size: Some(50),
-            tag: None,
         };
 
         assert_eq!(
@@ -152,7 +152,6 @@ mod tests {
         let params = PaginationParams {
             page: None,
             page_size: Some(25),
-            tag: Some("ignored".to_string()),
         };
 
         assert_eq!(AdminService::build_query_params(&params), "page_size=25");

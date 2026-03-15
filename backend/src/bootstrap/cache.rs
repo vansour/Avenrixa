@@ -72,7 +72,10 @@ mod tests {
         let connections = connect_cache(&config).await;
 
         assert!(connections.app.is_none());
-        assert_eq!(connections.status.status, "disabled");
+        assert_eq!(
+            connections.status.status,
+            crate::models::HealthState::Disabled
+        );
         assert!(
             connections
                 .status
@@ -90,7 +93,10 @@ mod tests {
         let connections = connect_cache(&config).await;
 
         assert!(connections.app.is_none());
-        assert_eq!(connections.status.status, "degraded");
+        assert_eq!(
+            connections.status.status,
+            crate::models::HealthState::Degraded
+        );
         assert!(
             connections
                 .status

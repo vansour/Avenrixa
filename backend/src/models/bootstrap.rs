@@ -1,9 +1,10 @@
+use crate::config::DatabaseKind;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct BootstrapStatusResponse {
     pub mode: String,
-    pub database_kind: String,
+    pub database_kind: DatabaseKind,
     pub database_configured: bool,
     pub database_url_masked: Option<String>,
     pub cache_configured: bool,
@@ -15,13 +16,13 @@ pub struct BootstrapStatusResponse {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct UpdateBootstrapDatabaseConfigRequest {
-    pub database_kind: String,
+    pub database_kind: DatabaseKind,
     pub database_url: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct UpdateBootstrapDatabaseConfigResponse {
-    pub database_kind: String,
+    pub database_kind: DatabaseKind,
     pub database_configured: bool,
     pub database_url_masked: String,
     pub restart_required: bool,

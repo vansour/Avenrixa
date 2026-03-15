@@ -5,15 +5,15 @@ use uuid::Uuid;
 use super::AdminDomainService;
 use crate::db::DatabasePool;
 use crate::error::AppError;
-use crate::models::{AdminUserSummary, AuditLog, AuditLogResponse, SystemStats};
+use crate::models::{AdminUserSummary, AuditLog, AuditLogResponse, SystemStats, UserRole};
 
 const LAST_ADMIN_ROLE_CHANGE_ERROR: &str = "系统至少需要保留一个管理员账户";
 
 #[derive(Debug)]
 pub struct UserRoleUpdateResult {
     pub email: String,
-    pub previous_role: String,
-    pub new_role: String,
+    pub previous_role: UserRole,
+    pub new_role: UserRole,
     pub changed: bool,
 }
 
@@ -43,9 +43,9 @@ impl AdminDomainService {
     pub async fn update_user_role(
         &self,
         user_id: Uuid,
-        role: &str,
+        role: UserRole,
     ) -> Result<UserRoleUpdateResult, AppError> {
-        if role != "admin" && role != "user" {
+        if !matches!(role, UserRole::Admin | UserRole::User) {
             return Err(AppError::ValidationError(
                 "角色必须是 admin 或 user".to_string(),
             ));
@@ -63,17 +63,17 @@ impl AdminDomainService {
                 .ok_or(AppError::UserNotFound)?;
 
                 let (email, previous_role) = current;
+                let previous_role = UserRole::parse(&previous_role);
                 if previous_role == role {
                     return Ok(UserRoleUpdateResult {
                         email,
-                        previous_role: previous_role.clone(),
-                        new_role: role.to_string(),
+                        previous_role,
+                        new_role: role,
                         changed: false,
                     });
                 }
 
-                if previous_role.eq_ignore_ascii_case("admin") && role.eq_ignore_ascii_case("user")
-                {
+                if previous_role.is_admin() && role == UserRole::User {
                     let admin_ids = sqlx::query_scalar::<_, Uuid>(
                         "SELECT id FROM users WHERE role = 'admin' FOR UPDATE",
                     )
@@ -92,7 +92,7 @@ impl AdminDomainService {
                          token_version = token_version + 1
                      WHERE id = $2",
                 )
-                .bind(role)
+                .bind(role.as_str())
                 .bind(user_id)
                 .execute(&mut *tx)
                 .await?;
@@ -101,7 +101,7 @@ impl AdminDomainService {
                 UserRoleUpdateResult {
                     email,
                     previous_role,
-                    new_role: role.to_string(),
+                    new_role: role,
                     changed: true,
                 }
             }
@@ -116,17 +116,17 @@ impl AdminDomainService {
                 .ok_or(AppError::UserNotFound)?;
 
                 let (email, previous_role) = current;
+                let previous_role = UserRole::parse(&previous_role);
                 if previous_role == role {
                     return Ok(UserRoleUpdateResult {
                         email,
-                        previous_role: previous_role.clone(),
-                        new_role: role.to_string(),
+                        previous_role,
+                        new_role: role,
                         changed: false,
                     });
                 }
 
-                if previous_role.eq_ignore_ascii_case("admin") && role.eq_ignore_ascii_case("user")
-                {
+                if previous_role.is_admin() && role == UserRole::User {
                     let admin_ids = sqlx::query_scalar::<_, Uuid>(
                         "SELECT id FROM users WHERE role = 'admin' FOR UPDATE",
                     )
@@ -145,7 +145,7 @@ impl AdminDomainService {
                          token_version = token_version + 1
                      WHERE id = ?",
                 )
-                .bind(role)
+                .bind(role.as_str())
                 .bind(user_id)
                 .execute(&mut *tx)
                 .await?;
@@ -154,7 +154,7 @@ impl AdminDomainService {
                 UserRoleUpdateResult {
                     email,
                     previous_role,
-                    new_role: role.to_string(),
+                    new_role: role,
                     changed: true,
                 }
             }
@@ -169,17 +169,17 @@ impl AdminDomainService {
                 .ok_or(AppError::UserNotFound)?;
 
                 let (email, previous_role) = current;
+                let previous_role = UserRole::parse(&previous_role);
                 if previous_role == role {
                     return Ok(UserRoleUpdateResult {
                         email,
-                        previous_role: previous_role.clone(),
-                        new_role: role.to_string(),
+                        previous_role,
+                        new_role: role,
                         changed: false,
                     });
                 }
 
-                if previous_role.eq_ignore_ascii_case("admin") && role.eq_ignore_ascii_case("user")
-                {
+                if previous_role.is_admin() && role == UserRole::User {
                     let admin_count = sqlx::query_scalar::<_, i64>(
                         "SELECT COUNT(*) FROM users WHERE role = 'admin'",
                     )
@@ -198,7 +198,7 @@ impl AdminDomainService {
                          token_version = token_version + 1
                      WHERE id = ?2",
                 )
-                .bind(role)
+                .bind(role.as_str())
                 .bind(user_id)
                 .execute(&mut *tx)
                 .await?;
@@ -207,14 +207,14 @@ impl AdminDomainService {
                 UserRoleUpdateResult {
                     email,
                     previous_role,
-                    new_role: role.to_string(),
+                    new_role: role,
                     changed: true,
                 }
             }
         };
 
         if result.changed {
-            info!("User role updated: {} -> {}", user_id, role);
+            info!("User role updated: {} -> {}", user_id, role.as_str());
         }
         Ok(result)
     }
@@ -300,28 +300,28 @@ impl AdminDomainService {
                     .fetch_one(pool)
                     .await?,
                 total_images: sqlx::query_scalar(
-                    "SELECT COUNT(*) FROM images WHERE deleted_at IS NULL",
+                    "SELECT COUNT(*) FROM images WHERE status = 'active'",
                 )
-                .fetch_one(pool)
-                .await?,
+                    .fetch_one(pool)
+                    .await?,
                 total_storage: sqlx::query_scalar(
-                    "SELECT COALESCE(SUM(size), 0)::BIGINT FROM images WHERE deleted_at IS NULL",
+                    "SELECT COALESCE(SUM(size), 0)::BIGINT FROM images WHERE status = 'active'",
                 )
-                .fetch_one(pool)
-                .await?,
+                    .fetch_one(pool)
+                    .await?,
                 total_views: sqlx::query_scalar(
-                    "SELECT COALESCE(SUM(views), 0)::BIGINT FROM images WHERE deleted_at IS NULL",
+                    "SELECT COALESCE(SUM(views), 0)::BIGINT FROM images WHERE status = 'active'",
                 )
-                .fetch_one(pool)
-                .await?,
+                    .fetch_one(pool)
+                    .await?,
                 images_last_24h: sqlx::query_scalar(
-                    "SELECT COUNT(*) FROM images WHERE created_at > $1 AND deleted_at IS NULL",
+                    "SELECT COUNT(*) FROM images WHERE created_at > $1 AND status = 'active'",
                 )
                 .bind(day_ago)
                 .fetch_one(pool)
                 .await?,
                 images_last_7d: sqlx::query_scalar(
-                    "SELECT COUNT(*) FROM images WHERE created_at > $1 AND deleted_at IS NULL",
+                    "SELECT COUNT(*) FROM images WHERE created_at > $1 AND status = 'active'",
                 )
                 .bind(week_ago)
                 .fetch_one(pool)
@@ -332,28 +332,28 @@ impl AdminDomainService {
                     .fetch_one(pool)
                     .await?,
                 total_images: sqlx::query_scalar(
-                    "SELECT CAST(COUNT(*) AS SIGNED) FROM images WHERE deleted_at IS NULL",
+                    "SELECT CAST(COUNT(*) AS SIGNED) FROM images WHERE status = 'active'",
                 )
-                .fetch_one(pool)
-                .await?,
+                    .fetch_one(pool)
+                    .await?,
                 total_storage: sqlx::query_scalar(
-                    "SELECT CAST(COALESCE(SUM(size), 0) AS SIGNED) FROM images WHERE deleted_at IS NULL",
+                    "SELECT CAST(COALESCE(SUM(size), 0) AS SIGNED) FROM images WHERE status = 'active'",
                 )
                 .fetch_one(pool)
                 .await?,
                 total_views: sqlx::query_scalar(
-                    "SELECT CAST(COALESCE(SUM(views), 0) AS SIGNED) FROM images WHERE deleted_at IS NULL",
+                    "SELECT CAST(COALESCE(SUM(views), 0) AS SIGNED) FROM images WHERE status = 'active'",
                 )
                 .fetch_one(pool)
                 .await?,
                 images_last_24h: sqlx::query_scalar(
-                    "SELECT CAST(COUNT(*) AS SIGNED) FROM images WHERE created_at > ? AND deleted_at IS NULL",
+                    "SELECT CAST(COUNT(*) AS SIGNED) FROM images WHERE created_at > ? AND status = 'active'",
                 )
                 .bind(day_ago)
                 .fetch_one(pool)
                 .await?,
                 images_last_7d: sqlx::query_scalar(
-                    "SELECT CAST(COUNT(*) AS SIGNED) FROM images WHERE created_at > ? AND deleted_at IS NULL",
+                    "SELECT CAST(COUNT(*) AS SIGNED) FROM images WHERE created_at > ? AND status = 'active'",
                 )
                 .bind(week_ago)
                 .fetch_one(pool)
@@ -364,28 +364,28 @@ impl AdminDomainService {
                     .fetch_one(pool)
                     .await?,
                 total_images: sqlx::query_scalar(
-                    "SELECT COUNT(*) FROM images WHERE deleted_at IS NULL",
+                    "SELECT COUNT(*) FROM images WHERE status = 'active'",
                 )
-                .fetch_one(pool)
-                .await?,
+                    .fetch_one(pool)
+                    .await?,
                 total_storage: sqlx::query_scalar(
-                    "SELECT COALESCE(SUM(size), 0) FROM images WHERE deleted_at IS NULL",
+                    "SELECT COALESCE(SUM(size), 0) FROM images WHERE status = 'active'",
                 )
-                .fetch_one(pool)
-                .await?,
+                    .fetch_one(pool)
+                    .await?,
                 total_views: sqlx::query_scalar(
-                    "SELECT COALESCE(SUM(views), 0) FROM images WHERE deleted_at IS NULL",
+                    "SELECT COALESCE(SUM(views), 0) FROM images WHERE status = 'active'",
                 )
-                .fetch_one(pool)
-                .await?,
+                    .fetch_one(pool)
+                    .await?,
                 images_last_24h: sqlx::query_scalar(
-                    "SELECT COUNT(*) FROM images WHERE created_at > ?1 AND deleted_at IS NULL",
+                    "SELECT COUNT(*) FROM images WHERE created_at > ?1 AND status = 'active'",
                 )
                 .bind(day_ago)
                 .fetch_one(pool)
                 .await?,
                 images_last_7d: sqlx::query_scalar(
-                    "SELECT COUNT(*) FROM images WHERE created_at > ?1 AND deleted_at IS NULL",
+                    "SELECT COUNT(*) FROM images WHERE created_at > ?1 AND status = 'active'",
                 )
                 .bind(week_ago)
                 .fetch_one(pool)
@@ -421,7 +421,7 @@ mod tests {
     use super::*;
     use crate::config::{Config, DatabaseKind};
     use crate::db::run_migrations;
-    use crate::models::ComponentStatus;
+    use crate::models::{ComponentStatus, UserRole};
     use crate::runtime_settings::RuntimeSettings;
     use crate::storage_backend::StorageManager;
     use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
@@ -485,7 +485,7 @@ mod tests {
         insert_user(&pool, admin_id, "admin@example.com", "admin").await;
 
         let error = service
-            .update_user_role(admin_id, "user")
+            .update_user_role(admin_id, UserRole::User)
             .await
             .expect_err("demoting the last admin should fail");
 
@@ -504,13 +504,13 @@ mod tests {
         insert_user(&pool, second_admin_id, "second-admin@example.com", "admin").await;
 
         let result = service
-            .update_user_role(admin_id, "user")
+            .update_user_role(admin_id, UserRole::User)
             .await
             .expect("role update should succeed");
 
         assert!(result.changed);
-        assert_eq!(result.previous_role, "admin");
-        assert_eq!(result.new_role, "user");
+        assert_eq!(result.previous_role, UserRole::Admin);
+        assert_eq!(result.new_role, UserRole::User);
 
         let (role, token_version) = sqlx::query_as::<_, (String, i64)>(
             "SELECT role, token_version FROM users WHERE id = ?1",

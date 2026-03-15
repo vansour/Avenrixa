@@ -14,18 +14,18 @@ use tracing::info;
 use uuid::Uuid;
 
 use crate::audit::log_audit_db;
-use crate::backup_manifest::{load_backup_manifest, storage_signature};
+use crate::backup_manifest::{backup_directory, load_backup_manifest, storage_signature};
 use crate::bootstrap::{resolve_sqlite_database_path, sqlite_connect_options};
 use crate::config::{Config, DatabaseKind, normalize_mysql_compatible_url};
 use crate::db::{ADMIN_USER_ID, DatabasePool, INSTALL_STATE_SETTING_KEY};
 use crate::models::{
-    BackupFileSummary, BackupObjectRollbackAnchor, BackupRestorePrecheckResponse,
-    BackupRestoreResult, BackupRestoreScheduleResponse, BackupRestoreStatusResponse,
-    BackupRestoreStorageSummary, BackupSemantics, PendingBackupRestore,
+    BackupDatabaseFamily, BackupFileSummary, BackupObjectRollbackAnchor,
+    BackupObjectRollbackStrategy, BackupRestorePrecheckResponse, BackupRestoreResult,
+    BackupRestoreScheduleResponse, BackupRestoreStatus, BackupRestoreStatusResponse,
+    BackupRestoreStorageSummary, BackupSemantics, PendingBackupRestore, StorageBackendKind,
 };
 use crate::runtime_settings::{RuntimeSettings, StorageSettingsSnapshot, load_from_db};
 
-const BACKUP_DIR: &str = "/data/backup";
 const DEFAULT_PENDING_RESTORE_PATH: &str = "/data/backup/pending_restore.json";
 const DEFAULT_LAST_RESTORE_RESULT_PATH: &str = "/data/backup/last_restore_result.json";
 const REQUIRED_BACKUP_TABLES: [&str; 3] = ["users", "settings", "images"];
@@ -165,7 +165,7 @@ pub async fn precheck_restore(
             match load_backup_manifest(filename).await {
                 Ok(Some(manifest)) => {
                     semantics = manifest.semantics.clone();
-                    if !manifest.database_kind.eq_ignore_ascii_case("mysql") {
+                    if manifest.database_kind != BackupDatabaseFamily::MySql {
                         blockers
                             .push("备份 manifest 的数据库类型不是 MySQL / MariaDB。".to_string());
                     }
@@ -224,11 +224,10 @@ pub async fn precheck_restore(
         filename: backup.filename,
         backup_created_at: backup.created_at,
         backup_size_bytes: backup.size_bytes,
-        current_database_kind: config.database.kind.as_str().to_string(),
+        current_database_kind: BackupDatabaseFamily::from_database_kind(config.database.kind),
         backup_database_kind: backup_database_kind
-            .map(DatabaseKind::as_str)
-            .unwrap_or("unknown")
-            .to_string(),
+            .map(BackupDatabaseFamily::from_database_kind)
+            .unwrap_or(BackupDatabaseFamily::Unknown),
         semantics,
         integrity_check_passed,
         app_installed,
@@ -271,7 +270,7 @@ pub async fn schedule_restore(
 
         return Err(crate::error::AppError::ValidationError(format!(
             "已有待执行的 {} 恢复计划: {}，请先重启服务完成或清理它",
-            restore_database_label(&existing.database_kind),
+            restore_database_label(existing.database_kind),
             existing.filename,
         )));
     }
@@ -435,7 +434,7 @@ async fn apply_pending_sqlite_restore(
         create_sqlite_snapshot(config, &rollback_path).await?;
 
         persist_last_restore_result(&restore_result(
-            "started",
+            BackupRestoreStatus::Started,
             &pending_for_execution,
             started_at,
             Some(rollback_filename.clone()),
@@ -557,7 +556,7 @@ async fn apply_pending_mysql_restore(
         dump_current_mysql_database_for_rollback(config, &rollback_path).await?;
 
         persist_last_restore_result(&restore_result(
-            "started",
+            BackupRestoreStatus::Started,
             &pending_for_execution,
             started_at,
             Some(rollback_filename.clone()),
@@ -577,14 +576,14 @@ async fn apply_pending_mysql_restore(
                 restore_mysql_dump_into_current_database(config, &rollback_path).await;
             let (status, message) = match rollback_result {
                 Ok(()) => (
-                    "rolled_back",
+                    BackupRestoreStatus::RolledBack,
                     format!(
                         "执行 MySQL / MariaDB 恢复计划 {} 失败，已自动回滚到恢复前逻辑快照: {}",
                         pending_for_execution.filename, error
                     ),
                 ),
                 Err(rollback_error) => (
-                    "failed",
+                    BackupRestoreStatus::Failed,
                     format!(
                         "执行 MySQL / MariaDB 恢复计划 {} 失败，且自动回滚失败。恢复错误: {}；回滚错误: {}",
                         pending_for_execution.filename, error, rollback_error
@@ -632,7 +631,13 @@ async fn startup_restore_failure(
     rollback_filename: Option<String>,
     message: String,
 ) -> anyhow::Result<StartupRestoreOutcome> {
-    let result = restore_result("failed", pending, started_at, rollback_filename, message);
+    let result = restore_result(
+        BackupRestoreStatus::Failed,
+        pending,
+        started_at,
+        rollback_filename,
+        message,
+    );
     persist_last_restore_result(&result).await?;
     clear_pending_restore_plan().await?;
     Ok(StartupRestoreOutcome::StartupFailure(result))
@@ -660,13 +665,13 @@ pub async fn rollback_failed_restore(
     }
 
     let result = restore_result(
-        "rolled_back",
+        BackupRestoreStatus::RolledBack,
         &applied.pending,
         applied.started_at,
         Some(applied.rollback_filename.clone()),
         format!(
             "恢复 {} 备份 {} 后启动失败，已自动回滚到恢复前快照: {}",
-            restore_database_label(&applied.pending.database_kind),
+            restore_database_label(applied.pending.database_kind),
             applied.pending.filename,
             startup_error
         ),
@@ -680,8 +685,8 @@ pub async fn finalize_restore_success(
     applied: &AppliedRestoreContext,
 ) -> anyhow::Result<BackupRestoreResult> {
     invalidate_runtime_state_after_restore(state).await?;
-    let database_label = restore_database_label(&applied.pending.database_kind);
-    let completion_message = if applied.pending.database_kind.eq_ignore_ascii_case("sqlite") {
+    let database_label = restore_database_label(applied.pending.database_kind);
+    let completion_message = if applied.pending.database_kind == BackupDatabaseFamily::Sqlite {
         format!(
             "{} 备份 {} 已在启动前完成恢复，旧会话和缓存已全部失效。",
             database_label, applied.pending.filename
@@ -694,7 +699,7 @@ pub async fn finalize_restore_success(
     };
 
     let result = restore_result(
-        "completed",
+        BackupRestoreStatus::Completed,
         &applied.pending,
         applied.started_at,
         Some(applied.rollback_filename.clone()),
@@ -715,7 +720,7 @@ pub async fn finalize_restore_success(
             "requested_by_email": applied.pending.requested_by_email,
             "scheduled_at": applied.pending.scheduled_at,
             "rollback_filename": applied.rollback_filename,
-            "result": "completed",
+            "result": BackupRestoreStatus::Completed,
             "risk_level": "danger",
         })),
     )
@@ -741,7 +746,7 @@ pub async fn finalize_restore_rollback(
             "database_kind": result.database_kind,
             "rollback_filename": result.rollback_filename,
             "message": result.message,
-            "result": "rolled_back",
+            "result": BackupRestoreStatus::RolledBack,
             "risk_level": "danger",
         })),
     )
@@ -753,7 +758,7 @@ pub async fn record_startup_restore_failure(
     state: &crate::db::AppState,
     result: &BackupRestoreResult,
 ) -> anyhow::Result<()> {
-    let action = if result.status == "rolled_back" {
+    let action = if result.status == BackupRestoreStatus::RolledBack {
         "system.database_restore.rollback_applied"
     } else {
         "system.database_restore.failed"
@@ -779,14 +784,14 @@ pub async fn record_startup_restore_failure(
 }
 
 fn restore_result(
-    status: &str,
+    status: BackupRestoreStatus,
     pending: &PendingBackupRestore,
     started_at: chrono::DateTime<chrono::Utc>,
     rollback_filename: Option<String>,
     message: String,
 ) -> BackupRestoreResult {
     BackupRestoreResult {
-        status: status.to_string(),
+        status,
         filename: pending.filename.clone(),
         database_kind: pending.database_kind.clone(),
         semantics: pending.semantics.clone(),
@@ -1200,7 +1205,7 @@ fn storage_summary_from_snapshot(
     snapshot: &StorageSettingsSnapshot,
 ) -> BackupRestoreStorageSummary {
     BackupRestoreStorageSummary {
-        storage_backend: snapshot.storage_backend.as_str().to_string(),
+        storage_backend: StorageBackendKind::from_runtime(snapshot.storage_backend),
         local_storage_path: snapshot.local_storage_path.clone(),
         s3_endpoint: snapshot.s3_endpoint.clone(),
         s3_region: snapshot.s3_region.clone(),
@@ -1212,7 +1217,7 @@ fn storage_summary_from_snapshot(
 
 fn unknown_storage_summary() -> BackupRestoreStorageSummary {
     BackupRestoreStorageSummary {
-        storage_backend: "unknown".to_string(),
+        storage_backend: StorageBackendKind::Unknown,
         local_storage_path: String::new(),
         s3_endpoint: None,
         s3_region: None,
@@ -1223,9 +1228,10 @@ fn unknown_storage_summary() -> BackupRestoreStorageSummary {
 }
 
 fn backup_database_kind_from_pending(pending: &PendingBackupRestore) -> Option<DatabaseKind> {
-    DatabaseKind::parse(&pending.database_kind)
-        .ok()
-        .or_else(|| DatabaseKind::parse(&pending.semantics.database_family).ok())
+    pending
+        .database_kind
+        .to_database_kind()
+        .or_else(|| pending.semantics.database_family.to_database_kind())
         .or_else(|| backup_database_kind_from_filename(&pending.filename))
 }
 
@@ -1241,18 +1247,8 @@ fn backup_database_kind_from_filename(filename: &str) -> Option<DatabaseKind> {
     }
 }
 
-fn restore_database_label(database_kind: &str) -> &'static str {
-    if database_kind.eq_ignore_ascii_case("sqlite") {
-        "SQLite"
-    } else if database_kind.eq_ignore_ascii_case("mysql") {
-        "MySQL / MariaDB"
-    } else if database_kind.eq_ignore_ascii_case("postgresql")
-        || database_kind.eq_ignore_ascii_case("postgres")
-    {
-        "PostgreSQL"
-    } else {
-        "数据库"
-    }
+fn restore_database_label(database_kind: BackupDatabaseFamily) -> &'static str {
+    database_kind.label()
 }
 
 fn append_object_rollback_anchor_warnings(
@@ -1263,42 +1259,43 @@ fn append_object_rollback_anchor_warnings(
         return;
     };
 
-    if anchor.strategy == "local-directory-snapshot" {
-        if let Some(path) = anchor.local_storage_path.as_deref() {
-            warnings.push(format!(
-                "这份备份绑定的文件回滚锚点目录为 {}。如需回退本地附件，请按相同时间点恢复该目录快照。",
-                path
-            ));
+    match anchor.strategy {
+        BackupObjectRollbackStrategy::LocalDirectorySnapshot => {
+            if let Some(path) = anchor.local_storage_path.as_deref() {
+                warnings.push(format!(
+                    "这份备份绑定的文件回滚锚点目录为 {}。如需回退本地附件，请按相同时间点恢复该目录快照。",
+                    path
+                ));
+            }
         }
-        return;
-    }
-
-    if anchor.strategy == "s3-versioned-rollback-anchor" {
-        let bucket = anchor
-            .s3_bucket
-            .clone()
-            .unwrap_or_else(|| "未配置 bucket".to_string());
-        let prefix = anchor.s3_prefix.clone().unwrap_or_else(|| "/".to_string());
-        let status = anchor
-            .s3_bucket_versioning_status
-            .clone()
-            .unwrap_or_else(|| "unknown".to_string());
-        warnings.push(format!(
-            "这份备份绑定的对象回滚锚点为 bucket={}、prefix={}、时间={}，bucket versioning 状态={status}。",
-            bucket,
-            prefix,
-            anchor.checkpoint_at.format("%Y-%m-%d %H:%M UTC")
-        ));
-        warnings.push(
-            "如果需要让对象存储内容与数据库版本保持一致，应按上述锚点回退对象版本，而不是单独选择任意对象快照。"
-                .to_string(),
-        );
-        if let Some(error) = anchor.capture_error.as_ref() {
+        BackupObjectRollbackStrategy::S3VersionedRollbackAnchor => {
+            let bucket = anchor
+                .s3_bucket
+                .clone()
+                .unwrap_or_else(|| "未配置 bucket".to_string());
+            let prefix = anchor.s3_prefix.clone().unwrap_or_else(|| "/".to_string());
+            let status = anchor
+                .s3_bucket_versioning_status
+                .clone()
+                .unwrap_or_else(|| "unknown".to_string());
             warnings.push(format!(
-                "备份生成时未能确认对象存储版本状态，锚点仍已记录，但需要额外人工核对: {}",
-                error
+                "这份备份绑定的对象回滚锚点为 bucket={}、prefix={}、时间={}，bucket versioning 状态={status}。",
+                bucket,
+                prefix,
+                anchor.checkpoint_at.format("%Y-%m-%d %H:%M UTC")
             ));
+            warnings.push(
+                "如果需要让对象存储内容与数据库版本保持一致，应按上述锚点回退对象版本，而不是单独选择任意对象快照。"
+                    .to_string(),
+            );
+            if let Some(error) = anchor.capture_error.as_ref() {
+                warnings.push(format!(
+                    "备份生成时未能确认对象存储版本状态，锚点仍已记录，但需要额外人工核对: {}",
+                    error
+                ));
+            }
         }
+        BackupObjectRollbackStrategy::Unknown => {}
     }
 }
 
@@ -1456,10 +1453,6 @@ fn last_restore_result_path() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(DEFAULT_LAST_RESTORE_RESULT_PATH))
 }
 
-fn backup_directory() -> PathBuf {
-    PathBuf::from(BACKUP_DIR)
-}
-
 fn validate_backup_filename(filename: &str) -> bool {
     !filename.is_empty()
         && filename.len() <= 255
@@ -1511,7 +1504,7 @@ async fn backup_file_summary(filename: &str) -> Result<BackupFileSummary, crate:
 fn normalize_pending_restore(mut pending: PendingBackupRestore) -> PendingBackupRestore {
     if pending.semantics.is_unknown() {
         pending.semantics =
-            BackupSemantics::infer_from_kind_str(&pending.filename, Some(&pending.database_kind));
+            BackupSemantics::infer(&pending.filename, pending.database_kind.to_database_kind());
     }
     pending
 }
@@ -1519,7 +1512,310 @@ fn normalize_pending_restore(mut pending: PendingBackupRestore) -> PendingBackup
 fn normalize_restore_result(mut result: BackupRestoreResult) -> BackupRestoreResult {
     if result.semantics.is_unknown() {
         result.semantics =
-            BackupSemantics::infer_from_kind_str(&result.filename, Some(&result.database_kind));
+            BackupSemantics::infer(&result.filename, result.database_kind.to_database_kind());
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use once_cell::sync::Lazy;
+    use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+    use tokio::sync::Mutex;
+
+    use super::*;
+    use crate::config::DatabaseKind;
+    use crate::db::run_migrations;
+    use crate::models::{BackupDatabaseFamily, BackupKind, BackupRestoreStatus, RestoreMode};
+    use crate::runtime_settings::{SETTING_LOCAL_STORAGE_PATH, SETTING_STORAGE_BACKEND};
+
+    static TEST_ENV_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+
+    struct TestEnv {
+        _guard: tokio::sync::MutexGuard<'static, ()>,
+        temp_dir: tempfile::TempDir,
+        backup_dir: PathBuf,
+        pending_path: PathBuf,
+        last_result_path: PathBuf,
+    }
+
+    impl TestEnv {
+        async fn new() -> Self {
+            let guard = TEST_ENV_LOCK.lock().await;
+            let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+            let backup_dir = temp_dir.path().join("backup");
+            let pending_path = temp_dir.path().join("pending_restore.json");
+            let last_result_path = temp_dir.path().join("last_restore_result.json");
+
+            // Tests serialize environment mutation through TEST_ENV_LOCK.
+            unsafe {
+                std::env::set_var("VANSOUR_IMAGE_BACKUP_DIR", &backup_dir);
+                std::env::set_var("SQLITE_PENDING_RESTORE_PATH", &pending_path);
+                std::env::set_var("SQLITE_LAST_RESTORE_RESULT_PATH", &last_result_path);
+            }
+
+            Self {
+                _guard: guard,
+                temp_dir,
+                backup_dir,
+                pending_path,
+                last_result_path,
+            }
+        }
+
+        fn sqlite_config(&self) -> Config {
+            let mut config = Config::default();
+            config.database.kind = DatabaseKind::Sqlite;
+            config.database.url = self
+                .temp_dir
+                .path()
+                .join("current.db")
+                .to_string_lossy()
+                .into_owned();
+            config.storage.path = self
+                .temp_dir
+                .path()
+                .join("images")
+                .to_string_lossy()
+                .into_owned();
+            config
+        }
+
+        fn mysql_config(&self) -> Config {
+            let mut config = self.sqlite_config();
+            config.database.kind = DatabaseKind::MySql;
+            config.database.url = "mysql://user:pass@127.0.0.1:3306/image".to_string();
+            config
+        }
+    }
+
+    impl Drop for TestEnv {
+        fn drop(&mut self) {
+            // Tests serialize environment mutation through TEST_ENV_LOCK.
+            unsafe {
+                std::env::remove_var("VANSOUR_IMAGE_BACKUP_DIR");
+                std::env::remove_var("SQLITE_PENDING_RESTORE_PATH");
+                std::env::remove_var("SQLITE_LAST_RESTORE_RESULT_PATH");
+            }
+        }
+    }
+
+    async fn create_valid_sqlite_backup(filename: &str, config: &Config) -> PathBuf {
+        tokio::fs::create_dir_all(backup_directory())
+            .await
+            .expect("backup dir should be created");
+        let database_path = backup_directory().join(filename);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(
+                SqliteConnectOptions::new()
+                    .filename(&database_path)
+                    .create_if_missing(true)
+                    .foreign_keys(true),
+            )
+            .await
+            .expect("sqlite pool should be created");
+
+        let database = DatabasePool::Sqlite(pool.clone());
+        run_migrations(&database)
+            .await
+            .expect("migrations should succeed");
+
+        let now = Utc::now();
+        sqlx::query(
+            "INSERT INTO users (
+                id,
+                email,
+                email_verified_at,
+                password_hash,
+                role,
+                created_at,
+                token_version
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        )
+        .bind(ADMIN_USER_ID)
+        .bind("admin@example.com")
+        .bind(now)
+        .bind("password-hash")
+        .bind("admin")
+        .bind(now)
+        .bind(0_i64)
+        .execute(&pool)
+        .await
+        .expect("admin user should be inserted");
+
+        sqlx::query("INSERT INTO settings (key, value, updated_at) VALUES (?1, ?2, ?3)")
+            .bind(INSTALL_STATE_SETTING_KEY)
+            .bind("true")
+            .bind(now)
+            .execute(&pool)
+            .await
+            .expect("install state should be inserted");
+
+        sqlx::query("INSERT INTO settings (key, value, updated_at) VALUES (?1, ?2, ?3)")
+            .bind(SETTING_STORAGE_BACKEND)
+            .bind("local")
+            .bind(now)
+            .execute(&pool)
+            .await
+            .expect("storage backend should be inserted");
+
+        sqlx::query("INSERT INTO settings (key, value, updated_at) VALUES (?1, ?2, ?3)")
+            .bind(SETTING_LOCAL_STORAGE_PATH)
+            .bind(&config.storage.path)
+            .bind(now)
+            .execute(&pool)
+            .await
+            .expect("local storage path should be inserted");
+
+        pool.close().await;
+        database_path
+    }
+
+    #[tokio::test]
+    async fn sqlite_precheck_accepts_valid_backup_without_manifest() {
+        let env = TestEnv::new().await;
+        let config = env.sqlite_config();
+        create_valid_sqlite_backup("backup_valid.sqlite3", &config).await;
+
+        let response = precheck_restore(
+            &config,
+            &RuntimeSettings::from_defaults(&config).storage_settings(),
+            "backup_valid.sqlite3",
+        )
+        .await
+        .expect("precheck should succeed");
+
+        assert!(response.eligible);
+        assert_eq!(response.backup_database_kind, BackupDatabaseFamily::Sqlite);
+        assert!(response.integrity_check_passed);
+        assert!(response.app_installed);
+        assert!(response.has_admin);
+        assert!(response.storage_compatible);
+        assert!(response.blockers.is_empty());
+        assert!(
+            response
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("缺少对象/文件回滚锚点 manifest"))
+        );
+
+        drop(env);
+    }
+
+    #[tokio::test]
+    async fn mysql_precheck_rejects_dump_without_manifest_and_keeps_logical_dump_semantics() {
+        let env = TestEnv::new().await;
+        tokio::fs::create_dir_all(&env.backup_dir)
+            .await
+            .expect("backup dir should be created");
+        tokio::fs::write(
+            env.backup_dir.join("backup_legacy.mysql.sql"),
+            "-- MySQL dump\nCREATE TABLE users (id int);\n",
+        )
+        .await
+        .expect("mysql dump should be written");
+
+        let config = env.mysql_config();
+        let response = precheck_restore(
+            &config,
+            &RuntimeSettings::from_defaults(&config).storage_settings(),
+            "backup_legacy.mysql.sql",
+        )
+        .await
+        .expect("precheck should succeed");
+
+        assert!(!response.eligible);
+        assert_eq!(response.backup_database_kind, BackupDatabaseFamily::MySql);
+        assert_eq!(response.semantics.backup_kind, BackupKind::MySqlLogicalDump);
+        assert_eq!(response.semantics.restore_mode, RestoreMode::OpsToolingOnly);
+        assert!(response.integrity_check_passed);
+        assert!(
+            response
+                .blockers
+                .iter()
+                .any(|blocker| blocker.contains("缺少恢复 manifest"))
+        );
+        assert!(
+            response
+                .blockers
+                .iter()
+                .any(|blocker| blocker.contains("不支持页面恢复"))
+        );
+        assert!(
+            response
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("rollback_before_restore"))
+        );
+
+        drop(env);
+    }
+
+    #[tokio::test]
+    async fn load_restore_status_infers_legacy_pending_and_result_semantics() {
+        let env = TestEnv::new().await;
+        let now = Utc::now();
+
+        let pending = PendingBackupRestore {
+            filename: "backup_legacy.mysql.sql".to_string(),
+            database_kind: BackupDatabaseFamily::MySql,
+            semantics: BackupSemantics::unknown(),
+            requested_by_user_id: ADMIN_USER_ID,
+            requested_by_email: "admin@example.com".to_string(),
+            scheduled_at: now,
+            backup_created_at: now,
+            backup_size_bytes: 123,
+        };
+        let result = BackupRestoreResult {
+            status: BackupRestoreStatus::Completed,
+            filename: "backup_legacy.sql".to_string(),
+            database_kind: BackupDatabaseFamily::Postgres,
+            semantics: BackupSemantics::unknown(),
+            message: "ok".to_string(),
+            scheduled_at: Some(now),
+            started_at: Some(now),
+            finished_at: now,
+            rollback_filename: None,
+        };
+
+        tokio::fs::write(
+            &env.pending_path,
+            serde_json::to_vec_pretty(&pending).expect("pending restore should serialize"),
+        )
+        .await
+        .expect("pending restore should be written");
+        tokio::fs::write(
+            &env.last_result_path,
+            serde_json::to_vec_pretty(&result).expect("restore result should serialize"),
+        )
+        .await
+        .expect("restore result should be written");
+
+        let status = load_restore_status()
+            .await
+            .expect("restore status should load");
+        let pending = status.pending.expect("pending restore should exist");
+        let result = status.last_result.expect("restore result should exist");
+
+        assert_eq!(
+            pending.semantics.database_family,
+            BackupDatabaseFamily::MySql
+        );
+        assert_eq!(pending.database_kind, BackupDatabaseFamily::MySql);
+        assert_eq!(pending.semantics.backup_kind, BackupKind::MySqlLogicalDump);
+        assert_eq!(result.status, BackupRestoreStatus::Completed);
+        assert_eq!(result.database_kind, BackupDatabaseFamily::Postgres);
+        assert_eq!(
+            result.semantics.database_family,
+            BackupDatabaseFamily::Postgres
+        );
+        assert_eq!(
+            result.semantics.backup_kind,
+            BackupKind::PostgresqlLogicalDump
+        );
+
+        drop(env);
+    }
 }

@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::models::AdminSettingsConfig;
+use crate::models::{AdminSettingsConfig, StorageBackendKind};
 
 use super::validation::normalize_s3_prefix;
 
@@ -237,7 +237,7 @@ impl RuntimeSettings {
     pub fn to_admin_config(&self, restart_required: bool) -> AdminSettingsConfig {
         AdminSettingsConfig {
             site_name: self.site_name.clone(),
-            storage_backend: self.storage_backend.as_str().to_string(),
+            storage_backend: StorageBackendKind::from_runtime(self.storage_backend),
             local_storage_path: self.local_storage_path.clone(),
             mail_enabled: self.mail_enabled,
             mail_smtp_host: self.mail_smtp_host.clone(),

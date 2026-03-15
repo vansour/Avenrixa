@@ -36,9 +36,6 @@ pub struct ImageInfo {
     pub user_id: Uuid,
 }
 
-const MAX_TAGS_PER_IMAGE: usize = 20;
-const MAX_TAG_LENGTH: usize = 50;
-
 pub struct ImageDomainServiceDependencies {
     pub database: DatabasePool,
     pub cache: Option<CacheConnection>,

@@ -7,7 +7,7 @@ use super::common::{AuthDomainService, EmailVerificationDispatch};
 use crate::domain::auth::repository::{AuthRepository, EmailVerificationStatus};
 use crate::domain::auth::service::AuthService;
 use crate::error::AppError;
-use crate::models::{RegisterRequest, User};
+use crate::models::{RegisterRequest, User, UserRole};
 
 const EMAIL_VERIFICATION_TTL_HOURS: i64 = 24;
 
@@ -48,7 +48,7 @@ impl<R: AuthRepository> AuthDomainService<R> {
                     email: email.clone(),
                     email_verified_at: None,
                     password_hash: password_hash.clone(),
-                    role: "user".to_string(),
+                    role: UserRole::User,
                     created_at: Utc::now(),
                 };
                 self.repository.create_user(&user).await?;

@@ -38,12 +38,13 @@ mod tests {
     use crate::bootstrap::build_app_state;
     use crate::db::{DatabasePool, mark_app_installed_sqlite_tx};
     use crate::domain::auth::state_repository::AuthStateRepository;
-    use crate::models::InstallStatusResponse;
+    use crate::models::{InstallStatusResponse, UserRole};
     use axum::{
         body::{Body, to_bytes},
         http::{Request, StatusCode, header},
     };
     use chrono::Utc;
+    use serde_json::json;
     use sqlx::SqlitePool;
     use std::sync::OnceLock;
     use tower::ServiceExt;
@@ -180,21 +181,18 @@ mod tests {
                 .expect("image file should be written");
 
             sqlx::query(
-                "INSERT INTO images (id, user_id, category_id, filename, thumbnail, original_filename, size, hash, format, views, status, expires_at, deleted_at, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                "INSERT INTO images (id, user_id, filename, thumbnail, size, hash, format, views, status, expires_at, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             )
             .bind(Uuid::new_v4())
             .bind(user_id)
-            .bind(None::<Uuid>)
             .bind(filename)
             .bind(None::<String>)
-            .bind(Some(filename.to_string()))
             .bind(sample_png_bytes().len() as i64)
             .bind(hash)
             .bind("png")
             .bind(0_i64)
             .bind("active")
-            .bind(None::<chrono::DateTime<Utc>>)
             .bind(None::<chrono::DateTime<Utc>>)
             .bind(Utc::now())
             .execute(self.sqlite_pool())
@@ -224,7 +222,13 @@ mod tests {
             let token = self
                 .state
                 .auth
-                .generate_token(user_id, email, role, token_version, session_epoch)
+                .generate_token(
+                    user_id,
+                    email,
+                    &UserRole::parse(role),
+                    token_version,
+                    session_epoch,
+                )
                 .expect("token should be generated");
             axum::http::HeaderValue::from_str(&format!("auth_token={token}"))
                 .expect("cookie header should be valid")
@@ -387,6 +391,72 @@ mod tests {
         assert_eq!(status.config.s3_endpoint, None);
         assert_eq!(status.config.s3_bucket, None);
         assert_eq!(status.config.s3_access_key, None);
+    }
+
+    #[tokio::test]
+    async fn install_bootstrap_applies_local_storage_path_without_restart() {
+        let app = TestApp::new(|_| {}).await;
+        let selected_path = app._temp_dir.path().join("mounted-images");
+
+        let response = app
+            .request(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/install/bootstrap")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&json!({
+                            "admin_email": "admin@example.com",
+                            "admin_password": "Password123!",
+                            "favicon_data_url": null,
+                            "config": {
+                                "site_name": "Vansour Image",
+                                "storage_backend": "local",
+                                "local_storage_path": selected_path.to_string_lossy(),
+                                "mail_enabled": false,
+                                "mail_smtp_host": "",
+                                "mail_smtp_port": 587,
+                                "mail_smtp_user": null,
+                                "mail_smtp_password": null,
+                                "mail_from_email": "",
+                                "mail_from_name": "",
+                                "mail_link_base_url": "",
+                                "s3_endpoint": null,
+                                "s3_region": null,
+                                "s3_bucket": null,
+                                "s3_prefix": null,
+                                "s3_access_key": null,
+                                "s3_secret_key": null,
+                                "s3_force_path_style": true
+                            }
+                        }))
+                        .expect("request body should serialize"),
+                    ))
+                    .expect("request should build"),
+            )
+            .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            app.state
+                .storage_manager
+                .active_settings()
+                .local_storage_path,
+            selected_path.to_string_lossy().to_string()
+        );
+
+        let proof_file = "install-proof.png";
+        app.state
+            .storage_manager
+            .write(proof_file, &sample_png_bytes())
+            .await
+            .expect("proof file should be written");
+
+        assert!(
+            tokio::fs::try_exists(selected_path.join(proof_file))
+                .await
+                .expect("existence check should succeed")
+        );
     }
 
     #[tokio::test]

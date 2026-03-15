@@ -71,7 +71,6 @@ pub fn ImageListPage() -> Element {
                 let params = PaginationParams {
                     page: Some(page),
                     page_size: Some(size),
-                    tag: None,
                 };
 
                 match image_service.get_images(params).await {

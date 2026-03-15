@@ -12,17 +12,16 @@ use crate::domain::image::{
     MySqlImageRepository, PostgresImageRepository, SqliteImageRepository,
 };
 use crate::image_processor::ImageProcessor;
-use crate::runtime_settings::{RuntimeSettings, RuntimeSettingsService, StorageBackend};
+use crate::runtime_settings::RuntimeSettingsService;
 use crate::storage_backend::StorageManager;
-use std::os::unix::fs::PermissionsExt;
 use std::sync::Arc;
 use tracing::info;
 
 pub struct ServiceBundle {
     pub auth: AuthService,
-    pub auth_domain_service: Option<Arc<DefaultAuthDomainService>>,
-    pub image_domain_service: Option<Arc<DefaultImageDomainService>>,
-    pub admin_domain_service: Option<Arc<AdminDomainService>>,
+    pub auth_domain_service: Arc<DefaultAuthDomainService>,
+    pub image_domain_service: Arc<DefaultImageDomainService>,
+    pub admin_domain_service: Arc<AdminDomainService>,
     pub runtime_settings: Arc<RuntimeSettingsService>,
     pub storage_manager: Arc<StorageManager>,
 }
@@ -42,8 +41,10 @@ pub async fn build_services(
     );
     let runtime_settings = Arc::new(RuntimeSettingsService::new(database.clone(), config));
     let active_runtime_settings = runtime_settings.get_runtime_settings().await?;
-    prepare_storage(&active_runtime_settings).await?;
-    let storage_manager = Arc::new(StorageManager::new(active_runtime_settings));
+    let storage_manager = Arc::new(StorageManager::new(active_runtime_settings.clone()));
+    storage_manager
+        .apply_runtime_settings(active_runtime_settings)
+        .await?;
 
     let auth_repository = match database {
         DatabasePool::Postgres(pool) => {
@@ -56,7 +57,7 @@ pub async fn build_services(
             DatabaseAuthRepository::Sqlite(SqliteAuthRepository::new(pool.clone()))
         }
     };
-    let auth_domain_service = Some(Arc::new(DefaultAuthDomainService::new(auth_repository)));
+    let auth_domain_service = Arc::new(DefaultAuthDomainService::new(auth_repository));
     info!("Auth domain service initialized");
 
     let image_domain_service = match database {
@@ -70,10 +71,10 @@ pub async fn build_services(
                 image_processor.clone(),
                 storage_manager.clone(),
             );
-            Some(Arc::new(DefaultImageDomainService::new(
+            Arc::new(DefaultImageDomainService::new(
                 image_dependencies,
                 image_repository,
-            )))
+            ))
         }
         DatabasePool::MySql(pool) => {
             let image_repository =
@@ -85,10 +86,10 @@ pub async fn build_services(
                 image_processor.clone(),
                 storage_manager.clone(),
             );
-            Some(Arc::new(DefaultImageDomainService::new(
+            Arc::new(DefaultImageDomainService::new(
                 image_dependencies,
                 image_repository,
-            )))
+            ))
         }
         DatabasePool::Sqlite(pool) => {
             let image_repository =
@@ -100,21 +101,21 @@ pub async fn build_services(
                 image_processor.clone(),
                 storage_manager.clone(),
             );
-            Some(Arc::new(DefaultImageDomainService::new(
+            Arc::new(DefaultImageDomainService::new(
                 image_dependencies,
                 image_repository,
-            )))
+            ))
         }
     };
     info!("Image domain service initialized");
 
-    let admin_domain_service = Some(Arc::new(AdminDomainService::new(
+    let admin_domain_service = Arc::new(AdminDomainService::new(
         database.clone(),
         cache_connections.app.clone(),
         cache_connections.status.clone(),
         config.clone(),
         storage_manager.clone(),
-    )));
+    ));
     info!("Admin domain service initialized");
 
     Ok(ServiceBundle {
@@ -125,18 +126,4 @@ pub async fn build_services(
         runtime_settings,
         storage_manager,
     })
-}
-
-async fn prepare_storage(settings: &RuntimeSettings) -> anyhow::Result<()> {
-    if settings.storage_backend != StorageBackend::Local {
-        return Ok(());
-    }
-
-    info!("Creating storage directories...");
-    tokio::fs::create_dir_all(&settings.local_storage_path).await?;
-
-    let images_perms = PermissionsExt::from_mode(0o755);
-    let _ = tokio::fs::set_permissions(&settings.local_storage_path, images_perms).await;
-
-    Ok(())
 }

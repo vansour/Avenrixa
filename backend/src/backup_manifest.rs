@@ -9,12 +9,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::DatabaseKind;
 use crate::models::{
-    BackupMetadataManifest, BackupObjectRollbackAnchor, BackupRestoreStorageSummary,
-    BackupSemantics,
+    BackupDatabaseFamily, BackupMetadataManifest, BackupObjectRollbackAnchor,
+    BackupObjectRollbackStrategy, BackupRestoreStorageSummary, BackupSemantics, StorageBackendKind,
 };
 use crate::runtime_settings::{StorageBackend, StorageSettingsSnapshot};
 
-const BACKUP_DIR: &str = "/data/backup";
+const DEFAULT_BACKUP_DIR: &str = "/data/backup";
 const CURRENT_BACKUP_MANIFEST_FORMAT_VERSION: u32 = 2;
 
 pub async fn capture_backup_manifest(
@@ -30,7 +30,7 @@ pub async fn capture_backup_manifest(
         format_version: CURRENT_BACKUP_MANIFEST_FORMAT_VERSION,
         filename: filename.to_string(),
         created_at,
-        database_kind: database_kind.as_str().to_string(),
+        database_kind: BackupDatabaseFamily::from_database_kind(database_kind),
         semantics,
         app_installed,
         has_admin,
@@ -70,13 +70,20 @@ pub fn storage_signature(snapshot: &StorageSettingsSnapshot) -> String {
         .to_string()
 }
 
+pub(crate) fn backup_directory() -> PathBuf {
+    std::env::var("VANSOUR_IMAGE_BACKUP_DIR")
+        .ok()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(DEFAULT_BACKUP_DIR))
+}
+
 fn backup_manifest_path(filename: &str) -> PathBuf {
-    PathBuf::from(BACKUP_DIR).join(format!("{filename}.manifest.json"))
+    backup_directory().join(format!("{filename}.manifest.json"))
 }
 
 fn storage_summary(snapshot: &StorageSettingsSnapshot) -> BackupRestoreStorageSummary {
     BackupRestoreStorageSummary {
-        storage_backend: snapshot.storage_backend.as_str().to_string(),
+        storage_backend: StorageBackendKind::from_runtime(snapshot.storage_backend),
         local_storage_path: snapshot.local_storage_path.clone(),
         s3_endpoint: snapshot.s3_endpoint.clone(),
         s3_region: snapshot.s3_region.clone(),
@@ -92,7 +99,7 @@ async fn capture_object_rollback_anchor(
 ) -> BackupObjectRollbackAnchor {
     match settings.storage_backend {
         StorageBackend::Local => BackupObjectRollbackAnchor {
-            strategy: "local-directory-snapshot".to_string(),
+            strategy: BackupObjectRollbackStrategy::LocalDirectorySnapshot,
             checkpoint_at,
             local_storage_path: Some(settings.local_storage_path.clone()),
             s3_endpoint: None,
@@ -110,7 +117,7 @@ async fn capture_object_rollback_anchor(
             };
 
             BackupObjectRollbackAnchor {
-                strategy: "s3-versioned-rollback-anchor".to_string(),
+                strategy: BackupObjectRollbackStrategy::S3VersionedRollbackAnchor,
                 checkpoint_at,
                 local_storage_path: None,
                 s3_endpoint: settings.s3_endpoint.clone(),
@@ -192,7 +199,7 @@ fn normalize_backup_manifest(
 ) -> BackupMetadataManifest {
     if manifest.semantics.is_unknown() {
         manifest.semantics =
-            BackupSemantics::infer_from_kind_str(filename, Some(&manifest.database_kind));
+            BackupSemantics::infer(filename, manifest.database_kind.to_database_kind());
     }
     if manifest.format_version == 0 {
         manifest.format_version = 1;
@@ -206,8 +213,9 @@ mod tests {
 
     use super::normalize_backup_manifest;
     use crate::models::{
-        BackupMetadataManifest, BackupObjectRollbackAnchor, BackupRestoreStorageSummary,
-        BackupSemantics,
+        BackupDatabaseFamily, BackupKind, BackupMetadataManifest, BackupObjectRollbackAnchor,
+        BackupObjectRollbackStrategy, BackupRestoreStorageSummary, BackupSemantics,
+        StorageBackendKind,
     };
 
     #[test]
@@ -216,13 +224,13 @@ mod tests {
             format_version: 1,
             filename: "backup_legacy.mysql.sql".to_string(),
             created_at: Utc::now(),
-            database_kind: "mysql".to_string(),
+            database_kind: BackupDatabaseFamily::MySql,
             semantics: BackupSemantics::default(),
             app_installed: true,
             has_admin: true,
             storage_signature: "sig".to_string(),
             storage: BackupRestoreStorageSummary {
-                storage_backend: "local".to_string(),
+                storage_backend: StorageBackendKind::Local,
                 local_storage_path: "/data/images".to_string(),
                 s3_endpoint: None,
                 s3_region: None,
@@ -231,7 +239,7 @@ mod tests {
                 s3_force_path_style: true,
             },
             object_rollback_anchor: BackupObjectRollbackAnchor {
-                strategy: "local-directory-snapshot".to_string(),
+                strategy: BackupObjectRollbackStrategy::LocalDirectorySnapshot,
                 checkpoint_at: Utc::now(),
                 local_storage_path: Some("/data/images".to_string()),
                 s3_endpoint: None,
@@ -246,8 +254,14 @@ mod tests {
 
         let filename = manifest.filename.clone();
         let normalized = normalize_backup_manifest(&filename, manifest);
-        assert_eq!(normalized.semantics.database_family, "mysql");
-        assert_eq!(normalized.semantics.backup_kind, "mysql-logical-dump");
+        assert_eq!(
+            normalized.semantics.database_family,
+            BackupDatabaseFamily::MySql
+        );
+        assert_eq!(
+            normalized.semantics.backup_kind,
+            BackupKind::MySqlLogicalDump
+        );
         assert!(!normalized.semantics.ui_restore_supported);
     }
 }

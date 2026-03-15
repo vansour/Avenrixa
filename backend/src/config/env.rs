@@ -49,13 +49,6 @@ impl Config {
         if let Ok(cleanup_enabled) = std::env::var("CLEANUP_ENABLED") {
             config.cleanup.enabled = cleanup_enabled.parse().unwrap_or(true);
         }
-        if let Ok(retention_days) = std::env::var("CLEANUP_RETENTION_DAYS") {
-            config.cleanup.deleted_images_retention_days = retention_days.parse().unwrap_or(30);
-        }
-        if let Ok(deleted_interval) = std::env::var("CLEANUP_DELETED_INTERVAL_SECONDS") {
-            config.cleanup.deleted_cleanup_interval_seconds =
-                deleted_interval.parse().unwrap_or(86400);
-        }
         if let Ok(expiry_interval) = std::env::var("CLEANUP_EXPIRY_CHECK_INTERVAL_SECONDS") {
             config.cleanup.expiry_check_interval_seconds = expiry_interval.parse().unwrap_or(3600);
         }

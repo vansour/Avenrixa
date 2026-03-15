@@ -3,7 +3,7 @@ use crate::audit::log_audit_db;
 use crate::db::AppState;
 use crate::error::AppError;
 use crate::middleware::AdminUser;
-use crate::models::{AdminUserSummary, UserUpdateRequest};
+use crate::models::{AdminUserSummary, UserRole, UserUpdateRequest};
 use axum::{
     Json,
     extract::{Path, State},
@@ -27,10 +27,9 @@ pub async fn update_user_role(
 ) -> Result<(), AppError> {
     let service = admin_service(&state)?;
     if let Some(ref role) = req.role {
-        let result = service.update_user_role(id, role).await?;
+        let result = service.update_user_role(id, *role).await?;
         if result.changed {
-            let risk_level = if result.previous_role.eq_ignore_ascii_case("admin")
-                && result.new_role.eq_ignore_ascii_case("user")
+            let risk_level = if result.previous_role.is_admin() && result.new_role == UserRole::User
             {
                 "danger"
             } else {

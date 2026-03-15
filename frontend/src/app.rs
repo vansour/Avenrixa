@@ -6,7 +6,7 @@ use crate::pages::{
     UploadPage,
 };
 use crate::store::{DashboardPage, SettingsAnchor};
-use crate::types::api::{BootstrapStatusResponse, InstallStatusResponse};
+use crate::types::api::{BootstrapStatusResponse, InstallStatusResponse, StorageBackendKind};
 use dioxus::prelude::*;
 use gloo_timers::future::TimeoutFuture;
 
@@ -51,7 +51,7 @@ pub fn App() -> Element {
                     .is_some_and(|status| status.installed)
                 && current_user
                     .as_ref()
-                    .is_some_and(|user| user.role.eq_ignore_ascii_case("admin"));
+                    .is_some_and(|user| user.role.is_admin());
 
             if let Some(user) = current_user {
                 if eligible {
@@ -148,7 +148,7 @@ pub fn App() -> Element {
     let user = auth_store.user();
     let is_admin = user
         .as_ref()
-        .map(|current| current.role.eq_ignore_ascii_case("admin"))
+        .map(|current| current.role.is_admin())
         .unwrap_or(false);
     let is_bootstrap_mode = bootstrap_status()
         .as_ref()
@@ -263,8 +263,8 @@ pub fn App() -> Element {
                     site_name: site_name(),
                     storage_backend: install_status()
                         .as_ref()
-                        .map(|status| status.config.storage_backend.clone())
-                        .unwrap_or_else(|| "local".to_string()),
+                        .map(|status| status.config.storage_backend)
+                        .unwrap_or(StorageBackendKind::Local),
                     mail_enabled: install_status()
                         .as_ref()
                         .map(|status| status.config.mail_enabled)
@@ -337,7 +337,7 @@ fn sync_browser_branding(_site_name: &str, _favicon_version: u64) {}
 #[component]
 fn FirstRunGuideModal(
     site_name: String,
-    storage_backend: String,
+    storage_backend: StorageBackendKind,
     mail_enabled: bool,
     favicon_configured: bool,
     on_go_settings: EventHandler<MouseEvent>,
@@ -346,7 +346,7 @@ fn FirstRunGuideModal(
     on_go_audit: EventHandler<MouseEvent>,
     on_close: EventHandler<()>,
 ) -> Element {
-    let storage_label = if storage_backend.eq_ignore_ascii_case("s3") {
+    let storage_label = if storage_backend.is_s3() {
         "S3 / MinIO"
     } else {
         "本地目录"

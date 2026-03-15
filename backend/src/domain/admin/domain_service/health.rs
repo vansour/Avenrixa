@@ -4,7 +4,7 @@ use super::AdminDomainService;
 use crate::cache::CacheCommands;
 use crate::db::DatabasePool;
 use crate::error::AppError;
-use crate::models::{ComponentStatus, HealthMetrics, HealthStatus};
+use crate::models::{ComponentStatus, HealthMetrics, HealthState, HealthStatus};
 
 fn build_version_label(
     app_version: Option<&str>,
@@ -38,12 +38,12 @@ impl AdminDomainService {
     #[tracing::instrument(skip(self))]
     pub async fn health_check(&self, uptime_seconds: u64) -> Result<HealthStatus, AppError> {
         let timestamp = Utc::now();
-        let mut overall_status = "healthy".to_string();
+        let mut overall_status = HealthState::Healthy;
 
         let db_status = match self.database_ping().await {
             Ok(_) => ComponentStatus::healthy(),
             Err(e) => {
-                overall_status = "unhealthy".to_string();
+                overall_status = HealthState::Unhealthy;
                 ComponentStatus::unhealthy(e.to_string())
             }
         };
@@ -53,17 +53,17 @@ impl AdminDomainService {
             match cache.ping::<()>().await {
                 Ok(_) => ComponentStatus::healthy(),
                 Err(e) => {
-                    if overall_status == "healthy" {
-                        overall_status = "degraded".to_string();
+                    if overall_status == HealthState::Healthy {
+                        overall_status = HealthState::Degraded;
                     }
                     ComponentStatus::degraded(format!("外部缓存不可用，已降级为无缓存模式: {}", e))
                 }
             }
         } else {
-            if self.cache_status.status.eq_ignore_ascii_case("degraded")
-                && overall_status == "healthy"
+            if self.cache_status.status == HealthState::Degraded
+                && overall_status == HealthState::Healthy
             {
-                overall_status = "degraded".to_string();
+                overall_status = HealthState::Degraded;
             }
             self.cache_status.clone()
         };
@@ -71,7 +71,7 @@ impl AdminDomainService {
         let storage_status = match self.storage_manager.check_health().await {
             Ok(_) => ComponentStatus::healthy(),
             Err(e) => {
-                overall_status = "unhealthy".to_string();
+                overall_status = HealthState::Unhealthy;
                 ComponentStatus::unhealthy(e.to_string())
             }
         };
@@ -93,19 +93,19 @@ impl AdminDomainService {
     async fn collect_health_metrics(&self) -> Result<HealthMetrics, AppError> {
         let images_count: i64 = match &self.database {
             DatabasePool::Postgres(pool) => {
-                sqlx::query_scalar("SELECT COUNT(*) FROM images WHERE deleted_at IS NULL")
+                sqlx::query_scalar("SELECT COUNT(*) FROM images WHERE status = 'active'")
                     .fetch_one(pool)
                     .await
                     .unwrap_or(0)
             }
             DatabasePool::MySql(pool) => sqlx::query_scalar(
-                "SELECT CAST(COUNT(*) AS SIGNED) FROM images WHERE deleted_at IS NULL",
+                "SELECT CAST(COUNT(*) AS SIGNED) FROM images WHERE status = 'active'",
             )
             .fetch_one(pool)
             .await
             .unwrap_or(0),
             DatabasePool::Sqlite(pool) => {
-                sqlx::query_scalar("SELECT COUNT(*) FROM images WHERE deleted_at IS NULL")
+                sqlx::query_scalar("SELECT COUNT(*) FROM images WHERE status = 'active'")
                     .fetch_one(pool)
                     .await
                     .unwrap_or(0)
@@ -161,24 +161,24 @@ impl AdminDomainService {
 
     async fn storage_used_mb(&self) -> Option<f64> {
         let total_size = match &self.database {
-            DatabasePool::Postgres(pool) => {
-                sqlx::query_scalar::<_, Option<i64>>("SELECT CAST(SUM(size) AS BIGINT) FROM images")
-                    .fetch_one(pool)
-                    .await
-                    .unwrap_or(None)
-            }
-            DatabasePool::MySql(pool) => {
-                sqlx::query_scalar::<_, Option<i64>>("SELECT CAST(SUM(size) AS SIGNED) FROM images")
-                    .fetch_one(pool)
-                    .await
-                    .unwrap_or(None)
-            }
-            DatabasePool::Sqlite(pool) => {
-                sqlx::query_scalar::<_, Option<i64>>("SELECT SUM(size) FROM images")
-                    .fetch_one(pool)
-                    .await
-                    .unwrap_or(None)
-            }
+            DatabasePool::Postgres(pool) => sqlx::query_scalar::<_, Option<i64>>(
+                "SELECT CAST(SUM(size) AS BIGINT) FROM images WHERE status = 'active'",
+            )
+            .fetch_one(pool)
+            .await
+            .unwrap_or(None),
+            DatabasePool::MySql(pool) => sqlx::query_scalar::<_, Option<i64>>(
+                "SELECT CAST(SUM(size) AS SIGNED) FROM images WHERE status = 'active'",
+            )
+            .fetch_one(pool)
+            .await
+            .unwrap_or(None),
+            DatabasePool::Sqlite(pool) => sqlx::query_scalar::<_, Option<i64>>(
+                "SELECT SUM(size) FROM images WHERE status = 'active'",
+            )
+            .fetch_one(pool)
+            .await
+            .unwrap_or(None),
         };
         total_size.map(|size| size as f64 / 1024.0 / 1024.0)
     }

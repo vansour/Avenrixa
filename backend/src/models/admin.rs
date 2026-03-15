@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::config::DatabaseKind;
+use crate::runtime_settings::StorageBackend as RuntimeStorageBackend;
 
 #[derive(Debug, Serialize, sqlx::FromRow)]
 pub struct AuditLog {
@@ -32,7 +33,7 @@ pub struct UpdateSettingRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AdminSettingsConfig {
     pub site_name: String,
-    pub storage_backend: String,
+    pub storage_backend: StorageBackendKind,
     pub local_storage_path: String,
     pub mail_enabled: bool,
     pub mail_smtp_host: String,
@@ -76,7 +77,7 @@ pub struct StorageDirectoryBrowseResponse {
 #[derive(Debug, Clone, Deserialize)]
 pub struct UpdateAdminSettingsConfigRequest {
     pub site_name: String,
-    pub storage_backend: String,
+    pub storage_backend: StorageBackendKind,
     pub local_storage_path: String,
     pub mail_enabled: bool,
     pub mail_smtp_host: String,
@@ -120,9 +121,113 @@ pub struct Setting {
     pub requires_confirmation: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub enum StorageBackendKind {
+    Local,
+    S3,
+    Unknown,
+}
+
+impl StorageBackendKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Local => "local",
+            Self::S3 => "s3",
+            Self::Unknown => "unknown",
+        }
+    }
+
+    pub fn parse(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "local" => Self::Local,
+            "s3" => Self::S3,
+            _ => Self::Unknown,
+        }
+    }
+
+    pub fn from_runtime(value: RuntimeStorageBackend) -> Self {
+        match value {
+            RuntimeStorageBackend::Local => Self::Local,
+            RuntimeStorageBackend::S3 => Self::S3,
+        }
+    }
+
+    pub fn to_runtime(self) -> Option<RuntimeStorageBackend> {
+        match self {
+            Self::Local => Some(RuntimeStorageBackend::Local),
+            Self::S3 => Some(RuntimeStorageBackend::S3),
+            Self::Unknown => None,
+        }
+    }
+
+    pub fn is_s3(self) -> bool {
+        matches!(self, Self::S3)
+    }
+}
+
+impl From<String> for StorageBackendKind {
+    fn from(value: String) -> Self {
+        Self::parse(&value)
+    }
+}
+
+impl From<StorageBackendKind> for String {
+    fn from(value: StorageBackendKind) -> Self {
+        value.as_str().to_string()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub enum HealthState {
+    Healthy,
+    Degraded,
+    Unhealthy,
+    Disabled,
+    Bootstrapping,
+    Unknown,
+}
+
+impl HealthState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Healthy => "healthy",
+            Self::Degraded => "degraded",
+            Self::Unhealthy => "unhealthy",
+            Self::Disabled => "disabled",
+            Self::Bootstrapping => "bootstrapping",
+            Self::Unknown => "unknown",
+        }
+    }
+
+    pub fn parse(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "healthy" => Self::Healthy,
+            "degraded" => Self::Degraded,
+            "unhealthy" => Self::Unhealthy,
+            "disabled" => Self::Disabled,
+            "bootstrapping" => Self::Bootstrapping,
+            _ => Self::Unknown,
+        }
+    }
+}
+
+impl From<String> for HealthState {
+    fn from(value: String) -> Self {
+        Self::parse(&value)
+    }
+}
+
+impl From<HealthState> for String {
+    fn from(value: HealthState) -> Self {
+        value.as_str().to_string()
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct HealthStatus {
-    pub status: String,
+    pub status: HealthState,
     pub timestamp: DateTime<Utc>,
     pub database: ComponentStatus,
     pub cache: ComponentStatus,
@@ -144,35 +249,35 @@ pub struct HealthMetrics {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ComponentStatus {
-    pub status: String,
+    pub status: HealthState,
     pub message: Option<String>,
 }
 
 impl ComponentStatus {
     pub fn healthy() -> Self {
         Self {
-            status: "healthy".to_string(),
+            status: HealthState::Healthy,
             message: None,
         }
     }
 
     pub fn unhealthy(message: impl Into<String>) -> Self {
         Self {
-            status: "unhealthy".to_string(),
+            status: HealthState::Unhealthy,
             message: Some(message.into()),
         }
     }
 
     pub fn degraded(message: impl Into<String>) -> Self {
         Self {
-            status: "degraded".to_string(),
+            status: HealthState::Degraded,
             message: Some(message.into()),
         }
     }
 
     pub fn disabled(message: impl Into<String>) -> Self {
         Self {
-            status: "disabled".to_string(),
+            status: HealthState::Disabled,
             message: Some(message.into()),
         }
     }
@@ -194,13 +299,282 @@ impl axum::response::IntoResponse for SystemStats {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub enum BackupDatabaseFamily {
+    Postgres,
+    MySql,
+    Sqlite,
+    Unknown,
+}
+
+impl BackupDatabaseFamily {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Postgres => "postgresql",
+            Self::MySql => "mysql",
+            Self::Sqlite => "sqlite",
+            Self::Unknown => "unknown",
+        }
+    }
+
+    pub fn parse(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "postgresql" | "postgres" => Self::Postgres,
+            "mysql" | "mariadb" => Self::MySql,
+            "sqlite" => Self::Sqlite,
+            _ => Self::Unknown,
+        }
+    }
+
+    pub fn from_database_kind(kind: DatabaseKind) -> Self {
+        match kind {
+            DatabaseKind::Postgres => Self::Postgres,
+            DatabaseKind::MySql => Self::MySql,
+            DatabaseKind::Sqlite => Self::Sqlite,
+        }
+    }
+
+    pub fn to_database_kind(self) -> Option<DatabaseKind> {
+        match self {
+            Self::Postgres => Some(DatabaseKind::Postgres),
+            Self::MySql => Some(DatabaseKind::MySql),
+            Self::Sqlite => Some(DatabaseKind::Sqlite),
+            Self::Unknown => None,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Sqlite => "SQLite",
+            Self::MySql => "MySQL / MariaDB",
+            Self::Postgres => "PostgreSQL",
+            Self::Unknown => "数据库",
+        }
+    }
+}
+
+impl From<String> for BackupDatabaseFamily {
+    fn from(value: String) -> Self {
+        Self::parse(&value)
+    }
+}
+
+impl From<BackupDatabaseFamily> for String {
+    fn from(value: BackupDatabaseFamily) -> Self {
+        value.as_str().to_string()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub enum BackupRestoreStatus {
+    Pending,
+    Started,
+    Completed,
+    RolledBack,
+    Failed,
+    Unknown,
+}
+
+impl BackupRestoreStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Started => "started",
+            Self::Completed => "completed",
+            Self::RolledBack => "rolled_back",
+            Self::Failed => "failed",
+            Self::Unknown => "unknown",
+        }
+    }
+
+    pub fn parse(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "pending" => Self::Pending,
+            "started" => Self::Started,
+            "completed" => Self::Completed,
+            "rolled_back" => Self::RolledBack,
+            "failed" => Self::Failed,
+            _ => Self::Unknown,
+        }
+    }
+}
+
+impl From<String> for BackupRestoreStatus {
+    fn from(value: String) -> Self {
+        Self::parse(&value)
+    }
+}
+
+impl From<BackupRestoreStatus> for String {
+    fn from(value: BackupRestoreStatus) -> Self {
+        value.as_str().to_string()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub enum BackupKind {
+    SqliteDatabaseSnapshot,
+    MySqlLogicalDump,
+    PostgresqlLogicalDump,
+    Unknown,
+}
+
+impl BackupKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::SqliteDatabaseSnapshot => "sqlite-database-snapshot",
+            Self::MySqlLogicalDump => "mysql-logical-dump",
+            Self::PostgresqlLogicalDump => "postgresql-logical-dump",
+            Self::Unknown => "unknown",
+        }
+    }
+
+    pub fn parse(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "sqlite-database-snapshot" => Self::SqliteDatabaseSnapshot,
+            "mysql-logical-dump" => Self::MySqlLogicalDump,
+            "postgresql-logical-dump" => Self::PostgresqlLogicalDump,
+            _ => Self::Unknown,
+        }
+    }
+}
+
+impl From<String> for BackupKind {
+    fn from(value: String) -> Self {
+        Self::parse(&value)
+    }
+}
+
+impl From<BackupKind> for String {
+    fn from(value: BackupKind) -> Self {
+        value.as_str().to_string()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub enum BackupScope {
+    DatabaseOnly,
+    Unknown,
+}
+
+impl BackupScope {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::DatabaseOnly => "database-only",
+            Self::Unknown => "unknown",
+        }
+    }
+
+    pub fn parse(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "database-only" => Self::DatabaseOnly,
+            _ => Self::Unknown,
+        }
+    }
+}
+
+impl From<String> for BackupScope {
+    fn from(value: String) -> Self {
+        Self::parse(&value)
+    }
+}
+
+impl From<BackupScope> for String {
+    fn from(value: BackupScope) -> Self {
+        value.as_str().to_string()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub enum RestoreMode {
+    UiRestartFileSwap,
+    UiRestartSqlImport,
+    OpsToolingOnly,
+    DownloadOnly,
+    Unknown,
+}
+
+impl RestoreMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::UiRestartFileSwap => "ui-restart-file-swap",
+            Self::UiRestartSqlImport => "ui-restart-sql-import",
+            Self::OpsToolingOnly => "ops-tooling-only",
+            Self::DownloadOnly => "download-only",
+            Self::Unknown => "unknown",
+        }
+    }
+
+    pub fn parse(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "ui-restart-file-swap" => Self::UiRestartFileSwap,
+            "ui-restart-sql-import" => Self::UiRestartSqlImport,
+            "ops-tooling-only" => Self::OpsToolingOnly,
+            "download-only" => Self::DownloadOnly,
+            _ => Self::Unknown,
+        }
+    }
+}
+
+impl From<String> for RestoreMode {
+    fn from(value: String) -> Self {
+        Self::parse(&value)
+    }
+}
+
+impl From<RestoreMode> for String {
+    fn from(value: RestoreMode) -> Self {
+        value.as_str().to_string()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub enum ArtifactLayout {
+    SingleFilePlusManifest,
+    Unknown,
+}
+
+impl ArtifactLayout {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::SingleFilePlusManifest => "single-file-plus-manifest",
+            Self::Unknown => "unknown",
+        }
+    }
+
+    pub fn parse(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "single-file-plus-manifest" => Self::SingleFilePlusManifest,
+            _ => Self::Unknown,
+        }
+    }
+}
+
+impl From<String> for ArtifactLayout {
+    fn from(value: String) -> Self {
+        Self::parse(&value)
+    }
+}
+
+impl From<ArtifactLayout> for String {
+    fn from(value: ArtifactLayout) -> Self {
+        value.as_str().to_string()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BackupSemantics {
-    pub database_family: String,
-    pub backup_kind: String,
-    pub backup_scope: String,
-    pub restore_mode: String,
-    pub artifact_layout: String,
+    pub database_family: BackupDatabaseFamily,
+    pub backup_kind: BackupKind,
+    pub backup_scope: BackupScope,
+    pub restore_mode: RestoreMode,
+    pub artifact_layout: ArtifactLayout,
     pub ui_restore_supported: bool,
 }
 
@@ -213,44 +587,44 @@ impl Default for BackupSemantics {
 impl BackupSemantics {
     pub fn sqlite_database_snapshot() -> Self {
         Self {
-            database_family: DatabaseKind::Sqlite.as_str().to_string(),
-            backup_kind: "sqlite-database-snapshot".to_string(),
-            backup_scope: "database-only".to_string(),
-            restore_mode: "ui-restart-file-swap".to_string(),
-            artifact_layout: "single-file-plus-manifest".to_string(),
+            database_family: BackupDatabaseFamily::Sqlite,
+            backup_kind: BackupKind::SqliteDatabaseSnapshot,
+            backup_scope: BackupScope::DatabaseOnly,
+            restore_mode: RestoreMode::UiRestartFileSwap,
+            artifact_layout: ArtifactLayout::SingleFilePlusManifest,
             ui_restore_supported: true,
         }
     }
 
     pub fn mysql_logical_dump() -> Self {
         Self {
-            database_family: DatabaseKind::MySql.as_str().to_string(),
-            backup_kind: "mysql-logical-dump".to_string(),
-            backup_scope: "database-only".to_string(),
-            restore_mode: "ops-tooling-only".to_string(),
-            artifact_layout: "single-file-plus-manifest".to_string(),
+            database_family: BackupDatabaseFamily::MySql,
+            backup_kind: BackupKind::MySqlLogicalDump,
+            backup_scope: BackupScope::DatabaseOnly,
+            restore_mode: RestoreMode::OpsToolingOnly,
+            artifact_layout: ArtifactLayout::SingleFilePlusManifest,
             ui_restore_supported: false,
         }
     }
 
     pub fn postgresql_logical_dump() -> Self {
         Self {
-            database_family: DatabaseKind::Postgres.as_str().to_string(),
-            backup_kind: "postgresql-logical-dump".to_string(),
-            backup_scope: "database-only".to_string(),
-            restore_mode: "download-only".to_string(),
-            artifact_layout: "single-file-plus-manifest".to_string(),
+            database_family: BackupDatabaseFamily::Postgres,
+            backup_kind: BackupKind::PostgresqlLogicalDump,
+            backup_scope: BackupScope::DatabaseOnly,
+            restore_mode: RestoreMode::DownloadOnly,
+            artifact_layout: ArtifactLayout::SingleFilePlusManifest,
             ui_restore_supported: false,
         }
     }
 
     pub fn unknown() -> Self {
         Self {
-            database_family: "unknown".to_string(),
-            backup_kind: "unknown".to_string(),
-            backup_scope: "unknown".to_string(),
-            restore_mode: "unknown".to_string(),
-            artifact_layout: "unknown".to_string(),
+            database_family: BackupDatabaseFamily::Unknown,
+            backup_kind: BackupKind::Unknown,
+            backup_scope: BackupScope::Unknown,
+            restore_mode: RestoreMode::Unknown,
+            artifact_layout: ArtifactLayout::Unknown,
             ui_restore_supported: false,
         }
     }
@@ -279,13 +653,8 @@ impl BackupSemantics {
         }
     }
 
-    pub fn infer_from_kind_str(filename: &str, database_kind: Option<&str>) -> Self {
-        let parsed = database_kind.and_then(|value| DatabaseKind::parse(value).ok());
-        Self::infer(filename, parsed)
-    }
-
     pub fn is_unknown(&self) -> bool {
-        self.backup_kind.eq_ignore_ascii_case("unknown")
+        self.backup_kind == BackupKind::Unknown
     }
 }
 
@@ -306,7 +675,7 @@ pub struct BackupFileSummary {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BackupRestoreStorageSummary {
-    pub storage_backend: String,
+    pub storage_backend: StorageBackendKind,
     pub local_storage_path: String,
     pub s3_endpoint: Option<String>,
     pub s3_region: Option<String>,
@@ -315,9 +684,55 @@ pub struct BackupRestoreStorageSummary {
     pub s3_force_path_style: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub enum BackupObjectRollbackStrategy {
+    LocalDirectorySnapshot,
+    S3VersionedRollbackAnchor,
+    Unknown,
+}
+
+impl BackupObjectRollbackStrategy {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::LocalDirectorySnapshot => "local-directory-snapshot",
+            Self::S3VersionedRollbackAnchor => "s3-versioned-rollback-anchor",
+            Self::Unknown => "unknown",
+        }
+    }
+
+    pub fn parse(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "local-directory-snapshot" => Self::LocalDirectorySnapshot,
+            "s3-versioned-rollback-anchor" => Self::S3VersionedRollbackAnchor,
+            _ => Self::Unknown,
+        }
+    }
+
+    pub fn is_local_directory_snapshot(self) -> bool {
+        matches!(self, Self::LocalDirectorySnapshot)
+    }
+
+    pub fn is_s3_versioned_rollback_anchor(self) -> bool {
+        matches!(self, Self::S3VersionedRollbackAnchor)
+    }
+}
+
+impl From<String> for BackupObjectRollbackStrategy {
+    fn from(value: String) -> Self {
+        Self::parse(&value)
+    }
+}
+
+impl From<BackupObjectRollbackStrategy> for String {
+    fn from(value: BackupObjectRollbackStrategy) -> Self {
+        value.as_str().to_string()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BackupObjectRollbackAnchor {
-    pub strategy: String,
+    pub strategy: BackupObjectRollbackStrategy,
     pub checkpoint_at: DateTime<Utc>,
     pub local_storage_path: Option<String>,
     pub s3_endpoint: Option<String>,
@@ -335,7 +750,7 @@ pub struct BackupMetadataManifest {
     pub format_version: u32,
     pub filename: String,
     pub created_at: DateTime<Utc>,
-    pub database_kind: String,
+    pub database_kind: BackupDatabaseFamily,
     #[serde(default)]
     pub semantics: BackupSemantics,
     pub app_installed: bool,
@@ -351,8 +766,8 @@ pub struct BackupRestorePrecheckResponse {
     pub filename: String,
     pub backup_created_at: DateTime<Utc>,
     pub backup_size_bytes: u64,
-    pub current_database_kind: String,
-    pub backup_database_kind: String,
+    pub current_database_kind: BackupDatabaseFamily,
+    pub backup_database_kind: BackupDatabaseFamily,
     pub semantics: BackupSemantics,
     pub integrity_check_passed: bool,
     pub app_installed: bool,
@@ -365,15 +780,15 @@ pub struct BackupRestorePrecheckResponse {
     pub blockers: Vec<String>,
 }
 
-fn default_restore_database_kind() -> String {
-    "sqlite".to_string()
+fn default_restore_database_kind() -> BackupDatabaseFamily {
+    BackupDatabaseFamily::Sqlite
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PendingBackupRestore {
     pub filename: String,
     #[serde(default = "default_restore_database_kind")]
-    pub database_kind: String,
+    pub database_kind: BackupDatabaseFamily,
     #[serde(default)]
     pub semantics: BackupSemantics,
     pub requested_by_user_id: Uuid,
@@ -385,10 +800,10 @@ pub struct PendingBackupRestore {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BackupRestoreResult {
-    pub status: String,
+    pub status: BackupRestoreStatus,
     pub filename: String,
     #[serde(default = "default_restore_database_kind")]
-    pub database_kind: String,
+    pub database_kind: BackupDatabaseFamily,
     #[serde(default)]
     pub semantics: BackupSemantics,
     pub message: String,
@@ -420,23 +835,82 @@ fn default_backup_manifest_format_version() -> u32 {
 mod tests {
     use crate::config::DatabaseKind;
 
-    use super::BackupSemantics;
+    use super::{
+        BackupDatabaseFamily, BackupKind, BackupObjectRollbackStrategy, BackupRestoreStatus,
+        BackupSemantics, HealthState, RestoreMode, StorageBackendKind,
+    };
 
     #[test]
     fn backup_semantics_infer_from_database_kind() {
         let semantics = BackupSemantics::from_database_kind(DatabaseKind::Sqlite);
-        assert_eq!(semantics.database_family, "sqlite");
-        assert_eq!(semantics.backup_kind, "sqlite-database-snapshot");
-        assert_eq!(semantics.restore_mode, "ui-restart-file-swap");
+        assert_eq!(semantics.database_family, BackupDatabaseFamily::Sqlite);
+        assert_eq!(semantics.backup_kind, BackupKind::SqliteDatabaseSnapshot);
+        assert_eq!(semantics.restore_mode, RestoreMode::UiRestartFileSwap);
         assert!(semantics.ui_restore_supported);
     }
 
     #[test]
     fn backup_semantics_infer_from_filename_for_legacy_records() {
         let semantics = BackupSemantics::infer("backup_123.mysql.sql", None);
-        assert_eq!(semantics.database_family, "mysql");
-        assert_eq!(semantics.backup_kind, "mysql-logical-dump");
-        assert_eq!(semantics.restore_mode, "ops-tooling-only");
+        assert_eq!(semantics.database_family, BackupDatabaseFamily::MySql);
+        assert_eq!(semantics.backup_kind, BackupKind::MySqlLogicalDump);
+        assert_eq!(semantics.restore_mode, RestoreMode::OpsToolingOnly);
         assert!(!semantics.ui_restore_supported);
+    }
+
+    #[test]
+    fn backup_restore_status_parses_legacy_string_values() {
+        assert_eq!(
+            BackupRestoreStatus::parse("rolled_back"),
+            BackupRestoreStatus::RolledBack
+        );
+        assert_eq!(
+            BackupRestoreStatus::parse("started"),
+            BackupRestoreStatus::Started
+        );
+        assert_eq!(
+            BackupRestoreStatus::parse("other"),
+            BackupRestoreStatus::Unknown
+        );
+    }
+
+    #[test]
+    fn health_state_parses_legacy_string_values() {
+        assert_eq!(HealthState::parse("healthy"), HealthState::Healthy);
+        assert_eq!(HealthState::parse("DISABLED"), HealthState::Disabled);
+        assert_eq!(
+            HealthState::parse("bootstrapping"),
+            HealthState::Bootstrapping
+        );
+        assert_eq!(HealthState::parse("other"), HealthState::Unknown);
+    }
+
+    #[test]
+    fn storage_backend_kind_parses_legacy_string_values() {
+        assert_eq!(
+            StorageBackendKind::parse("local"),
+            StorageBackendKind::Local
+        );
+        assert_eq!(StorageBackendKind::parse("S3"), StorageBackendKind::S3);
+        assert_eq!(
+            StorageBackendKind::parse("ftp"),
+            StorageBackendKind::Unknown
+        );
+    }
+
+    #[test]
+    fn backup_object_rollback_strategy_parses_legacy_string_values() {
+        assert_eq!(
+            BackupObjectRollbackStrategy::parse("local-directory-snapshot"),
+            BackupObjectRollbackStrategy::LocalDirectorySnapshot
+        );
+        assert_eq!(
+            BackupObjectRollbackStrategy::parse("S3-versioned-rollback-anchor"),
+            BackupObjectRollbackStrategy::S3VersionedRollbackAnchor
+        );
+        assert_eq!(
+            BackupObjectRollbackStrategy::parse("other"),
+            BackupObjectRollbackStrategy::Unknown
+        );
     }
 }

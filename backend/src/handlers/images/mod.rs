@@ -6,5 +6,5 @@ mod upload;
 
 pub use delete_restore::delete_images;
 pub use query::{get_image, get_images};
-pub use update::{set_expiry, update_image};
+pub use update::set_expiry;
 pub use upload::upload_image;

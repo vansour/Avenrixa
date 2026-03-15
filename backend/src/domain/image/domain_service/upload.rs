@@ -1,4 +1,5 @@
 use super::*;
+use crate::models::ImageStatus;
 
 impl<I: ImageRepository> ImageDomainService<I> {
     /// 验证文件名安全性
@@ -82,17 +83,14 @@ impl<I: ImageRepository> ImageDomainService<I> {
             return Ok(Image {
                 id: info.id,
                 user_id,
-                category_id: None,
                 filename: info.filename,
                 thumbnail: None,
-                original_filename: None,
                 size: compressed_size,
                 hash,
                 format: ext.clone(),
                 views: 0,
-                status: "active".to_string(),
+                status: ImageStatus::Active,
                 expires_at: None,
-                deleted_at: None,
                 created_at: Utc::now(),
                 total_count: None,
             });
@@ -115,17 +113,14 @@ impl<I: ImageRepository> ImageDomainService<I> {
         let image = Image {
             id: image_id,
             user_id,
-            category_id: None,
             filename: stored_filename.clone(),
             thumbnail: None,
-            original_filename: None,
             size: compressed_size,
             hash,
             format: ext.clone(),
             views: 0,
-            status: "active".to_string(),
+            status: ImageStatus::Active,
             expires_at: None,
-            deleted_at: None,
             created_at: Utc::now(),
             total_count: None,
         };
@@ -143,7 +138,6 @@ impl<I: ImageRepository> ImageDomainService<I> {
             None,
             Some(serde_json::json!({
                 "actor_email": actor_email,
-                "original_filename": filename,
                 "stored_filename": stored_filename,
                 "size_bytes": compressed_size,
                 "format": ext,
@@ -216,17 +210,14 @@ impl<I: ImageRepository> ImageDomainService<I> {
             return Ok(Image {
                 id: info.id,
                 user_id,
-                category_id: None,
                 filename: info.filename,
                 thumbnail: None,
-                original_filename: None,
                 size: compressed_size,
                 hash,
                 format: ext.clone(),
                 views: 0,
-                status: "active".to_string(),
+                status: ImageStatus::Active,
                 expires_at: None,
-                deleted_at: None,
                 created_at: Utc::now(),
                 total_count: None,
             });
@@ -248,17 +239,14 @@ impl<I: ImageRepository> ImageDomainService<I> {
         let image = Image {
             id: image_id,
             user_id,
-            category_id: None,
             filename: stored_filename.clone(),
             thumbnail: None,
-            original_filename: None,
             size: compressed_size,
             hash,
             format: ext.clone(),
             views: 0,
-            status: "active".to_string(),
+            status: ImageStatus::Active,
             expires_at: None,
-            deleted_at: None,
             created_at: Utc::now(),
             total_count: None,
         };
@@ -276,7 +264,6 @@ impl<I: ImageRepository> ImageDomainService<I> {
             None,
             Some(serde_json::json!({
                 "actor_email": actor_email,
-                "original_filename": filename,
                 "stored_filename": stored_filename,
                 "size_bytes": compressed_size,
                 "format": ext,

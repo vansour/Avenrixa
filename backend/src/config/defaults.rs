@@ -42,7 +42,6 @@ impl Default for Config {
             cache_policy: CachePolicyConfig {
                 list_ttl: 300,
                 detail_ttl: 1800,
-                categories_ttl: 3600,
             },
             rate_limit: RateLimitConfig {
                 requests_per_minute: 100,
@@ -50,8 +49,6 @@ impl Default for Config {
             },
             cleanup: CleanupConfig {
                 enabled: true,
-                deleted_images_retention_days: 30,
-                deleted_cleanup_interval_seconds: 86400,
                 expiry_check_interval_seconds: 3600,
             },
             cookie: CookieConfig {

@@ -1,10 +1,12 @@
-use crate::types::api::{AdminSettingsConfig, UpdateAdminSettingsConfigRequest};
+use crate::types::api::{
+    AdminSettingsConfig, StorageBackendKind, UpdateAdminSettingsConfigRequest,
+};
 use dioxus::prelude::*;
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct SettingsFormState {
     pub site_name: Signal<String>,
-    pub storage_backend: Signal<String>,
+    pub storage_backend: Signal<StorageBackendKind>,
     pub local_storage_path: Signal<String>,
     pub mail_enabled: Signal<bool>,
     pub mail_smtp_host: Signal<String>,
@@ -54,7 +56,7 @@ impl SettingsFormState {
     }
 
     pub fn is_s3_backend(&self) -> bool {
-        (self.storage_backend)() == "s3"
+        (self.storage_backend)().is_s3()
     }
 
     pub fn validate(&self) -> Result<(), String> {

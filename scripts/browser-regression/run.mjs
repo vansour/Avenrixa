@@ -412,7 +412,7 @@ async function phaseInstallAndBackup(page) {
   await assertGuideTarget(page, "打开存储设置", "存储设置");
   await reopenFirstRunGuide(page);
 
-  await assertGuideTarget(page, "去上传中心", "点击或拖拽上传图片");
+  await assertGuideTarget(page, "去上传中心", /点击.*拖拽.*上传图片/);
   await reopenFirstRunGuide(page);
 
   await assertGuideTarget(page, "打开审计日志", "审计日志");

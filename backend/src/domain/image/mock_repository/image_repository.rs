@@ -30,12 +30,11 @@ impl ImageRepository for MockImageRepository {
         user_id: Uuid,
         limit: i32,
         offset: i32,
-        _tag: Option<&str>,
     ) -> Result<Vec<Image>, sqlx::Error> {
         let images = self.images.lock().unwrap();
         let mut filtered: Vec<Image> = images
             .iter()
-            .filter(|image| image.user_id == user_id && image.deleted_at.is_none())
+            .filter(|image| image.user_id == user_id && image.status.is_active())
             .cloned()
             .collect();
 
@@ -83,7 +82,11 @@ impl ImageRepository for MockImageRepository {
         let images = self.images.lock().unwrap();
         Ok(images
             .iter()
-            .filter(|image| image.user_id == user_id && image_ids.contains(&image.id))
+            .filter(|image| {
+                image.user_id == user_id
+                    && image_ids.contains(&image.id)
+                    && image.status.is_active()
+            })
             .cloned()
             .collect())
     }
@@ -96,7 +99,11 @@ impl ImageRepository for MockImageRepository {
         let images = self.images.lock().unwrap();
         Ok(images
             .iter()
-            .filter(|image| image.user_id == user_id && image_keys.contains(&image.hash))
+            .filter(|image| {
+                image.user_id == user_id
+                    && image_keys.contains(&image.hash)
+                    && image.status.is_active()
+            })
             .cloned()
             .collect())
     }
@@ -123,7 +130,7 @@ impl ImageRepository for MockImageRepository {
             if excluded_ids.contains(&image.id) {
                 continue;
             }
-            if filenames.contains(&image.filename) {
+            if image.status.is_active() && filenames.contains(&image.filename) {
                 referenced.insert(image.filename.clone());
             }
         }
@@ -139,7 +146,7 @@ impl ImageRepository for MockImageRepository {
         Ok(images
             .iter()
             .find(|image| {
-                image.hash == hash && image.user_id == user_id && image.deleted_at.is_none()
+                image.hash == hash && image.user_id == user_id && image.status.is_active()
             })
             .cloned())
     }
@@ -148,7 +155,7 @@ impl ImageRepository for MockImageRepository {
         let images = self.images.lock().unwrap();
         Ok(images
             .iter()
-            .find(|image| image.hash == hash && image.deleted_at.is_none())
+            .find(|image| image.hash == hash && image.status.is_active())
             .cloned())
     }
 }

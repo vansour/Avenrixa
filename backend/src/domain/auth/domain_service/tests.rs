@@ -3,7 +3,7 @@ use crate::domain::auth::mock_repository::MockAuthRepository;
 use crate::domain::auth::repository::AuthRepository;
 use crate::domain::auth::service::AuthService;
 use crate::error::AppError;
-use crate::models::{LoginRequest, RegisterRequest};
+use crate::models::{LoginRequest, RegisterRequest, UserRole};
 use uuid::Uuid;
 
 fn build_test_user() -> crate::models::User {
@@ -13,7 +13,7 @@ fn build_test_user() -> crate::models::User {
         email: "admin@example.com".to_string(),
         email_verified_at: Some(chrono::Utc::now()),
         password_hash,
-        role: "admin".to_string(),
+        role: UserRole::Admin,
         created_at: chrono::Utc::now(),
     }
 }
@@ -122,6 +122,7 @@ async fn test_register_creates_unverified_user_and_dispatch() {
         .expect("query should succeed")
         .expect("user should exist");
     assert_eq!(created_user.email, "new-user@example.com");
+    assert_eq!(created_user.role, UserRole::User);
     assert!(created_user.email_verified_at.is_none());
     assert!(!dispatch.token.is_empty());
 }

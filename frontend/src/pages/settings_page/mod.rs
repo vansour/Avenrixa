@@ -5,7 +5,7 @@ mod view;
 use crate::app_context::{use_auth_store, use_settings_service, use_toast_store};
 use crate::auth_session::{auth_session_expired_message, handle_auth_session_error};
 use crate::store::{AuthStore, SettingsAnchor, ToastStore};
-use crate::types::api::AdminSettingsConfig;
+use crate::types::api::{AdminSettingsConfig, StorageBackendKind};
 use crate::types::errors::AppError;
 use dioxus::prelude::*;
 use gloo_timers::future::TimeoutFuture;
@@ -64,7 +64,7 @@ pub fn SettingsPage(
     let mut applied_requested_section = use_signal(|| None::<SettingsAnchor>);
 
     let site_name = use_signal(String::new);
-    let storage_backend = use_signal(|| "local".to_string());
+    let storage_backend = use_signal(|| StorageBackendKind::Local);
     let local_storage_path = use_signal(String::new);
     let mail_enabled = use_signal(|| false);
     let mail_smtp_host = use_signal(String::new);
@@ -206,9 +206,6 @@ pub fn SettingsPage(
                     form.apply_loaded_config(config.clone());
                     on_site_name_updated.call(config.site_name.clone());
                     toast_store.show_success("设置已保存".to_string());
-                    if config.restart_required {
-                        toast_store.show_info("部分设置需重启服务后生效".to_string());
-                    }
                 }
                 Err(err) => {
                     if handle_settings_auth_error(&auth_store, &toast_store, &err) {
@@ -422,7 +419,7 @@ fn count_config_changes(form: SettingsFormState, config: &AdminSettingsConfig) -
     if (form.site_name)().trim() != config.site_name.trim() {
         changes += 1;
     }
-    if (form.storage_backend)().trim() != config.storage_backend.trim() {
+    if (form.storage_backend)() != config.storage_backend {
         changes += 1;
     }
     if (form.local_storage_path)().trim() != config.local_storage_path.trim() {

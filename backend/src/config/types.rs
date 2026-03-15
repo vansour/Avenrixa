@@ -26,8 +26,6 @@ pub enum ConfigError {
     InvalidServerRateLimit,
     #[error("无效的去重策略: {0}，必须是 'user' 或 'global'")]
     InvalidDedupStrategy(String),
-    #[error("保留图片天数必须大于 0")]
-    InvalidRetentionDays,
     #[error("TTL 必须大于 0")]
     InvalidTtl,
     #[error("JPEG 质量必须在 1-100 之间")]
@@ -195,7 +193,6 @@ pub(crate) fn default_file_check_concurrent_threshold() -> usize {
 pub struct CachePolicyConfig {
     pub list_ttl: u64,
     pub detail_ttl: u64,
-    pub categories_ttl: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -207,8 +204,6 @@ pub struct RateLimitConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CleanupConfig {
     pub enabled: bool,
-    pub deleted_images_retention_days: i64,
-    pub deleted_cleanup_interval_seconds: u64,
     pub expiry_check_interval_seconds: u64,
 }
 

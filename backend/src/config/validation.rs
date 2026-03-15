@@ -70,12 +70,7 @@ impl Config {
             ));
         }
 
-        if self.cleanup.deleted_images_retention_days <= 0 {
-            return Err(ConfigError::InvalidRetentionDays);
-        }
-        if self.cleanup.deleted_cleanup_interval_seconds == 0
-            || self.cleanup.expiry_check_interval_seconds == 0
-        {
+        if self.cleanup.expiry_check_interval_seconds == 0 {
             return Err(ConfigError::InvalidCleanupInterval);
         }
 
@@ -90,10 +85,7 @@ impl Config {
             return Err(ConfigError::InvalidCookieMaxAge);
         }
 
-        if self.cache_policy.list_ttl == 0
-            || self.cache_policy.detail_ttl == 0
-            || self.cache_policy.categories_ttl == 0
-        {
+        if self.cache_policy.list_ttl == 0 || self.cache_policy.detail_ttl == 0 {
             return Err(ConfigError::InvalidTtl);
         }
 

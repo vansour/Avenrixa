@@ -18,7 +18,6 @@ mod runtime_settings;
 mod server;
 mod sqlite_restore;
 mod storage_backend;
-mod tasks;
 
 use bootstrap::{BootstrapAppState, BootstrapConfigStore, build_app_state, init_logging};
 use config::Config;

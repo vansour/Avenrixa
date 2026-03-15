@@ -5,12 +5,7 @@ use crate::models::{Image, ImageResponse, Paginated};
 use std::sync::Arc;
 
 pub(super) fn image_service(state: &AppState) -> Result<Arc<DefaultImageDomainService>, AppError> {
-    state
-        .image_domain_service
-        .clone()
-        .ok_or(AppError::Internal(anyhow::anyhow!(
-            "Image service not found"
-        )))
+    Ok(state.image_domain_service.clone())
 }
 
 pub(super) fn map_paginated_images(result: Paginated<Image>) -> Paginated<ImageResponse> {

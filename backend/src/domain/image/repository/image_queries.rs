@@ -5,7 +5,11 @@ use super::sql::{
     IMAGE_SELECT_COLUMNS, IMAGE_SELECT_WITH_TOTAL_COUNT, MYSQL_IMAGE_SELECT_WITH_TOTAL_COUNT,
 };
 use super::{MySqlImageRepository, PostgresImageRepository, SqliteImageRepository};
-use crate::models::Image;
+use crate::models::{Image, ImageStatus};
+
+fn active_status() -> &'static str {
+    ImageStatus::Active.as_str()
+}
 
 impl PostgresImageRepository {
     pub(super) async fn find_image_by_id_impl(
@@ -26,26 +30,13 @@ impl PostgresImageRepository {
         user_id: Uuid,
         limit: i32,
         offset: i32,
-        tag: Option<&str>,
     ) -> Result<Vec<Image>, sqlx::Error> {
-        let tag = tag
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(|value| value.to_lowercase());
-
         let mut builder = QueryBuilder::<Postgres>::new("SELECT ");
         builder.push(IMAGE_SELECT_WITH_TOTAL_COUNT);
         builder.push(" FROM images WHERE images.user_id = ");
         builder.push_bind(user_id);
-        builder.push(" AND images.deleted_at IS NULL AND images.status = 'active'");
-
-        if let Some(tag_value) = tag.as_deref() {
-            builder.push(
-                " AND EXISTS (SELECT 1 FROM image_tags it WHERE it.image_id = images.id AND it.tag = ",
-            );
-            builder.push_bind(tag_value);
-            builder.push(")");
-        }
+        builder.push(" AND images.status = ");
+        builder.push_bind(active_status());
 
         builder.push(" ORDER BY images.created_at DESC, images.id DESC");
         builder.push(" LIMIT ");
@@ -65,11 +56,12 @@ impl PostgresImageRepository {
         image_ids: &[Uuid],
     ) -> Result<Vec<Image>, sqlx::Error> {
         sqlx::query_as::<_, Image>(&format!(
-            "SELECT {} FROM images WHERE user_id = $1 AND id = ANY($2)",
+            "SELECT {} FROM images WHERE user_id = $1 AND id = ANY($2) AND status = $3",
             IMAGE_SELECT_COLUMNS
         ))
         .bind(user_id)
         .bind(image_ids)
+        .bind(active_status())
         .fetch_all(&self.pool)
         .await
     }
@@ -80,11 +72,12 @@ impl PostgresImageRepository {
         image_keys: &[String],
     ) -> Result<Vec<Image>, sqlx::Error> {
         sqlx::query_as::<_, Image>(&format!(
-            "SELECT {} FROM images WHERE user_id = $1 AND hash = ANY($2)",
+            "SELECT {} FROM images WHERE user_id = $1 AND hash = ANY($2) AND status = $3",
             IMAGE_SELECT_COLUMNS
         ))
         .bind(user_id)
         .bind(image_keys)
+        .bind(active_status())
         .fetch_all(&self.pool)
         .await
     }
@@ -102,10 +95,12 @@ impl PostgresImageRepository {
             "SELECT DISTINCT filename
              FROM images
              WHERE filename = ANY($1)
+               AND status = $3
                AND NOT (id = ANY($2))",
         )
         .bind(filenames)
         .bind(excluded_ids)
+        .bind(active_status())
         .fetch_all(&self.pool)
         .await
     }
@@ -116,11 +111,12 @@ impl PostgresImageRepository {
         user_id: Uuid,
     ) -> Result<Option<Image>, sqlx::Error> {
         sqlx::query_as::<_, Image>(&format!(
-            "SELECT {} FROM images WHERE hash = $1 AND user_id = $2 AND deleted_at IS NULL",
+            "SELECT {} FROM images WHERE hash = $1 AND user_id = $2 AND status = $3",
             IMAGE_SELECT_COLUMNS
         ))
         .bind(hash)
         .bind(user_id)
+        .bind(active_status())
         .fetch_optional(&self.pool)
         .await
     }
@@ -130,10 +126,11 @@ impl PostgresImageRepository {
         hash: &str,
     ) -> Result<Option<Image>, sqlx::Error> {
         sqlx::query_as::<_, Image>(&format!(
-            "SELECT {} FROM images WHERE hash = $1 AND deleted_at IS NULL LIMIT 1",
+            "SELECT {} FROM images WHERE hash = $1 AND status = $2 LIMIT 1",
             IMAGE_SELECT_COLUMNS
         ))
         .bind(hash)
+        .bind(active_status())
         .fetch_optional(&self.pool)
         .await
     }
@@ -158,26 +155,13 @@ impl MySqlImageRepository {
         user_id: Uuid,
         limit: i32,
         offset: i32,
-        tag: Option<&str>,
     ) -> Result<Vec<Image>, sqlx::Error> {
-        let tag = tag
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(|value| value.to_lowercase());
-
         let mut builder = QueryBuilder::<MySql>::new("SELECT ");
         builder.push(MYSQL_IMAGE_SELECT_WITH_TOTAL_COUNT);
         builder.push(" FROM images WHERE images.user_id = ");
         builder.push_bind(user_id);
-        builder.push(" AND images.deleted_at IS NULL AND images.status = 'active'");
-
-        if let Some(tag_value) = tag.as_deref() {
-            builder.push(
-                " AND EXISTS (SELECT 1 FROM image_tags it WHERE it.image_id = images.id AND it.tag = ",
-            );
-            builder.push_bind(tag_value);
-            builder.push(")");
-        }
+        builder.push(" AND images.status = ");
+        builder.push_bind(active_status());
 
         builder.push(" ORDER BY images.created_at DESC, images.id DESC");
         builder.push(" LIMIT ");
@@ -204,6 +188,8 @@ impl MySqlImageRepository {
         builder.push(IMAGE_SELECT_COLUMNS);
         builder.push(" FROM images WHERE user_id = ");
         builder.push_bind(user_id);
+        builder.push(" AND status = ");
+        builder.push_bind(active_status());
         builder.push(" AND id IN (");
         {
             let mut separated = builder.separated(", ");
@@ -232,6 +218,8 @@ impl MySqlImageRepository {
         builder.push(IMAGE_SELECT_COLUMNS);
         builder.push(" FROM images WHERE user_id = ");
         builder.push_bind(user_id);
+        builder.push(" AND status = ");
+        builder.push_bind(active_status());
         builder.push(" AND hash IN (");
         {
             let mut separated = builder.separated(", ");
@@ -265,6 +253,8 @@ impl MySqlImageRepository {
             }
         }
         builder.push(")");
+        builder.push(" AND status = ");
+        builder.push_bind(active_status());
 
         if !excluded_ids.is_empty() {
             builder.push(" AND id NOT IN (");
@@ -286,11 +276,12 @@ impl MySqlImageRepository {
         user_id: Uuid,
     ) -> Result<Option<Image>, sqlx::Error> {
         sqlx::query_as::<_, Image>(&format!(
-            "SELECT {} FROM images WHERE hash = ? AND user_id = ? AND deleted_at IS NULL",
+            "SELECT {} FROM images WHERE hash = ? AND user_id = ? AND status = ?",
             IMAGE_SELECT_COLUMNS
         ))
         .bind(hash)
         .bind(user_id)
+        .bind(active_status())
         .fetch_optional(&self.pool)
         .await
     }
@@ -300,10 +291,11 @@ impl MySqlImageRepository {
         hash: &str,
     ) -> Result<Option<Image>, sqlx::Error> {
         sqlx::query_as::<_, Image>(&format!(
-            "SELECT {} FROM images WHERE hash = ? AND deleted_at IS NULL LIMIT 1",
+            "SELECT {} FROM images WHERE hash = ? AND status = ? LIMIT 1",
             IMAGE_SELECT_COLUMNS
         ))
         .bind(hash)
+        .bind(active_status())
         .fetch_optional(&self.pool)
         .await
     }
@@ -328,26 +320,13 @@ impl SqliteImageRepository {
         user_id: Uuid,
         limit: i32,
         offset: i32,
-        tag: Option<&str>,
     ) -> Result<Vec<Image>, sqlx::Error> {
-        let tag = tag
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(|value| value.to_lowercase());
-
         let mut builder = QueryBuilder::<Sqlite>::new("SELECT ");
         builder.push(IMAGE_SELECT_WITH_TOTAL_COUNT);
         builder.push(" FROM images WHERE images.user_id = ");
         builder.push_bind(user_id);
-        builder.push(" AND images.deleted_at IS NULL AND images.status = 'active'");
-
-        if let Some(tag_value) = tag.as_deref() {
-            builder.push(
-                " AND EXISTS (SELECT 1 FROM image_tags it WHERE it.image_id = images.id AND it.tag = ",
-            );
-            builder.push_bind(tag_value);
-            builder.push(")");
-        }
+        builder.push(" AND images.status = ");
+        builder.push_bind(active_status());
 
         builder.push(" ORDER BY images.created_at DESC, images.id DESC");
         builder.push(" LIMIT ");
@@ -374,6 +353,8 @@ impl SqliteImageRepository {
         builder.push(IMAGE_SELECT_COLUMNS);
         builder.push(" FROM images WHERE user_id = ");
         builder.push_bind(user_id);
+        builder.push(" AND status = ");
+        builder.push_bind(active_status());
         builder.push(" AND id IN (");
         {
             let mut separated = builder.separated(", ");
@@ -402,6 +383,8 @@ impl SqliteImageRepository {
         builder.push(IMAGE_SELECT_COLUMNS);
         builder.push(" FROM images WHERE user_id = ");
         builder.push_bind(user_id);
+        builder.push(" AND status = ");
+        builder.push_bind(active_status());
         builder.push(" AND hash IN (");
         {
             let mut separated = builder.separated(", ");
@@ -435,6 +418,8 @@ impl SqliteImageRepository {
             }
         }
         builder.push(")");
+        builder.push(" AND status = ");
+        builder.push_bind(active_status());
 
         if !excluded_ids.is_empty() {
             builder.push(" AND id NOT IN (");
@@ -456,11 +441,12 @@ impl SqliteImageRepository {
         user_id: Uuid,
     ) -> Result<Option<Image>, sqlx::Error> {
         sqlx::query_as::<_, Image>(&format!(
-            "SELECT {} FROM images WHERE hash = ?1 AND user_id = ?2 AND deleted_at IS NULL",
+            "SELECT {} FROM images WHERE hash = ?1 AND user_id = ?2 AND status = ?3",
             IMAGE_SELECT_COLUMNS
         ))
         .bind(hash)
         .bind(user_id)
+        .bind(active_status())
         .fetch_optional(&self.pool)
         .await
     }
@@ -470,10 +456,11 @@ impl SqliteImageRepository {
         hash: &str,
     ) -> Result<Option<Image>, sqlx::Error> {
         sqlx::query_as::<_, Image>(&format!(
-            "SELECT {} FROM images WHERE hash = ?1 AND deleted_at IS NULL LIMIT 1",
+            "SELECT {} FROM images WHERE hash = ?1 AND status = ?2 LIMIT 1",
             IMAGE_SELECT_COLUMNS
         ))
         .bind(hash)
+        .bind(active_status())
         .fetch_optional(&self.pool)
         .await
     }

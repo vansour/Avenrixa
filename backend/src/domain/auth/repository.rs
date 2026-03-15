@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use sqlx::{MySqlPool, PgPool, SqlitePool};
 use uuid::Uuid;
 
-use crate::models::User;
+use crate::models::{User, UserRole};
 
 #[derive(Debug, Clone)]
 pub enum PasswordResetStatus {
@@ -152,7 +152,7 @@ impl AuthRepository for PostgresAuthRepository {
         .bind(&user.email)
         .bind(user.email_verified_at)
         .bind(&user.password_hash)
-        .bind(&user.role)
+        .bind(user.role.as_str())
         .bind(user.created_at)
         .execute(&self.pool)
         .await?;
@@ -255,7 +255,7 @@ impl AuthRepository for PostgresAuthRepository {
             email,
             email_verified_at,
             password_hash: password_hash.to_string(),
-            role,
+            role: UserRole::parse(&role),
             created_at,
         }))
     }
@@ -341,7 +341,7 @@ impl AuthRepository for PostgresAuthRepository {
             email,
             email_verified_at: Some(verified_at),
             password_hash,
-            role,
+            role: UserRole::parse(&role),
             created_at,
         }))
     }
@@ -381,7 +381,7 @@ impl AuthRepository for MySqlAuthRepository {
         .bind(&user.email)
         .bind(user.email_verified_at)
         .bind(&user.password_hash)
-        .bind(&user.role)
+        .bind(user.role.as_str())
         .bind(user.created_at)
         .execute(&self.pool)
         .await?;
@@ -486,7 +486,7 @@ impl AuthRepository for MySqlAuthRepository {
             email,
             email_verified_at,
             password_hash: password_hash.to_string(),
-            role,
+            role: UserRole::parse(&role),
             created_at,
         }))
     }
@@ -574,7 +574,7 @@ impl AuthRepository for MySqlAuthRepository {
             email,
             email_verified_at: Some(verified_at),
             password_hash,
-            role,
+            role: UserRole::parse(&role),
             created_at,
         }))
     }
@@ -614,7 +614,7 @@ impl AuthRepository for SqliteAuthRepository {
         .bind(&user.email)
         .bind(user.email_verified_at)
         .bind(&user.password_hash)
-        .bind(&user.role)
+        .bind(user.role.as_str())
         .bind(user.created_at)
         .execute(&self.pool)
         .await?;
@@ -726,7 +726,7 @@ impl AuthRepository for SqliteAuthRepository {
             email,
             email_verified_at,
             password_hash: password_hash.to_string(),
-            role,
+            role: UserRole::parse(&role),
             created_at,
         }))
     }
@@ -821,7 +821,7 @@ impl AuthRepository for SqliteAuthRepository {
             email,
             email_verified_at: Some(verified_at),
             password_hash,
-            role,
+            role: UserRole::parse(&role),
             created_at,
         }))
     }

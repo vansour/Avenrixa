@@ -12,7 +12,6 @@ pub trait ImageRepository: Send + Sync {
         user_id: Uuid,
         limit: i32,
         offset: i32,
-        tag: Option<&str>,
     ) -> Result<Vec<Image>, sqlx::Error>;
     async fn create_image(&self, image: &Image) -> Result<(), sqlx::Error>;
     async fn update_image(&self, image: &Image) -> Result<(), sqlx::Error>;

@@ -59,8 +59,13 @@ pub async fn update_admin_settings_config(
         .runtime_settings
         .update_admin_settings_config(req)
         .await?;
+    state
+        .storage_manager
+        .apply_runtime_settings(updated.clone())
+        .await?;
     let restart_required = state.storage_manager.restart_required(&updated);
     let changed_keys = changed_setting_keys(&current, &updated);
+    let has_high_risk_change = changed_keys.iter().any(|key| raw_setting_is_high_risk(key));
 
     if !changed_keys.is_empty() {
         log_audit_db(
@@ -74,7 +79,7 @@ pub async fn update_admin_settings_config(
                 "admin_email": admin_user.email,
                 "changed_keys": changed_keys,
                 "restart_required": restart_required,
-                "risk_level": if restart_required { "danger" } else { "warning" },
+                "risk_level": if has_high_risk_change { "danger" } else { "warning" },
             })),
         )
         .await;
@@ -90,15 +95,19 @@ pub async fn update_setting(
     Json(req): Json<UpdateSettingRequest>,
 ) -> Result<(), AppError> {
     let previous_value = get_setting_value(&state.database, &key).await?;
-    state
+    let updated = state
         .runtime_settings
         .update_raw_setting(&key, &req.value)
+        .await?;
+    state
+        .storage_manager
+        .apply_runtime_settings(updated)
         .await?;
 
     let policy = admin_setting_policy(&key);
     let previous_value_masked = previous_value.map(|value| mask_admin_setting_value(&key, &value));
     let next_value_masked = mask_admin_setting_value(&key, &req.value);
-    let risk_level = if policy.requires_confirmation && raw_setting_requires_restart(&key) {
+    let risk_level = if policy.requires_confirmation && raw_setting_is_high_risk(&key) {
         "danger"
     } else if policy.requires_confirmation {
         "warning"
@@ -120,7 +129,7 @@ pub async fn update_setting(
             "new_value": next_value_masked,
             "requires_confirmation": policy.requires_confirmation,
             "risk_level": risk_level,
-            "restart_required": raw_setting_requires_restart(&key),
+            "restart_required": false,
         })),
     )
     .await;
@@ -189,7 +198,7 @@ fn changed_setting_keys(current: &RuntimeSettings, updated: &RuntimeSettings) ->
     changed
 }
 
-fn raw_setting_requires_restart(key: &str) -> bool {
+fn raw_setting_is_high_risk(key: &str) -> bool {
     matches!(
         key,
         SETTING_STORAGE_BACKEND

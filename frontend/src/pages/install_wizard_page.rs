@@ -6,14 +6,13 @@ use crate::pages::settings_page::{
 use crate::services::InstallService;
 use crate::types::api::{
     AdminSettingsConfig, BootstrapStatusResponse, InstallBootstrapRequest,
-    InstallBootstrapResponse, StorageDirectoryEntry,
+    InstallBootstrapResponse, StorageBackendKind, StorageDirectoryEntry,
 };
 use base64::Engine;
 use dioxus::html::FileData;
 use dioxus::prelude::*;
 
 const MIN_ADMIN_PASSWORD_LENGTH: usize = 12;
-const DEFAULT_INSTALL_LOCAL_STORAGE_PATH: &str = "/data/images";
 const INSTALL_WIZARD_STEPS: [InstallWizardStep; 4] = [
     InstallWizardStep::Admin,
     InstallWizardStep::General,
@@ -59,12 +58,7 @@ impl InstallWizardStep {
 }
 
 fn initial_local_storage_path(config: &AdminSettingsConfig) -> String {
-    let configured = config.local_storage_path.trim();
-    if !configured.is_empty() {
-        return configured.to_string();
-    }
-
-    DEFAULT_INSTALL_LOCAL_STORAGE_PATH.to_string()
+    config.local_storage_path.trim().to_string()
 }
 
 #[component]
@@ -81,8 +75,8 @@ pub fn InstallWizardPage(
         move || initial.clone()
     });
     let storage_backend = use_signal({
-        let initial = initial_config.storage_backend.clone();
-        move || initial.clone()
+        let initial = initial_config.storage_backend;
+        move || initial
     });
     let local_storage_path = use_signal({
         let initial = initial_local_storage_path(&initial_config);
@@ -185,8 +179,7 @@ pub fn InstallWizardPage(
     let mut storage_browser_open = use_signal(|| false);
     let storage_browser_loading = use_signal(|| false);
     let mut storage_browser_error = use_signal(String::new);
-    let storage_browser_current_path =
-        use_signal(|| DEFAULT_INSTALL_LOCAL_STORAGE_PATH.to_string());
+    let storage_browser_current_path = use_signal(String::new);
     let storage_browser_parent_path = use_signal(|| None::<String>);
     let storage_browser_directories = use_signal(Vec::<StorageDirectoryEntry>::new);
 
@@ -252,11 +245,7 @@ pub fn InstallWizardPage(
 
             match install_service.bootstrap_installation(request).await {
                 Ok(response) => {
-                    let message = if response.config.restart_required {
-                        "安装完成，管理员已登录；存储配置需要重启服务后生效".to_string()
-                    } else {
-                        "安装完成，已自动登录管理员账户".to_string()
-                    };
+                    let message = "安装完成，已自动登录管理员账户".to_string();
                     success_message.set(message.clone());
                     toast_store.show_success(message);
                     on_installed.call(response);
@@ -337,7 +326,7 @@ pub fn InstallWizardPage(
     } else {
         "数据库与缓存来自 bootstrap 配置文件，这里只做只读展示。"
     };
-    let database_label = bootstrap_database_kind_label(&bootstrap_status.database_kind).to_string();
+    let database_label = bootstrap_status.database_kind.label().to_string();
     let database_status = if bootstrap_status.database_configured {
         "已接入".to_string()
     } else {
@@ -366,6 +355,13 @@ pub fn InstallWizardPage(
 
     let current_step_value = current_step();
     let current_step_index = install_step_index(current_step_value);
+    let current_step_ready = install_step_complete(
+        current_step_value,
+        admin_ready,
+        general_ready,
+        storage_ready,
+        review_ready,
+    );
     let total_steps = INSTALL_WIZARD_STEPS.len();
     let prev_step = current_step_index
         .checked_sub(1)
@@ -431,7 +427,12 @@ pub fn InstallWizardPage(
                             button {
                                 class: format!("install-step-button {state_class}"),
                                 r#type: "button",
-                                disabled: is_installing(),
+                                disabled: is_installing() || !install_step_accessible(
+                                    step,
+                                    admin_ready,
+                                    general_ready,
+                                    storage_ready,
+                                ),
                                 onclick: move |_| current_step.set(step),
                                 div { class: "install-step-index", "{index + 1}" }
                                 div { class: "install-step-copy",
@@ -613,138 +614,135 @@ pub fn InstallWizardPage(
                                         label { class: "settings-field",
                                             span { "存储后端" }
                                             select {
-                                                value: "{(form.storage_backend)()}",
+                                                value: "{(form.storage_backend)().as_str()}",
                                                 onchange: move |event| {
-                                                    let next = event.value();
-                                                    (form.storage_backend).set(next.clone());
-                                                    if (form.local_storage_path)().trim().is_empty() {
-                                                        (form.local_storage_path).set(DEFAULT_INSTALL_LOCAL_STORAGE_PATH.to_string());
-                                                    }
+                                                    (form.storage_backend).set(StorageBackendKind::parse(&event.value()));
                                                     storage_browser_open.set(false);
                                                     storage_browser_error.set(String::new());
                                                 },
                                                 disabled: is_installing(),
-                                                option { value: "local", "本地存储" }
-                                                option { value: "s3", "对象存储（S3）" }
+                                                option { value: StorageBackendKind::Local.as_str(), "本地存储" }
+                                                option { value: StorageBackendKind::S3.as_str(), "对象存储（S3）" }
                                             }
                                         }
 
-                                        if !form.is_s3_backend() {
-                                            div { class: "settings-field settings-field-full",
-                                                span { "本地存储路径" }
-                                                div { class: "install-path-picker",
-                                                    input {
-                                                        class: "install-path-input",
-                                                        r#type: "text",
-                                                        value: "{(form.local_storage_path)()}",
-                                                        readonly: true,
-                                                        disabled: true,
-                                                    }
-                                                    button {
-                                                        class: "btn btn-ghost",
-                                                        r#type: "button",
-                                                        disabled: is_installing() || storage_browser_loading(),
-                                                        onclick: move |_| {
-                                                            storage_browser_open.set(true);
-                                                            load_install_storage_directories(
-                                                                open_browser_service.clone(),
-                                                                storage_browser_loading,
-                                                                storage_browser_error,
-                                                                storage_browser_current_path,
-                                                                storage_browser_parent_path,
-                                                                storage_browser_directories,
-                                                                (form.local_storage_path)(),
-                                                            );
-                                                        },
-                                                        if storage_browser_loading() { "读取中..." } else { "选择文件夹" }
-                                                    }
+                                        div { class: "settings-field settings-field-full",
+                                            span { "本地存储路径" }
+                                            p { class: "settings-section-copy",
+                                                "必填。建议选择容器或宿主机上已经挂载好的数据卷路径；S3 模式下也会保留这一路径。"
+                                            }
+                                            div { class: "install-path-picker",
+                                                input {
+                                                    class: "install-path-input",
+                                                    r#type: "text",
+                                                    value: "{(form.local_storage_path)()}",
+                                                    readonly: true,
+                                                    disabled: true,
                                                 }
-                                                if storage_browser_open() {
-                                                    Modal {
-                                                        title: "选择本地存储目录".to_string(),
-                                                        content_class: "storage-browser-modal-shell".to_string(),
-                                                        on_close: move |_| storage_browser_open.set(false),
-                                                        div { class: "install-path-browser",
-                                                            div { class: "install-path-browser-summary",
-                                                                div {
-                                                                    p { class: "install-path-browser-label", "当前目录" }
-                                                                    code { class: "install-path-browser-current", "{storage_browser_current_path()}" }
-                                                                }
-                                                                p { class: "install-path-browser-meta",
-                                                                    if storage_browser_loading() {
-                                                                        "正在读取目录..."
-                                                                    } else {
-                                                                        "{browser_directories.len()} 个子目录"
-                                                                    }
-                                                                }
+                                                button {
+                                                    class: "btn btn-ghost",
+                                                    r#type: "button",
+                                                    disabled: is_installing() || storage_browser_loading(),
+                                                    onclick: move |_| {
+                                                        storage_browser_open.set(true);
+                                                        load_install_storage_directories(
+                                                            open_browser_service.clone(),
+                                                            storage_browser_loading,
+                                                            storage_browser_error,
+                                                            storage_browser_current_path,
+                                                            storage_browser_parent_path,
+                                                            storage_browser_directories,
+                                                            (form.local_storage_path)(),
+                                                        );
+                                                    },
+                                                    if storage_browser_loading() { "读取中..." } else { "选择文件夹" }
+                                                }
+                                            }
+                                            if storage_browser_open() {
+                                                Modal {
+                                                    title: "选择本地存储目录".to_string(),
+                                                    content_class: "storage-browser-modal-shell".to_string(),
+                                                    on_close: move |_| storage_browser_open.set(false),
+                                                    div { class: "install-path-browser",
+                                                        div { class: "install-path-browser-summary",
+                                                            div {
+                                                                p { class: "install-path-browser-label", "当前目录" }
+                                                                code { class: "install-path-browser-current", "{storage_browser_current_path()}" }
                                                             }
-                                                            div { class: "install-path-browser-toolbar",
-                                                                button {
-                                                                    class: "btn btn-ghost",
-                                                                    r#type: "button",
-                                                                    disabled: is_installing() || storage_browser_loading() || storage_browser_parent_path().is_none(),
-                                                                    onclick: move |_| {
-                                                                        if let Some(parent_path) = storage_browser_parent_path() {
-                                                                            load_install_storage_directories(
-                                                                                browse_parent_service.clone(),
-                                                                                storage_browser_loading,
-                                                                                storage_browser_error,
-                                                                                storage_browser_current_path,
-                                                                                storage_browser_parent_path,
-                                                                                storage_browser_directories,
-                                                                                parent_path,
-                                                                            );
-                                                                        }
-                                                                    },
-                                                                    "上一级"
-                                                                }
-                                                                button {
-                                                                    class: "btn btn-primary",
-                                                                    r#type: "button",
-                                                                    disabled: is_installing(),
-                                                                    onclick: move |_| {
-                                                                        (form.local_storage_path).set(storage_browser_current_path());
-                                                                        storage_browser_open.set(false);
-                                                                    },
-                                                                    "选择当前文件夹"
-                                                                }
-                                                            }
-                                                            div { class: "install-path-browser-panel",
-                                                                if !storage_browser_error().is_empty() {
-                                                                    p { class: "install-path-browser-error", "{storage_browser_error()}" }
-                                                                } else if storage_browser_loading() {
-                                                                    p { class: "install-path-browser-empty", "正在读取目录..." }
-                                                                } else if storage_browser_directories().is_empty() {
-                                                                    p { class: "install-path-browser-empty", "当前目录下没有可继续展开的子目录。" }
+                                                            p { class: "install-path-browser-meta",
+                                                                if storage_browser_loading() {
+                                                                    "正在读取目录..."
                                                                 } else {
-                                                                    div { class: "install-path-browser-list",
-                                                                        {browser_directories.iter().map(|entry| {
-                                                                            let entry_path = entry.path.clone();
-                                                                            let entry_name = entry.name.clone();
-                                                                            let browse_entry_service = install_service.clone();
-                                                                            rsx! {
-                                                                                button {
-                                                                                    key: "{entry_path}",
-                                                                                    class: "install-path-browser-item",
-                                                                                    r#type: "button",
-                                                                                    disabled: is_installing() || storage_browser_loading(),
-                                                                                    onclick: move |_| {
-                                                                                        load_install_storage_directories(
-                                                                                            browse_entry_service.clone(),
-                                                                                            storage_browser_loading,
-                                                                                            storage_browser_error,
-                                                                                            storage_browser_current_path,
-                                                                                            storage_browser_parent_path,
-                                                                                            storage_browser_directories,
-                                                                                            entry_path.clone(),
-                                                                                        );
-                                                                                    },
-                                                                                    span { class: "install-path-browser-folder" }
-                                                                                    span { class: "install-path-browser-name", "{entry_name}" }
-                                                                                }
-                                                                            }
-                                                                        })}
+                                                                    "{browser_directories.len()} 个子目录"
+                                                                }
+                                                            }
+                                                        }
+                                                        div { class: "install-path-browser-toolbar",
+                                                            button {
+                                                                class: "btn btn-ghost",
+                                                                r#type: "button",
+                                                                disabled: is_installing() || storage_browser_loading() || storage_browser_parent_path().is_none(),
+                                                                onclick: move |_| {
+                                                                    if let Some(parent_path) = storage_browser_parent_path() {
+                                                                        load_install_storage_directories(
+                                                                            browse_parent_service.clone(),
+                                                                            storage_browser_loading,
+                                                                            storage_browser_error,
+                                                                            storage_browser_current_path,
+                                                                            storage_browser_parent_path,
+                                                                            storage_browser_directories,
+                                                                            parent_path,
+                                                                        );
                                                                     }
+                                                                },
+                                                                "上一级"
+                                                            }
+                                                            button {
+                                                                class: "btn btn-primary",
+                                                                r#type: "button",
+                                                                disabled: is_installing(),
+                                                                onclick: move |_| {
+                                                                    (form.local_storage_path).set(storage_browser_current_path());
+                                                                    storage_browser_open.set(false);
+                                                                },
+                                                                "选择当前文件夹"
+                                                            }
+                                                        }
+                                                        div { class: "install-path-browser-panel",
+                                                            if !storage_browser_error().is_empty() {
+                                                                p { class: "install-path-browser-error", "{storage_browser_error()}" }
+                                                            } else if storage_browser_loading() {
+                                                                p { class: "install-path-browser-empty", "正在读取目录..." }
+                                                            } else if storage_browser_directories().is_empty() {
+                                                                p { class: "install-path-browser-empty", "当前目录下没有可继续展开的子目录。" }
+                                                            } else {
+                                                                div { class: "install-path-browser-list",
+                                                                    {browser_directories.iter().map(|entry| {
+                                                                        let entry_path = entry.path.clone();
+                                                                        let entry_name = entry.name.clone();
+                                                                        let browse_entry_service = install_service.clone();
+                                                                        rsx! {
+                                                                            button {
+                                                                                key: "{entry_path}",
+                                                                                class: "install-path-browser-item",
+                                                                                r#type: "button",
+                                                                                disabled: is_installing() || storage_browser_loading(),
+                                                                                onclick: move |_| {
+                                                                                    load_install_storage_directories(
+                                                                                        browse_entry_service.clone(),
+                                                                                        storage_browser_loading,
+                                                                                        storage_browser_error,
+                                                                                        storage_browser_current_path,
+                                                                                        storage_browser_parent_path,
+                                                                                        storage_browser_directories,
+                                                                                        entry_path.clone(),
+                                                                                    );
+                                                                                },
+                                                                                span { class: "install-path-browser-folder" }
+                                                                                span { class: "install-path-browser-name", "{entry_name}" }
+                                                                            }
+                                                                        }
+                                                                    })}
                                                                 }
                                                             }
                                                         }
@@ -814,7 +812,10 @@ pub fn InstallWizardPage(
                             button {
                                 class: "btn btn-primary",
                                 r#type: "button",
-                                disabled: is_installing() || (!is_review_step && next_step.is_none()) || (is_review_step && !review_ready),
+                                disabled: is_installing()
+                                    || (!is_review_step
+                                        && (!current_step_ready || next_step.is_none()))
+                                    || (is_review_step && !review_ready),
                                 onclick: handle_primary_action,
                                 "{primary_action_label}"
                             }
@@ -958,15 +959,17 @@ fn install_step_complete(
     }
 }
 
-fn bootstrap_database_kind_label(kind: &str) -> &'static str {
-    if kind.eq_ignore_ascii_case("postgresql") || kind.eq_ignore_ascii_case("postgres") {
-        "PostgreSQL"
-    } else if kind.eq_ignore_ascii_case("mysql") {
-        "MySQL / MariaDB"
-    } else if kind.eq_ignore_ascii_case("sqlite") {
-        "SQLite"
-    } else {
-        "未识别数据库"
+fn install_step_accessible(
+    step: InstallWizardStep,
+    admin_ready: bool,
+    general_ready: bool,
+    storage_ready: bool,
+) -> bool {
+    match step {
+        InstallWizardStep::Admin => true,
+        InstallWizardStep::General => admin_ready,
+        InstallWizardStep::Storage => admin_ready && general_ready,
+        InstallWizardStep::Review => admin_ready && general_ready && storage_ready,
     }
 }
 
@@ -1099,20 +1102,21 @@ fn load_install_storage_directories(
     mut storage_browser_directories: Signal<Vec<StorageDirectoryEntry>>,
     requested_path: String,
 ) {
-    let requested_path = if requested_path.trim().is_empty() {
-        DEFAULT_INSTALL_LOCAL_STORAGE_PATH.to_string()
-    } else {
-        requested_path
-    };
+    let requested_path = requested_path.trim().to_string();
 
     spawn(async move {
         storage_browser_loading.set(true);
         storage_browser_error.set(String::new());
 
-        match install_service
-            .browse_storage_directories(Some(requested_path.as_str()))
-            .await
-        {
+        let response = if requested_path.is_empty() {
+            install_service.browse_storage_directories(None).await
+        } else {
+            install_service
+                .browse_storage_directories(Some(requested_path.as_str()))
+                .await
+        };
+
+        match response {
             Ok(response) => {
                 storage_browser_current_path.set(response.current_path);
                 storage_browser_parent_path.set(response.parent_path);
@@ -1206,6 +1210,61 @@ mod tests {
             "admin@example.com",
             "Password123!",
             "Password123!"
+        ));
+    }
+
+    #[test]
+    fn initial_local_storage_path_keeps_empty_value_until_user_selects_directory() {
+        let config = AdminSettingsConfig {
+            site_name: "Vansour Image".to_string(),
+            storage_backend: StorageBackendKind::Local,
+            local_storage_path: "   ".to_string(),
+            mail_enabled: false,
+            mail_smtp_host: String::new(),
+            mail_smtp_port: 587,
+            mail_smtp_user: None,
+            mail_smtp_password_set: false,
+            mail_from_email: String::new(),
+            mail_from_name: String::new(),
+            mail_link_base_url: String::new(),
+            s3_endpoint: None,
+            s3_region: None,
+            s3_bucket: None,
+            s3_prefix: None,
+            s3_access_key: None,
+            s3_secret_key_set: false,
+            s3_force_path_style: true,
+            restart_required: false,
+        };
+
+        assert!(initial_local_storage_path(&config).is_empty());
+    }
+
+    #[test]
+    fn install_step_accessible_requires_previous_steps_to_finish() {
+        assert!(install_step_accessible(
+            InstallWizardStep::Admin,
+            false,
+            false,
+            false
+        ));
+        assert!(!install_step_accessible(
+            InstallWizardStep::General,
+            false,
+            false,
+            false
+        ));
+        assert!(!install_step_accessible(
+            InstallWizardStep::Storage,
+            true,
+            false,
+            false
+        ));
+        assert!(install_step_accessible(
+            InstallWizardStep::Review,
+            true,
+            true,
+            true
         ));
     }
 }

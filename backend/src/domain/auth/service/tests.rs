@@ -1,5 +1,6 @@
 use super::*;
 use crate::config::Config;
+use crate::models::UserRole;
 use chrono::Utc;
 use uuid::Uuid;
 
@@ -41,11 +42,11 @@ fn test_generate_and_verify_token() {
     let service = create_test_service();
     let user_id = Uuid::new_v4();
     let email = "testuser@example.com";
-    let role = "user";
+    let role = UserRole::User;
     let token_version = 3;
 
     let token = service
-        .generate_token(user_id, email, role, token_version, 4)
+        .generate_token(user_id, email, &role, token_version, 4)
         .expect("Failed to generate token");
 
     let claims = service
@@ -53,7 +54,7 @@ fn test_generate_and_verify_token() {
         .expect("Failed to verify token");
     assert_eq!(claims.sub, user_id);
     assert_eq!(claims.email, email);
-    assert_eq!(claims.role, role);
+    assert_eq!(claims.role, role.as_str());
     assert_eq!(claims.token_version, token_version);
     assert_eq!(claims.session_epoch, 4);
 }
@@ -71,7 +72,13 @@ fn test_generate_token_uses_cookie_max_age() {
     let service = AuthService::new(&config).expect("Failed to create test auth service");
 
     let token = service
-        .generate_token(Uuid::new_v4(), "testuser@example.com", "user", 0, 0)
+        .generate_token(
+            Uuid::new_v4(),
+            "testuser@example.com",
+            &UserRole::User,
+            0,
+            0,
+        )
         .expect("Failed to generate token");
     let claims = service
         .verify_token(&token)
@@ -109,7 +116,7 @@ fn test_generate_access_token() {
     let user_id = Uuid::new_v4();
 
     let token = service
-        .generate_access_token(user_id, "testuser@example.com", "user", 7, 9)
+        .generate_access_token(user_id, "testuser@example.com", &UserRole::User, 7, 9)
         .expect("Failed to generate access token");
 
     let claims = service
@@ -147,7 +154,7 @@ fn test_verify_refresh_token_rejects_non_refresh_token() {
     let user_id = Uuid::new_v4();
 
     let access_token = service
-        .generate_access_token(user_id, "testuser@example.com", "user", 0, 0)
+        .generate_access_token(user_id, "testuser@example.com", &UserRole::User, 0, 0)
         .expect("Failed to generate access token");
 
     let result = service.verify_refresh_token(&access_token);

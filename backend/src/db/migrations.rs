@@ -38,6 +38,11 @@ static MYSQL_MIGRATOR: Lazy<Migrator> = Lazy::new(|| Migrator {
             "add auth runtime state",
             MYSQL_0003_ADD_AUTH_RUNTIME_STATE_SQL,
         ),
+        migration(
+            4,
+            "remove unused image metadata",
+            MYSQL_0004_REMOVE_UNUSED_IMAGE_METADATA_SQL,
+        ),
     ]),
     ..Migrator::DEFAULT
 });
@@ -55,6 +60,11 @@ static POSTGRES_MIGRATOR: Lazy<Migrator> = Lazy::new(|| Migrator {
             "add auth runtime state",
             POSTGRES_0003_ADD_AUTH_RUNTIME_STATE_SQL,
         ),
+        migration(
+            4,
+            "remove unused image metadata",
+            POSTGRES_0004_REMOVE_UNUSED_IMAGE_METADATA_SQL,
+        ),
     ]),
     ..Migrator::DEFAULT
 });
@@ -71,6 +81,11 @@ static SQLITE_MIGRATOR: Lazy<Migrator> = Lazy::new(|| Migrator {
             3,
             "add auth runtime state",
             SQLITE_0003_ADD_AUTH_RUNTIME_STATE_SQL,
+        ),
+        migration(
+            4,
+            "remove unused image metadata",
+            SQLITE_0004_REMOVE_UNUSED_IMAGE_METADATA_SQL,
         ),
     ]),
     ..Migrator::DEFAULT
@@ -222,6 +237,25 @@ CREATE TABLE IF NOT EXISTS revoked_tokens (
 CREATE INDEX idx_revoked_tokens_expires_at ON revoked_tokens(expires_at);
 "#;
 
+const MYSQL_0004_REMOVE_UNUSED_IMAGE_METADATA_SQL: &str = r#"DROP TABLE IF EXISTS image_tags;
+DROP TABLE IF EXISTS categories;
+
+DROP INDEX idx_images_category_id ON images;
+DROP INDEX idx_images_deleted_at ON images;
+DROP INDEX idx_images_hash_user_deleted ON images;
+DROP INDEX idx_images_user_status_partial ON images;
+DROP INDEX idx_images_user_category_status_partial ON images;
+DROP INDEX idx_images_user_status_created_partial ON images;
+DROP INDEX idx_images_user_status_expires_partial ON images;
+DROP INDEX idx_images_user_deleted_at_partial ON images;
+DROP INDEX idx_images_user_category_deleted ON images;
+
+ALTER TABLE images
+    DROP COLUMN category_id,
+    DROP COLUMN original_filename,
+    DROP COLUMN deleted_at;
+"#;
+
 const POSTGRES_0001_INITIAL_SCHEMA_SQL: &str = r#"CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY,
     email VARCHAR(255) UNIQUE NOT NULL,
@@ -366,6 +400,26 @@ CREATE INDEX IF NOT EXISTS idx_revoked_tokens_expires_at
     ON revoked_tokens(expires_at);
 "#;
 
+const POSTGRES_0004_REMOVE_UNUSED_IMAGE_METADATA_SQL: &str = r#"DROP TABLE IF EXISTS image_tags;
+DROP TABLE IF EXISTS categories;
+
+DROP INDEX IF EXISTS idx_images_category_id;
+DROP INDEX IF EXISTS idx_images_deleted_at;
+DROP INDEX IF EXISTS idx_images_hash_user_deleted;
+DROP INDEX IF EXISTS idx_images_user_status_partial;
+DROP INDEX IF EXISTS idx_images_user_category_status_partial;
+DROP INDEX IF EXISTS idx_images_user_status_created_partial;
+DROP INDEX IF EXISTS idx_images_user_status_expires_partial;
+DROP INDEX IF EXISTS idx_images_user_deleted_at_partial;
+DROP INDEX IF EXISTS idx_images_user_category_deleted;
+DROP INDEX IF EXISTS idx_images_original_filename_trgm;
+
+ALTER TABLE images
+    DROP COLUMN IF EXISTS category_id,
+    DROP COLUMN IF EXISTS original_filename,
+    DROP COLUMN IF EXISTS deleted_at;
+"#;
+
 const SQLITE_0001_INITIAL_SCHEMA_SQL: &str = r#"CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
     email TEXT UNIQUE NOT NULL,
@@ -500,11 +554,325 @@ CREATE INDEX IF NOT EXISTS idx_revoked_tokens_expires_at
     ON revoked_tokens(expires_at);
 "#;
 
+const SQLITE_0004_REMOVE_UNUSED_IMAGE_METADATA_SQL: &str = r#"PRAGMA foreign_keys = OFF;
+
+DROP INDEX IF EXISTS idx_images_category_id;
+DROP INDEX IF EXISTS idx_images_deleted_at;
+DROP INDEX IF EXISTS idx_images_hash_user_deleted;
+DROP INDEX IF EXISTS idx_images_user_status_partial;
+DROP INDEX IF EXISTS idx_images_user_category_status_partial;
+DROP INDEX IF EXISTS idx_images_user_status_created_partial;
+DROP INDEX IF EXISTS idx_images_user_status_expires_partial;
+DROP INDEX IF EXISTS idx_images_user_deleted_at_partial;
+DROP INDEX IF EXISTS idx_images_user_category_deleted;
+
+DROP TABLE IF EXISTS image_tags;
+DROP TABLE IF EXISTS categories;
+
+ALTER TABLE images RENAME TO images_old;
+
+CREATE TABLE images (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    filename TEXT NOT NULL,
+    thumbnail TEXT,
+    size INTEGER NOT NULL,
+    hash TEXT NOT NULL,
+    format TEXT,
+    views INTEGER DEFAULT 0,
+    status TEXT DEFAULT 'active',
+    expires_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+INSERT INTO images (
+    id,
+    user_id,
+    filename,
+    thumbnail,
+    size,
+    hash,
+    format,
+    views,
+    status,
+    expires_at,
+    created_at
+)
+SELECT
+    id,
+    user_id,
+    filename,
+    thumbnail,
+    size,
+    hash,
+    format,
+    views,
+    status,
+    expires_at,
+    created_at
+FROM images_old;
+
+DROP TABLE images_old;
+
+CREATE INDEX IF NOT EXISTS idx_images_user_id ON images(user_id);
+CREATE INDEX IF NOT EXISTS idx_images_created_at ON images(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_images_views ON images(views DESC);
+CREATE INDEX IF NOT EXISTS idx_images_size ON images(size);
+CREATE INDEX IF NOT EXISTS idx_images_hash ON images(hash);
+CREATE INDEX IF NOT EXISTS idx_images_status ON images(status);
+CREATE INDEX IF NOT EXISTS idx_images_expires_at ON images(expires_at);
+CREATE INDEX IF NOT EXISTS idx_images_user_status_created ON images(user_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_images_status_expires ON images(status, expires_at) WHERE expires_at IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_images_filename_lookup ON images(filename);
+
+PRAGMA foreign_keys = ON;
+"#;
+
 #[cfg(test)]
 mod tests {
+    use std::{borrow::Cow, process::Command, time::Duration};
+
+    use chrono::{NaiveDate, TimeZone, Utc};
     use hex::encode;
+    use sqlx::{
+        migrate::Migrator,
+        mysql::MySqlPoolOptions,
+        postgres::PgPoolOptions,
+        sqlite::{SqliteConnectOptions, SqlitePoolOptions},
+    };
+    use tokio::time::{sleep, timeout};
+    use uuid::Uuid;
 
     use super::{mysql_migrator, postgres_migrator, sqlite_migrator};
+
+    const EXPECTED_IMAGE_COLUMNS: [&str; 11] = [
+        "id",
+        "user_id",
+        "filename",
+        "thumbnail",
+        "size",
+        "hash",
+        "format",
+        "views",
+        "status",
+        "expires_at",
+        "created_at",
+    ];
+
+    fn legacy_migrator(migrator: &'static Migrator) -> Migrator {
+        Migrator {
+            migrations: Cow::Owned(migrator.migrations[..3].to_vec()),
+            ..Migrator::DEFAULT
+        }
+    }
+
+    fn mysql_legacy_migrator() -> Migrator {
+        legacy_migrator(mysql_migrator())
+    }
+
+    fn postgres_legacy_migrator() -> Migrator {
+        legacy_migrator(postgres_migrator())
+    }
+
+    fn sqlite_legacy_migrator() -> Migrator {
+        legacy_migrator(sqlite_migrator())
+    }
+
+    async fn sqlite_test_pool() -> (tempfile::TempDir, sqlx::SqlitePool) {
+        let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+        let database_path = temp_dir.path().join("migrations.db");
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(
+                SqliteConnectOptions::new()
+                    .filename(&database_path)
+                    .create_if_missing(true)
+                    .foreign_keys(true),
+            )
+            .await
+            .expect("sqlite pool should be created");
+
+        (temp_dir, pool)
+    }
+
+    async fn sqlite_table_exists(pool: &sqlx::SqlitePool, table_name: &str) -> bool {
+        sqlx::query_scalar::<_, i64>(
+            "SELECT EXISTS(
+                SELECT 1
+                FROM sqlite_master
+                WHERE type = 'table' AND name = ?1
+            )",
+        )
+        .bind(table_name)
+        .fetch_one(pool)
+        .await
+        .expect("sqlite_master query should succeed")
+            == 1
+    }
+
+    fn docker_output(args: &[String]) -> String {
+        let output = Command::new("docker")
+            .args(args)
+            .output()
+            .expect("docker command should start");
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        assert!(
+            output.status.success(),
+            "docker {} failed\nstdout: {}\nstderr: {}",
+            args.join(" "),
+            stdout,
+            stderr
+        );
+        stdout
+    }
+
+    struct DockerContainer {
+        name: String,
+    }
+
+    impl DockerContainer {
+        fn start(
+            name_prefix: &str,
+            image: &str,
+            container_port: u16,
+            env: &[(&str, &str)],
+        ) -> (Self, u16) {
+            let name = format!("{}-{}", name_prefix, Uuid::new_v4().simple());
+            let mut args = vec![
+                "run".to_string(),
+                "-d".to_string(),
+                "--rm".to_string(),
+                "--name".to_string(),
+                name.clone(),
+                "-p".to_string(),
+                format!("127.0.0.1::{}", container_port),
+            ];
+
+            for (key, value) in env {
+                args.push("-e".to_string());
+                args.push(format!("{}={}", key, value));
+            }
+
+            args.push(image.to_string());
+            docker_output(&args);
+
+            let container = Self { name };
+            let host_port = container.host_port(container_port);
+            (container, host_port)
+        }
+
+        fn host_port(&self, container_port: u16) -> u16 {
+            let template = format!(
+                "{{{{(index (index .NetworkSettings.Ports \"{}/tcp\") 0).HostPort}}}}",
+                container_port
+            );
+            let output = docker_output(&[
+                "inspect".to_string(),
+                "-f".to_string(),
+                template,
+                self.name.clone(),
+            ]);
+            output
+                .parse::<u16>()
+                .expect("docker host port should be numeric")
+        }
+    }
+
+    impl Drop for DockerContainer {
+        fn drop(&mut self) {
+            let _ = Command::new("docker")
+                .args(["rm", "-f", &self.name])
+                .output();
+        }
+    }
+
+    async fn wait_for_postgres_pool(database_url: &str) -> sqlx::PgPool {
+        for _ in 0..90 {
+            if let Ok(Ok(pool)) = timeout(
+                Duration::from_secs(2),
+                PgPoolOptions::new()
+                    .max_connections(1)
+                    .connect(database_url),
+            )
+            .await
+            {
+                if sqlx::query_scalar::<_, i32>("SELECT 1")
+                    .fetch_one(&pool)
+                    .await
+                    .is_ok()
+                {
+                    return pool;
+                }
+
+                pool.close().await;
+            }
+
+            sleep(Duration::from_secs(1)).await;
+        }
+
+        panic!("postgres container did not become ready in time");
+    }
+
+    async fn wait_for_mysql_pool(database_url: &str) -> sqlx::MySqlPool {
+        for _ in 0..120 {
+            if let Ok(Ok(pool)) = timeout(
+                Duration::from_secs(2),
+                MySqlPoolOptions::new()
+                    .max_connections(1)
+                    .connect(database_url),
+            )
+            .await
+            {
+                if sqlx::query_scalar::<_, i32>("SELECT 1")
+                    .fetch_one(&pool)
+                    .await
+                    .is_ok()
+                {
+                    return pool;
+                }
+
+                pool.close().await;
+            }
+
+            sleep(Duration::from_secs(1)).await;
+        }
+
+        panic!("mysql container did not become ready in time");
+    }
+
+    async fn start_postgres_test_pool() -> (DockerContainer, sqlx::PgPool) {
+        let (container, host_port) = DockerContainer::start(
+            "vansour-image-pg-upgrade",
+            "postgres:18",
+            5432,
+            &[
+                ("POSTGRES_DB", "image"),
+                ("POSTGRES_USER", "user"),
+                ("POSTGRES_PASSWORD", "pass"),
+            ],
+        );
+        let database_url = format!("postgresql://user:pass@127.0.0.1:{}/image", host_port);
+        let pool = wait_for_postgres_pool(&database_url).await;
+        (container, pool)
+    }
+
+    async fn start_mysql_test_pool() -> (DockerContainer, sqlx::MySqlPool) {
+        let (container, host_port) = DockerContainer::start(
+            "vansour-image-mysql-upgrade",
+            "mysql:8.4",
+            3306,
+            &[
+                ("MYSQL_DATABASE", "image"),
+                ("MYSQL_USER", "user"),
+                ("MYSQL_PASSWORD", "pass"),
+                ("MYSQL_ROOT_PASSWORD", "rootpass"),
+            ],
+        );
+        let database_url = format!("mysql://user:pass@127.0.0.1:{}/image", host_port);
+        let pool = wait_for_mysql_pool(&database_url).await;
+        (container, pool)
+    }
 
     #[test]
     fn embedded_migration_checksums_match_previous_files() {
@@ -520,6 +888,10 @@ mod tests {
             encode(mysql_migrator().migrations[2].checksum.as_ref()),
             "a964ea0b3b6b90ae31d10ec63ad30ecdd21a37e13c815e5834a54bf73996e0cd0ac98ced6434a9f2e6754b23d5efc82d"
         );
+        assert_eq!(
+            encode(mysql_migrator().migrations[3].checksum.as_ref()),
+            "b7e5b2b4dcba5ecaff6716bc1bf713e9b2084fc6aafa335b88fd73c93da1dc29e357542f3c49b0a4db07dee1fa0164ed"
+        );
 
         assert_eq!(
             encode(postgres_migrator().migrations[0].checksum.as_ref()),
@@ -532,6 +904,10 @@ mod tests {
         assert_eq!(
             encode(postgres_migrator().migrations[2].checksum.as_ref()),
             "f331d638badd2003158f875db2ec16a71a6b0e8721e5b605be725ee7c0f327eeaa32e65ccd2c2be3e4caa53c4cac516a"
+        );
+        assert_eq!(
+            encode(postgres_migrator().migrations[3].checksum.as_ref()),
+            "6929d35f692353eb93012002a4e4b54cac8d87f58afcb18248f908bf7a1a336e353a24cc834d52e3861790324062160a"
         );
 
         assert_eq!(
@@ -546,5 +922,721 @@ mod tests {
             encode(sqlite_migrator().migrations[2].checksum.as_ref()),
             "d65117bcefb41cc52dd4f1cffee63ecdd86a5111e2e8bb919be2367982ec12919fa0cdff4c053fa82f1e0390ef7c4aa0"
         );
+        assert_eq!(
+            encode(sqlite_migrator().migrations[3].checksum.as_ref()),
+            "461c2880e14f936f080c5e2fc5b2cb500d6fc6f32c91f622be5755812d487655af784c0a039e7d19409b5cb3a6f98032"
+        );
+    }
+
+    #[tokio::test]
+    async fn sqlite_upgrade_from_legacy_schema_removes_unused_metadata_and_preserves_image_data() {
+        let (_temp_dir, pool) = sqlite_test_pool().await;
+        sqlite_legacy_migrator()
+            .run(&pool)
+            .await
+            .expect("legacy migrations should succeed");
+
+        let user_id = "00000000-0000-0000-0000-000000000001";
+        let category_id = "00000000-0000-0000-0000-000000000010";
+        let image_id = "00000000-0000-0000-0000-000000000100";
+        let revoked_token_hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let expires_at = "2030-02-03T04:05:06.000Z";
+        let created_at = "2025-01-02T03:04:05.000Z";
+
+        sqlx::query(
+            "INSERT INTO users (
+                id,
+                email,
+                password_hash,
+                role,
+                created_at,
+                token_version
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        )
+        .bind(user_id)
+        .bind("legacy@example.com")
+        .bind("password-hash")
+        .bind("admin")
+        .bind(created_at)
+        .bind(2_i64)
+        .execute(&pool)
+        .await
+        .expect("legacy user should be inserted");
+
+        sqlx::query(
+            "INSERT INTO categories (id, user_id, name, created_at)
+             VALUES (?1, ?2, ?3, ?4)",
+        )
+        .bind(category_id)
+        .bind(user_id)
+        .bind("legacy-category")
+        .bind(created_at)
+        .execute(&pool)
+        .await
+        .expect("legacy category should be inserted");
+
+        sqlx::query(
+            "INSERT INTO images (
+                id,
+                user_id,
+                category_id,
+                filename,
+                thumbnail,
+                original_filename,
+                size,
+                hash,
+                format,
+                views,
+                status,
+                expires_at,
+                deleted_at,
+                created_at
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+        )
+        .bind(image_id)
+        .bind(user_id)
+        .bind(category_id)
+        .bind("legacy-image.png")
+        .bind("legacy-image-thumb.webp")
+        .bind("legacy-original-name.png")
+        .bind(123_456_i64)
+        .bind("legacy-hash")
+        .bind("png")
+        .bind(42_i64)
+        .bind("archived")
+        .bind(expires_at)
+        .bind("2025-01-03T03:04:05.000Z")
+        .bind(created_at)
+        .execute(&pool)
+        .await
+        .expect("legacy image should be inserted");
+
+        sqlx::query("INSERT INTO image_tags (image_id, tag) VALUES (?1, ?2)")
+            .bind(image_id)
+            .bind("legacy-tag")
+            .execute(&pool)
+            .await
+            .expect("legacy image tag should be inserted");
+
+        sqlx::query(
+            "UPDATE auth_state
+             SET session_epoch = ?1, updated_at = ?2
+             WHERE id = 1",
+        )
+        .bind(7_i64)
+        .bind(created_at)
+        .execute(&pool)
+        .await
+        .expect("auth state should be updated");
+
+        sqlx::query(
+            "INSERT INTO revoked_tokens (token_hash, expires_at, created_at)
+             VALUES (?1, ?2, ?3)",
+        )
+        .bind(revoked_token_hash)
+        .bind(expires_at)
+        .bind(created_at)
+        .execute(&pool)
+        .await
+        .expect("revoked token should be inserted");
+
+        sqlite_migrator()
+            .run(&pool)
+            .await
+            .expect("current migrations should upgrade legacy schema");
+
+        let image_columns = sqlx::query_scalar::<_, String>(
+            "SELECT name FROM pragma_table_info('images') ORDER BY cid",
+        )
+        .fetch_all(&pool)
+        .await
+        .expect("image columns should be listed");
+        assert_eq!(
+            image_columns,
+            vec![
+                "id",
+                "user_id",
+                "filename",
+                "thumbnail",
+                "size",
+                "hash",
+                "format",
+                "views",
+                "status",
+                "expires_at",
+                "created_at",
+            ]
+        );
+
+        assert!(!sqlite_table_exists(&pool, "categories").await);
+        assert!(!sqlite_table_exists(&pool, "image_tags").await);
+
+        let image = sqlx::query_as::<
+            _,
+            (
+                String,
+                String,
+                String,
+                Option<String>,
+                i64,
+                String,
+                Option<String>,
+                i64,
+                String,
+                Option<String>,
+                String,
+            ),
+        >(
+            "SELECT
+                id,
+                user_id,
+                filename,
+                thumbnail,
+                size,
+                hash,
+                format,
+                views,
+                status,
+                expires_at,
+                created_at
+             FROM images
+             WHERE id = ?1",
+        )
+        .bind(image_id)
+        .fetch_one(&pool)
+        .await
+        .expect("image should remain after migration");
+        assert_eq!(
+            image,
+            (
+                image_id.to_string(),
+                user_id.to_string(),
+                "legacy-image.png".to_string(),
+                Some("legacy-image-thumb.webp".to_string()),
+                123_456,
+                "legacy-hash".to_string(),
+                Some("png".to_string()),
+                42,
+                "archived".to_string(),
+                Some(expires_at.to_string()),
+                created_at.to_string(),
+            )
+        );
+
+        let session_epoch =
+            sqlx::query_scalar::<_, i64>("SELECT session_epoch FROM auth_state WHERE id = 1")
+                .fetch_one(&pool)
+                .await
+                .expect("auth state should remain");
+        assert_eq!(session_epoch, 7);
+
+        let revoked_token_count = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*)
+             FROM revoked_tokens
+             WHERE token_hash = ?1",
+        )
+        .bind(revoked_token_hash)
+        .fetch_one(&pool)
+        .await
+        .expect("revoked token count should load");
+        assert_eq!(revoked_token_count, 1);
+
+        let applied_versions =
+            sqlx::query_scalar::<_, i64>("SELECT version FROM _sqlx_migrations ORDER BY version")
+                .fetch_all(&pool)
+                .await
+                .expect("applied migrations should be listed");
+        assert_eq!(applied_versions, vec![1, 2, 3, 4]);
+    }
+
+    #[tokio::test]
+    #[ignore = "requires docker"]
+    async fn mysql_upgrade_from_legacy_schema_removes_unused_metadata_and_preserves_image_data() {
+        let (_container, pool) = start_mysql_test_pool().await;
+        mysql_legacy_migrator()
+            .run(&pool)
+            .await
+            .expect("legacy migrations should succeed");
+
+        let user_id = Uuid::parse_str("00000000-0000-0000-0000-000000000001")
+            .expect("user uuid should parse");
+        let category_id = Uuid::parse_str("00000000-0000-0000-0000-000000000010")
+            .expect("category uuid should parse");
+        let image_id = Uuid::parse_str("00000000-0000-0000-0000-000000000100")
+            .expect("image uuid should parse");
+        let revoked_token_hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let created_at = NaiveDate::from_ymd_opt(2025, 1, 2)
+            .expect("valid date")
+            .and_hms_micro_opt(3, 4, 5, 123_000)
+            .expect("valid timestamp");
+        let expires_at = NaiveDate::from_ymd_opt(2030, 2, 3)
+            .expect("valid date")
+            .and_hms_micro_opt(4, 5, 6, 456_000)
+            .expect("valid timestamp");
+        let deleted_at = NaiveDate::from_ymd_opt(2025, 1, 3)
+            .expect("valid date")
+            .and_hms_micro_opt(3, 4, 5, 789_000)
+            .expect("valid timestamp");
+
+        sqlx::query(
+            "INSERT INTO users (
+                id,
+                email,
+                password_hash,
+                role,
+                created_at,
+                token_version
+            )
+            VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .bind(user_id)
+        .bind("legacy@example.com")
+        .bind("password-hash")
+        .bind("admin")
+        .bind(created_at)
+        .bind(2_i64)
+        .execute(&pool)
+        .await
+        .expect("legacy user should be inserted");
+
+        sqlx::query(
+            "INSERT INTO categories (id, user_id, name, created_at)
+             VALUES (?, ?, ?, ?)",
+        )
+        .bind(category_id)
+        .bind(user_id)
+        .bind("legacy-category")
+        .bind(created_at)
+        .execute(&pool)
+        .await
+        .expect("legacy category should be inserted");
+
+        sqlx::query(
+            "INSERT INTO images (
+                id,
+                user_id,
+                category_id,
+                filename,
+                thumbnail,
+                original_filename,
+                size,
+                hash,
+                format,
+                views,
+                status,
+                expires_at,
+                deleted_at,
+                created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(image_id)
+        .bind(user_id)
+        .bind(category_id)
+        .bind("legacy-image.png")
+        .bind("legacy-image-thumb.webp")
+        .bind("legacy-original-name.png")
+        .bind(123_456_i64)
+        .bind("legacy-hash")
+        .bind("png")
+        .bind(42_i32)
+        .bind("archived")
+        .bind(expires_at)
+        .bind(deleted_at)
+        .bind(created_at)
+        .execute(&pool)
+        .await
+        .expect("legacy image should be inserted");
+
+        sqlx::query("INSERT INTO image_tags (image_id, tag) VALUES (?, ?)")
+            .bind(image_id)
+            .bind("legacy-tag")
+            .execute(&pool)
+            .await
+            .expect("legacy image tag should be inserted");
+
+        sqlx::query(
+            "UPDATE auth_state
+             SET session_epoch = ?, updated_at = ?
+             WHERE id = 1",
+        )
+        .bind(7_i64)
+        .bind(created_at)
+        .execute(&pool)
+        .await
+        .expect("auth state should be updated");
+
+        sqlx::query(
+            "INSERT INTO revoked_tokens (token_hash, expires_at, created_at)
+             VALUES (?, ?, ?)",
+        )
+        .bind(revoked_token_hash)
+        .bind(expires_at)
+        .bind(created_at)
+        .execute(&pool)
+        .await
+        .expect("revoked token should be inserted");
+
+        mysql_migrator()
+            .run(&pool)
+            .await
+            .expect("current migrations should upgrade legacy schema");
+
+        let image_columns = sqlx::query_scalar::<_, String>(
+            "SELECT COLUMN_NAME
+             FROM INFORMATION_SCHEMA.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE()
+               AND TABLE_NAME = 'images'
+             ORDER BY ORDINAL_POSITION",
+        )
+        .fetch_all(&pool)
+        .await
+        .expect("image columns should be listed");
+        assert_eq!(image_columns, EXPECTED_IMAGE_COLUMNS);
+
+        let categories_exists = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*)
+             FROM INFORMATION_SCHEMA.TABLES
+             WHERE TABLE_SCHEMA = DATABASE()
+               AND TABLE_NAME = ?",
+        )
+        .bind("categories")
+        .fetch_one(&pool)
+        .await
+        .expect("table existence should load");
+        assert_eq!(categories_exists, 0);
+
+        let image_tags_exists = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*)
+             FROM INFORMATION_SCHEMA.TABLES
+             WHERE TABLE_SCHEMA = DATABASE()
+               AND TABLE_NAME = ?",
+        )
+        .bind("image_tags")
+        .fetch_one(&pool)
+        .await
+        .expect("table existence should load");
+        assert_eq!(image_tags_exists, 0);
+
+        let image = sqlx::query_as::<
+            _,
+            (
+                Uuid,
+                Uuid,
+                String,
+                Option<String>,
+                i64,
+                String,
+                Option<String>,
+                i32,
+                String,
+                Option<chrono::NaiveDateTime>,
+                chrono::NaiveDateTime,
+            ),
+        >(
+            "SELECT
+                id,
+                user_id,
+                filename,
+                thumbnail,
+                size,
+                hash,
+                format,
+                views,
+                status,
+                expires_at,
+                created_at
+             FROM images
+             WHERE id = ?",
+        )
+        .bind(image_id)
+        .fetch_one(&pool)
+        .await
+        .expect("image should remain after migration");
+        assert_eq!(
+            image,
+            (
+                image_id,
+                user_id,
+                "legacy-image.png".to_string(),
+                Some("legacy-image-thumb.webp".to_string()),
+                123_456,
+                "legacy-hash".to_string(),
+                Some("png".to_string()),
+                42,
+                "archived".to_string(),
+                Some(expires_at),
+                created_at,
+            )
+        );
+
+        let session_epoch =
+            sqlx::query_scalar::<_, i64>("SELECT session_epoch FROM auth_state WHERE id = 1")
+                .fetch_one(&pool)
+                .await
+                .expect("auth state should remain");
+        assert_eq!(session_epoch, 7);
+
+        let revoked_token_count = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*)
+             FROM revoked_tokens
+             WHERE token_hash = ?",
+        )
+        .bind(revoked_token_hash)
+        .fetch_one(&pool)
+        .await
+        .expect("revoked token count should load");
+        assert_eq!(revoked_token_count, 1);
+
+        let applied_versions =
+            sqlx::query_scalar::<_, i64>("SELECT version FROM _sqlx_migrations ORDER BY version")
+                .fetch_all(&pool)
+                .await
+                .expect("applied migrations should be listed");
+        assert_eq!(applied_versions, vec![1, 2, 3, 4]);
+
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    #[ignore = "requires docker"]
+    async fn postgres_upgrade_from_legacy_schema_removes_unused_metadata_and_preserves_image_data()
+    {
+        let (_container, pool) = start_postgres_test_pool().await;
+        postgres_legacy_migrator()
+            .run(&pool)
+            .await
+            .expect("legacy migrations should succeed");
+
+        let user_id = Uuid::parse_str("00000000-0000-0000-0000-000000000001")
+            .expect("user uuid should parse");
+        let category_id = Uuid::parse_str("00000000-0000-0000-0000-000000000010")
+            .expect("category uuid should parse");
+        let image_id = Uuid::parse_str("00000000-0000-0000-0000-000000000100")
+            .expect("image uuid should parse");
+        let revoked_token_hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let created_at = Utc
+            .with_ymd_and_hms(2025, 1, 2, 3, 4, 5)
+            .single()
+            .expect("valid timestamp");
+        let expires_at = Utc
+            .with_ymd_and_hms(2030, 2, 3, 4, 5, 6)
+            .single()
+            .expect("valid timestamp");
+        let deleted_at = Utc
+            .with_ymd_and_hms(2025, 1, 3, 3, 4, 5)
+            .single()
+            .expect("valid timestamp");
+
+        sqlx::query(
+            "INSERT INTO users (
+                id,
+                email,
+                password_hash,
+                role,
+                created_at,
+                token_version
+            )
+            VALUES ($1, $2, $3, $4, $5, $6)",
+        )
+        .bind(user_id)
+        .bind("legacy@example.com")
+        .bind("password-hash")
+        .bind("admin")
+        .bind(created_at)
+        .bind(2_i64)
+        .execute(&pool)
+        .await
+        .expect("legacy user should be inserted");
+
+        sqlx::query(
+            "INSERT INTO categories (id, user_id, name, created_at)
+             VALUES ($1, $2, $3, $4)",
+        )
+        .bind(category_id)
+        .bind(user_id)
+        .bind("legacy-category")
+        .bind(created_at)
+        .execute(&pool)
+        .await
+        .expect("legacy category should be inserted");
+
+        sqlx::query(
+            "INSERT INTO images (
+                id,
+                user_id,
+                category_id,
+                filename,
+                thumbnail,
+                original_filename,
+                size,
+                hash,
+                format,
+                views,
+                status,
+                expires_at,
+                deleted_at,
+                created_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
+        )
+        .bind(image_id)
+        .bind(user_id)
+        .bind(category_id)
+        .bind("legacy-image.png")
+        .bind("legacy-image-thumb.webp")
+        .bind("legacy-original-name.png")
+        .bind(123_456_i64)
+        .bind("legacy-hash")
+        .bind("png")
+        .bind(42_i32)
+        .bind("archived")
+        .bind(expires_at)
+        .bind(deleted_at)
+        .bind(created_at)
+        .execute(&pool)
+        .await
+        .expect("legacy image should be inserted");
+
+        sqlx::query("INSERT INTO image_tags (image_id, tag) VALUES ($1, $2)")
+            .bind(image_id)
+            .bind("legacy-tag")
+            .execute(&pool)
+            .await
+            .expect("legacy image tag should be inserted");
+
+        sqlx::query(
+            "UPDATE auth_state
+             SET session_epoch = $1, updated_at = $2
+             WHERE id = 1",
+        )
+        .bind(7_i64)
+        .bind(created_at)
+        .execute(&pool)
+        .await
+        .expect("auth state should be updated");
+
+        sqlx::query(
+            "INSERT INTO revoked_tokens (token_hash, expires_at, created_at)
+             VALUES ($1, $2, $3)",
+        )
+        .bind(revoked_token_hash)
+        .bind(expires_at)
+        .bind(created_at)
+        .execute(&pool)
+        .await
+        .expect("revoked token should be inserted");
+
+        postgres_migrator()
+            .run(&pool)
+            .await
+            .expect("current migrations should upgrade legacy schema");
+
+        let image_columns = sqlx::query_scalar::<_, String>(
+            "SELECT column_name
+             FROM information_schema.columns
+             WHERE table_schema = 'public'
+               AND table_name = 'images'
+             ORDER BY ordinal_position",
+        )
+        .fetch_all(&pool)
+        .await
+        .expect("image columns should be listed");
+        assert_eq!(image_columns, EXPECTED_IMAGE_COLUMNS);
+
+        let categories_exists =
+            sqlx::query_scalar::<_, bool>("SELECT to_regclass('public.categories') IS NOT NULL")
+                .fetch_one(&pool)
+                .await
+                .expect("table existence should load");
+        assert!(!categories_exists);
+
+        let image_tags_exists =
+            sqlx::query_scalar::<_, bool>("SELECT to_regclass('public.image_tags') IS NOT NULL")
+                .fetch_one(&pool)
+                .await
+                .expect("table existence should load");
+        assert!(!image_tags_exists);
+
+        let image = sqlx::query_as::<
+            _,
+            (
+                Uuid,
+                Uuid,
+                String,
+                Option<String>,
+                i64,
+                String,
+                Option<String>,
+                i32,
+                String,
+                Option<chrono::DateTime<Utc>>,
+                chrono::DateTime<Utc>,
+            ),
+        >(
+            "SELECT
+                id,
+                user_id,
+                filename,
+                thumbnail,
+                size,
+                hash,
+                format,
+                views,
+                status,
+                expires_at,
+                created_at
+             FROM images
+             WHERE id = $1",
+        )
+        .bind(image_id)
+        .fetch_one(&pool)
+        .await
+        .expect("image should remain after migration");
+        assert_eq!(
+            image,
+            (
+                image_id,
+                user_id,
+                "legacy-image.png".to_string(),
+                Some("legacy-image-thumb.webp".to_string()),
+                123_456,
+                "legacy-hash".to_string(),
+                Some("png".to_string()),
+                42,
+                "archived".to_string(),
+                Some(expires_at),
+                created_at,
+            )
+        );
+
+        let session_epoch =
+            sqlx::query_scalar::<_, i64>("SELECT session_epoch FROM auth_state WHERE id = 1")
+                .fetch_one(&pool)
+                .await
+                .expect("auth state should remain");
+        assert_eq!(session_epoch, 7);
+
+        let revoked_token_count = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*)
+             FROM revoked_tokens
+             WHERE token_hash = $1",
+        )
+        .bind(revoked_token_hash)
+        .fetch_one(&pool)
+        .await
+        .expect("revoked token count should load");
+        assert_eq!(revoked_token_count, 1);
+
+        let applied_versions =
+            sqlx::query_scalar::<_, i64>("SELECT version FROM _sqlx_migrations ORDER BY version")
+                .fetch_all(&pool)
+                .await
+                .expect("applied migrations should be listed");
+        assert_eq!(applied_versions, vec![1, 2, 3, 4]);
+
+        pool.close().await;
     }
 }

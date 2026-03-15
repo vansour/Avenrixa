@@ -9,7 +9,7 @@ use crate::runtime_settings::StorageBackend;
 impl StorageManager {
     pub async fn exists(&self, file_key: &str) -> Result<bool, AppError> {
         validate_file_key(file_key)?;
-        let settings = self.active_settings().clone();
+        let settings = self.active_settings();
         match settings.storage_backend {
             StorageBackend::Local => local::exists(&settings, file_key).await,
             StorageBackend::S3 => s3_ops::exists(self, &settings, file_key).await,
@@ -18,7 +18,7 @@ impl StorageManager {
 
     pub async fn read(&self, file_key: &str) -> Result<Vec<u8>, AppError> {
         validate_file_key(file_key)?;
-        let settings = self.active_settings().clone();
+        let settings = self.active_settings();
         match settings.storage_backend {
             StorageBackend::Local => local::read(&settings, file_key).await,
             StorageBackend::S3 => s3_ops::read(self, &settings, file_key).await,
@@ -27,7 +27,7 @@ impl StorageManager {
 
     pub async fn write(&self, file_key: &str, data: &[u8]) -> Result<(), AppError> {
         validate_file_key(file_key)?;
-        let settings = self.active_settings().clone();
+        let settings = self.active_settings();
         match settings.storage_backend {
             StorageBackend::Local => local::write(&settings, file_key, data).await,
             StorageBackend::S3 => s3_ops::write(self, &settings, file_key, data).await,
@@ -36,7 +36,7 @@ impl StorageManager {
 
     pub async fn delete(&self, file_key: &str) -> Result<(), AppError> {
         validate_file_key(file_key)?;
-        let settings = self.active_settings().clone();
+        let settings = self.active_settings();
         match settings.storage_backend {
             StorageBackend::Local => local::delete(&settings, file_key).await,
             StorageBackend::S3 => s3_ops::delete(self, &settings, file_key).await,

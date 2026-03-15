@@ -1,5 +1,6 @@
 use super::AuthService;
 use crate::domain::auth::claims::Claims;
+use crate::models::UserRole;
 use chrono::{Duration, Utc};
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use uuid::Uuid;
@@ -10,14 +11,14 @@ impl AuthService {
         &self,
         user_id: Uuid,
         email: &str,
-        role: &str,
+        role: &UserRole,
         token_version: u64,
         session_epoch: u64,
     ) -> anyhow::Result<String> {
         self.encode_claims(build_claims(
             user_id,
             email,
-            role,
+            role.as_str(),
             self.session_ttl_seconds,
             token_version,
             session_epoch,
@@ -44,14 +45,14 @@ impl AuthService {
         &self,
         user_id: Uuid,
         email: &str,
-        role: &str,
+        role: &UserRole,
         token_version: u64,
         session_epoch: u64,
     ) -> anyhow::Result<String> {
         self.encode_claims(build_claims(
             user_id,
             email,
-            role,
+            role.as_str(),
             Self::ACCESS_TOKEN_TTL_SECONDS,
             token_version,
             session_epoch,

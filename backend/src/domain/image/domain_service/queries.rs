@@ -8,15 +8,11 @@ impl<I: ImageRepository> ImageDomainService<I> {
         user_id: Uuid,
         page: i32,
         page_size: i32,
-        tag: Option<&str>,
     ) -> Result<Paginated<Image>, AppError> {
         let offset = (page - 1) * page_size;
 
-        // 尝试从缓存获取 (仅对无标签过滤的简单列表查询进行缓存)
         let cache_key = ImageCache::list(user_id, page, page_size);
-        if tag.is_none()
-            && let Some(manager) = self.cache.as_ref()
-        {
+        if let Some(manager) = self.cache.as_ref() {
             let mut cache = manager.clone();
             if let Ok(Some(cached)) =
                 Cache::get::<Paginated<Image>, _>(&mut cache, &cache_key).await
@@ -27,7 +23,7 @@ impl<I: ImageRepository> ImageDomainService<I> {
 
         let images = self
             .image_repository
-            .find_images_by_user_paginated(user_id, page_size, offset, tag)
+            .find_images_by_user_paginated(user_id, page_size, offset)
             .await?;
 
         // 提取总数并清理
@@ -89,9 +85,7 @@ impl<I: ImageRepository> ImageDomainService<I> {
         };
 
         // 缓存结果
-        if tag.is_none()
-            && let Some(manager) = self.cache.as_ref()
-        {
+        if let Some(manager) = self.cache.as_ref() {
             let mut cache = manager.clone();
             let ttl = self.config.cache_policy.list_ttl;
             let _ = Cache::set(&mut cache, &cache_key, &result, ttl).await;

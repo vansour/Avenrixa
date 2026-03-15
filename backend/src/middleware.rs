@@ -1,6 +1,7 @@
 use crate::db::AppState;
 use crate::domain::auth::Claims;
 use crate::domain::auth::state_repository::{AuthStateRepository, hash_token};
+use crate::models::UserRole;
 use axum::http::StatusCode;
 use axum_extra::extract::cookie::CookieJar;
 use uuid::Uuid;
@@ -18,7 +19,7 @@ fn session_epoch_mismatched(claims: &Claims, current_epoch: u64) -> bool {
 pub struct AuthUser {
     pub id: Uuid,
     pub email: String,
-    pub role: String,
+    pub role: UserRole,
     pub token: String,
 }
 
@@ -89,10 +90,15 @@ impl axum::extract::FromRequestParts<AppState> for AuthUser {
             return Err(StatusCode::UNAUTHORIZED);
         }
 
+        let role = UserRole::parse(&claims.role);
+        if role == UserRole::Unknown {
+            return Err(StatusCode::UNAUTHORIZED);
+        }
+
         Ok(AuthUser {
             id: claims.sub,
             email: claims.email,
-            role: claims.role,
+            role,
             token: token.to_string(),
         })
     }
@@ -106,7 +112,7 @@ mod tests {
         Claims {
             sub: Uuid::new_v4(),
             email: "tester@example.com".to_string(),
-            role: "user".to_string(),
+            role: UserRole::User.as_str().to_string(),
             token_version,
             session_epoch,
             exp: 0,
@@ -159,7 +165,7 @@ impl axum::extract::FromRequestParts<AppState> for AdminUser {
         let auth_user = AuthUser::from_request_parts(parts, state).await?;
 
         // 验证用户角色为 admin
-        if auth_user.role != "admin" {
+        if !auth_user.role.is_admin() {
             return Err(StatusCode::FORBIDDEN);
         }
 
