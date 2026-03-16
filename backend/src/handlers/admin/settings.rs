@@ -3,10 +3,12 @@ use crate::audit::log_audit_db;
 use crate::db::AppState;
 use crate::db::get_setting_value;
 use crate::error::AppError;
+use crate::handlers::s3_test::{build_s3_test_settings, s3_test_success_response};
 use crate::handlers::storage_browser::{BrowseStorageDirectoriesQuery, browse_storage_directories};
 use crate::middleware::AdminUser;
 use crate::models::{
-    AdminSettingsConfig, Setting, UpdateAdminSettingsConfigRequest, UpdateSettingRequest,
+    AdminSettingsConfig, Setting, TestS3StorageConfigRequest, TestS3StorageConfigResponse,
+    UpdateAdminSettingsConfigRequest, UpdateSettingRequest,
 };
 use crate::runtime_settings::{
     RuntimeSettings, SETTING_LOCAL_STORAGE_PATH, SETTING_MAIL_ENABLED, SETTING_MAIL_FROM_EMAIL,
@@ -47,6 +49,21 @@ pub async fn browse_admin_storage_directories(
     Ok(Json(
         browse_storage_directories(query.path.as_deref()).await?,
     ))
+}
+
+pub async fn test_admin_s3_storage(
+    State(state): State<AppState>,
+    _admin_user: AdminUser,
+    Json(req): Json<TestS3StorageConfigRequest>,
+) -> Result<Json<TestS3StorageConfigResponse>, AppError> {
+    let current_settings = state.runtime_settings.get_runtime_settings().await?;
+    let test_settings = build_s3_test_settings(current_settings, req)?;
+    state
+        .storage_manager
+        .test_s3_settings(&test_settings)
+        .await?;
+
+    Ok(Json(s3_test_success_response()))
 }
 
 pub async fn update_admin_settings_config(

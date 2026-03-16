@@ -1,4 +1,4 @@
-use crate::types::api::{BackupDatabaseFamily, BackupSemantics, ComponentStatus};
+use crate::types::api::{BackupSemantics, ComponentStatus};
 use chrono::{DateTime, Utc};
 use dioxus::prelude::*;
 
@@ -13,15 +13,18 @@ pub(super) fn render_placeholder_section(section: SettingsSection) -> Element {
 }
 
 pub(super) fn render_component_status_card(title: &str, status: &ComponentStatus) -> Element {
+    let message = status
+        .message
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("运行正常");
+
     rsx! {
         article { class: format!("settings-status-card {}", status.status.surface_class()),
             p { class: "settings-summary-label", "{title}" }
             h3 { "{status.status.label()}" }
-            if let Some(message) = &status.message {
-                p { class: "settings-status-message", "{message}" }
-            } else {
-                p { class: "settings-status-message", "运行正常" }
-            }
+            p { class: "settings-status-message", "{message}" }
         }
     }
 }
@@ -71,54 +74,12 @@ pub(super) fn backup_supports_restore(semantics: &BackupSemantics) -> bool {
     semantics.supports_restore()
 }
 
-pub(super) fn restore_database_kind_label(kind: &str) -> &'static str {
-    BackupDatabaseFamily::parse(kind).label()
-}
-
 pub(super) fn format_storage_mb(storage_used_mb: Option<f64>) -> String {
     storage_used_mb
         .map(|value| format!("{value:.2} MB"))
         .unwrap_or_else(|| "未知".to_string())
 }
 
-pub(super) fn summary_value(value: String) -> String {
-    let value = value.trim().to_string();
-    if value.is_empty() {
-        "未配置".to_string()
-    } else {
-        value
-    }
-}
-
 pub(super) fn short_identifier(value: &str) -> String {
     value.chars().take(8).collect()
-}
-
-pub(super) fn optional_short_id(value: Option<&str>) -> String {
-    value
-        .map(short_identifier)
-        .unwrap_or_else(|| "未知".to_string())
-}
-
-pub(super) fn format_json_details(details: &serde_json::Value) -> String {
-    serde_json::to_string_pretty(details)
-        .or_else(|_| serde_json::to_string(details))
-        .unwrap_or_else(|_| "无法序列化详情".to_string())
-}
-
-pub(super) fn textarea_rows(value: &str) -> usize {
-    let lines = value.lines().count().max(1);
-    lines.clamp(3, 8)
-}
-
-pub(super) fn page_window(page: i32, page_size: i32, total: i64) -> (i64, i64) {
-    if total <= 0 {
-        return (0, 0);
-    }
-
-    let page = page.max(1) as i64;
-    let page_size = page_size.max(1) as i64;
-    let start = (page - 1) * page_size + 1;
-    let end = (page * page_size).min(total);
-    (start, end)
 }

@@ -9,8 +9,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::DatabaseKind;
 use crate::models::{
-    BackupDatabaseFamily, BackupMetadataManifest, BackupObjectRollbackAnchor,
-    BackupObjectRollbackStrategy, BackupRestoreStorageSummary, BackupSemantics, StorageBackendKind,
+    BackupMetadataManifest, BackupObjectRollbackAnchor, BackupObjectRollbackStrategy,
+    BackupRestoreStorageSummary, BackupSemantics, backup_database_family_from_config,
+    config_database_kind_from_backup_family, infer_backup_semantics,
 };
 use crate::runtime_settings::{StorageBackend, StorageSettingsSnapshot};
 
@@ -30,7 +31,7 @@ pub async fn capture_backup_manifest(
         format_version: CURRENT_BACKUP_MANIFEST_FORMAT_VERSION,
         filename: filename.to_string(),
         created_at,
-        database_kind: BackupDatabaseFamily::from_database_kind(database_kind),
+        database_kind: backup_database_family_from_config(database_kind),
         semantics,
         app_installed,
         has_admin,
@@ -83,7 +84,7 @@ fn backup_manifest_path(filename: &str) -> PathBuf {
 
 fn storage_summary(snapshot: &StorageSettingsSnapshot) -> BackupRestoreStorageSummary {
     BackupRestoreStorageSummary {
-        storage_backend: StorageBackendKind::from_runtime(snapshot.storage_backend),
+        storage_backend: crate::models::storage_backend_kind_from_runtime(snapshot.storage_backend),
         local_storage_path: snapshot.local_storage_path.clone(),
         s3_endpoint: snapshot.s3_endpoint.clone(),
         s3_region: snapshot.s3_region.clone(),
@@ -198,8 +199,10 @@ fn normalize_backup_manifest(
     mut manifest: BackupMetadataManifest,
 ) -> BackupMetadataManifest {
     if manifest.semantics.is_unknown() {
-        manifest.semantics =
-            BackupSemantics::infer(filename, manifest.database_kind.to_database_kind());
+        manifest.semantics = infer_backup_semantics(
+            filename,
+            config_database_kind_from_backup_family(manifest.database_kind),
+        );
     }
     if manifest.format_version == 0 {
         manifest.format_version = 1;
@@ -210,10 +213,11 @@ fn normalize_backup_manifest(
 #[cfg(test)]
 mod tests {
     use chrono::Utc;
+    use shared_types::backup::BackupKind;
 
     use super::normalize_backup_manifest;
     use crate::models::{
-        BackupDatabaseFamily, BackupKind, BackupMetadataManifest, BackupObjectRollbackAnchor,
+        BackupDatabaseFamily, BackupMetadataManifest, BackupObjectRollbackAnchor,
         BackupObjectRollbackStrategy, BackupRestoreStorageSummary, BackupSemantics,
         StorageBackendKind,
     };

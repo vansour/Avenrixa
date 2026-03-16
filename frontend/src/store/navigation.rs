@@ -30,8 +30,6 @@ pub enum SettingsAnchor {
     System,
     Maintenance,
     Users,
-    Audit,
-    Advanced,
 }
 
 #[derive(Clone)]

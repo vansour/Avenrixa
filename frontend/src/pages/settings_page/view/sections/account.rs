@@ -1,8 +1,6 @@
 use crate::types::api::UserRole;
 use dioxus::prelude::*;
 
-use super::super::shared::render_metric_card;
-
 #[component]
 pub fn AccountSettingsSection(
     email: String,
@@ -13,10 +11,36 @@ pub fn AccountSettingsSection(
 ) -> Element {
     rsx! {
         div { class: "settings-stack",
-            div { class: "settings-metric-grid",
-                {render_metric_card("邮箱", email)}
-                {render_metric_card("角色", role.label().to_string())}
-                {render_metric_card("创建时间", created_at)}
+            div { class: "settings-grid",
+                label { class: "settings-field settings-field-full",
+                    span { "账户邮箱" }
+                    input {
+                        r#type: "text",
+                        value: "{email}",
+                        readonly: true,
+                        class: "settings-readonly-input",
+                    }
+                }
+
+                label { class: "settings-field",
+                    span { "角色" }
+                    input {
+                        r#type: "text",
+                        value: "{role.label()}",
+                        readonly: true,
+                        class: "settings-readonly-input",
+                    }
+                }
+
+                label { class: "settings-field",
+                    span { "创建时间" }
+                    input {
+                        r#type: "text",
+                        value: "{created_at}",
+                        readonly: true,
+                        class: "settings-readonly-input",
+                    }
+                }
             }
 
             div { class: "settings-action-grid",

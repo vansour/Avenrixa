@@ -794,7 +794,7 @@ dependencies = [
 
 [[package]]
 name = "backend"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -822,6 +822,7 @@ dependencies = [
  "reqwest 0.13.2",
  "serde",
  "serde_json",
+ "shared-types",
  "sqlx",
  "tempfile",
  "thiserror 2.0.18",
@@ -2370,7 +2371,7 @@ dependencies = [
 
 [[package]]
 name = "frontend"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "base64",
@@ -2381,6 +2382,7 @@ dependencies = [
  "reqwest 0.13.2",
  "serde",
  "serde_json",
+ "shared-types",
  "thiserror 2.0.18",
  "tokio",
  "urlencoding",
@@ -5116,6 +5118,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f40ca3c46823713e0d4209592e8d6e826aa57e928f09752619fc696c499637f6"
 dependencies = [
  "lazy_static",
+]
+
+[[package]]
+name = "shared-types"
+version = "0.1.1"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

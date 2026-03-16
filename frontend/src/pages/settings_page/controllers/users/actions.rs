@@ -11,7 +11,7 @@ use super::super::{
 pub(super) enum RoleChangePlan {
     Error(String),
     Info(String),
-    RequiresConfirmation(PendingUserRoleChange),
+    RequiresConfirmation(Box<PendingUserRoleChange>),
 }
 
 pub(super) fn plan_role_change(
@@ -33,14 +33,15 @@ pub(super) fn plan_role_change(
     }
 
     let email = current_user.email.clone();
-    RoleChangePlan::RequiresConfirmation(PendingUserRoleChange {
+    RoleChangePlan::RequiresConfirmation(Box::new(PendingUserRoleChange {
         user_id: user_id.to_string(),
         email: email.clone(),
         next_role,
         plan: role_change_confirmation_plan(&email, current_user.role, next_role),
-    })
+    }))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn update_user_role(
     admin_service: AdminService,
     auth_store: AuthStore,

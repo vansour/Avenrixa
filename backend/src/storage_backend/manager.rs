@@ -1,9 +1,12 @@
 use std::os::unix::fs::PermissionsExt;
 use std::sync::Arc;
 
+use aws_sdk_s3::primitives::ByteStream;
 use tokio::fs;
+use uuid::Uuid;
 
 use super::StorageManager;
+use super::path::build_s3_object_key;
 use crate::error::AppError;
 use crate::runtime_settings::{RuntimeSettings, StorageBackend};
 
@@ -53,19 +56,46 @@ impl StorageManager {
                 Ok(())
             }
             StorageBackend::S3 => {
-                let cached = self.resolve_s3_client(&settings).await?;
-                cached
-                    .client
-                    .head_bucket()
-                    .bucket(cached.bucket.clone())
-                    .send()
-                    .await
-                    .map_err(|e| {
-                        AppError::Internal(anyhow::anyhow!("S3 health check failed: {}", e))
-                    })?;
+                self.resolve_s3_client(&settings).await?;
                 Ok(())
             }
         }
+    }
+
+    pub async fn test_s3_settings(&self, settings: &RuntimeSettings) -> Result<(), AppError> {
+        let client = Self::build_s3_client(settings)?;
+        let probe_file_key = format!(".vansour-s3-probe-{}", Uuid::new_v4().simple());
+        let object_key = build_s3_object_key(client.prefix.as_deref(), &probe_file_key);
+
+        client
+            .client
+            .put_object()
+            .bucket(client.bucket.clone())
+            .key(object_key.clone())
+            .body(ByteStream::from_static(b"vansour-s3-probe"))
+            .send()
+            .await
+            .map_err(|e| AppError::ValidationError(format!("S3 上传测试失败: {}", e)))?;
+
+        client
+            .client
+            .get_object()
+            .bucket(client.bucket.clone())
+            .key(object_key.clone())
+            .send()
+            .await
+            .map_err(|e| AppError::ValidationError(format!("S3 读取测试失败: {}", e)))?;
+
+        client
+            .client
+            .delete_object()
+            .bucket(client.bucket)
+            .key(object_key)
+            .send()
+            .await
+            .map_err(|e| AppError::ValidationError(format!("S3 清理测试文件失败: {}", e)))?;
+
+        Ok(())
     }
 
     pub fn cache_hint(&self, file_key: &str) -> String {
@@ -101,6 +131,29 @@ mod tests {
         }
     }
 
+    fn sample_s3_runtime_settings() -> RuntimeSettings {
+        RuntimeSettings {
+            site_name: "Vansour Image".to_string(),
+            storage_backend: StorageBackend::S3,
+            local_storage_path: "/tmp/vansour-image".to_string(),
+            mail_enabled: false,
+            mail_smtp_host: String::new(),
+            mail_smtp_port: 587,
+            mail_smtp_user: None,
+            mail_smtp_password: None,
+            mail_from_email: String::new(),
+            mail_from_name: String::new(),
+            mail_link_base_url: String::new(),
+            s3_endpoint: Some("https://example.r2.cloudflarestorage.com".to_string()),
+            s3_region: Some("auto".to_string()),
+            s3_bucket: Some("images".to_string()),
+            s3_prefix: Some("uploads".to_string()),
+            s3_access_key: Some("access".to_string()),
+            s3_secret_key: Some("secret".to_string()),
+            s3_force_path_style: false,
+        }
+    }
+
     #[tokio::test]
     async fn apply_runtime_settings_updates_local_path_and_creates_directory() {
         let temp_dir = tempdir().expect("temp dir should be created");
@@ -124,5 +177,15 @@ mod tests {
                 .await
                 .expect("existence check should succeed")
         );
+    }
+
+    #[tokio::test]
+    async fn check_health_allows_valid_s3_configuration_without_remote_probe() {
+        let manager = StorageManager::new(sample_s3_runtime_settings());
+
+        manager
+            .check_health()
+            .await
+            .expect("s3 health should only validate client construction");
     }
 }

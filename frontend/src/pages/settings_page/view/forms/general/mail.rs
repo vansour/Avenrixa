@@ -2,20 +2,6 @@ use dioxus::prelude::*;
 
 use super::super::super::super::state::SettingsFormState;
 
-pub(super) fn render_mail_status_banner(mail_is_enabled: bool) -> Element {
-    rsx! {
-        if mail_is_enabled {
-            div { class: "settings-banner settings-banner-neutral",
-                "邮件服务已开启。公开注册、邮箱验证和密码找回都会依赖这里的 SMTP 与跳转地址配置。"
-            }
-        } else {
-            div { class: "settings-banner settings-banner-neutral",
-                "邮件服务当前关闭。用户仍可登录，但公开注册后的邮箱验证和密码找回邮件不会发送。"
-            }
-        }
-    }
-}
-
 pub(super) fn render_mail_section(
     form: SettingsFormState,
     disabled: bool,
@@ -39,7 +25,7 @@ pub(super) fn render_mail_section(
     let section_title = if compact {
         "邮件服务"
     } else {
-        "邮件投递"
+        "邮件配置"
     };
 
     rsx! {
@@ -58,9 +44,10 @@ pub(super) fn render_mail_section(
 
                 if mail_is_enabled {
                     label { class: "settings-field",
-                        span { "发件邮箱" }
+                        span { "发件邮箱（必填）" }
                         input {
                             r#type: "email",
+                            placeholder: "noreply@example.com",
                             value: "{mail_from_email()}",
                             oninput: move |event| mail_from_email.set(event.value()),
                             disabled,
@@ -71,6 +58,7 @@ pub(super) fn render_mail_section(
                         span { "发件人名称" }
                         input {
                             r#type: "text",
+                            placeholder: "Vansour Image",
                             value: "{mail_from_name()}",
                             oninput: move |event| mail_from_name.set(event.value()),
                             disabled,
@@ -78,7 +66,7 @@ pub(super) fn render_mail_section(
                     }
 
                     label { class: "settings-field settings-field-full",
-                        span { "站点访问地址（用于邮件链接）" }
+                        span { "站点访问地址（必填）" }
                         input {
                             r#type: "url",
                             value: "{mail_link_base_url()}",
@@ -86,15 +74,13 @@ pub(super) fn render_mail_section(
                             placeholder: "https://img.example.com",
                             disabled,
                         }
-                        small { class: "settings-field-hint",
-                            "用户点击邮件里的验证或重置链接后，会回到这里。"
-                        }
                     }
 
                     label { class: "settings-field",
-                        span { "SMTP 主机" }
+                        span { "SMTP 主机（必填）" }
                         input {
                             r#type: "text",
+                            placeholder: "smtp.example.com",
                             value: "{mail_smtp_host()}",
                             oninput: move |event| mail_smtp_host.set(event.value()),
                             disabled,
@@ -102,10 +88,11 @@ pub(super) fn render_mail_section(
                     }
 
                     label { class: "settings-field",
-                        span { "SMTP 端口" }
+                        span { "SMTP 端口（必填）" }
                         input {
                             r#type: "number",
                             min: "1",
+                            placeholder: "587",
                             value: "{mail_smtp_port()}",
                             oninput: move |event| mail_smtp_port.set(event.value()),
                             disabled,
@@ -116,6 +103,7 @@ pub(super) fn render_mail_section(
                         span { "SMTP 用户名" }
                         input {
                             r#type: "text",
+                            placeholder: "可留空",
                             value: "{mail_smtp_user()}",
                             oninput: move |event| mail_smtp_user.set(event.value()),
                             disabled,
@@ -132,6 +120,11 @@ pub(super) fn render_mail_section(
                         }
                         input {
                             r#type: "password",
+                            placeholder: if mail_smtp_password_set() {
+                                "留空表示继续使用现有密码"
+                            } else {
+                                "输入 SMTP 密码"
+                            },
                             value: "{mail_smtp_password()}",
                             oninput: move |event| mail_smtp_password.set(event.value()),
                             disabled,

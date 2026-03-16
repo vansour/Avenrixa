@@ -43,6 +43,7 @@ pub(crate) async fn trigger_cleanup_expired(
     is_cleaning_expired.set(false);
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn backup_database(
     admin_service: AdminService,
     auth_store: AuthStore,
@@ -80,6 +81,7 @@ pub(crate) async fn backup_database(
     is_backing_up.set(false);
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn delete_backup(
     admin_service: AdminService,
     auth_store: AuthStore,

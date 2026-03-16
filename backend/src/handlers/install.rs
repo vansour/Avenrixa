@@ -4,6 +4,7 @@ use axum::{
     http::HeaderMap,
 };
 use base64::Engine;
+use shared_types::auth::UserResponse as SharedUserResponse;
 
 use crate::audit::log_audit_db;
 use crate::config::DatabaseKind;
@@ -19,10 +20,11 @@ use crate::db::{
 };
 use crate::error::AppError;
 use crate::handlers::auth::common::{append_session_cookies, issue_session_tokens};
+use crate::handlers::s3_test::{build_s3_test_settings, s3_test_success_response};
 use crate::handlers::storage_browser::{BrowseStorageDirectoriesQuery, browse_storage_directories};
 use crate::models::{
     AdminSettingsConfig, InstallBootstrapRequest, InstallBootstrapResponse, InstallStatusResponse,
-    StorageDirectoryBrowseResponse,
+    StorageDirectoryBrowseResponse, TestS3StorageConfigRequest, TestS3StorageConfigResponse,
 };
 use crate::runtime_settings::validate_and_merge;
 use crate::runtime_settings::{
@@ -65,6 +67,24 @@ pub async fn browse_install_storage_directories(
     Ok(Json(
         browse_storage_directories(query.path.as_deref()).await?,
     ))
+}
+
+pub async fn test_install_s3_storage(
+    State(state): State<AppState>,
+    Json(req): Json<TestS3StorageConfigRequest>,
+) -> Result<Json<TestS3StorageConfigResponse>, AppError> {
+    if is_app_installed(&state.database).await? {
+        return Err(AppError::AppAlreadyInstalled);
+    }
+
+    let current_settings = state.runtime_settings.get_runtime_settings().await?;
+    let test_settings = build_s3_test_settings(current_settings, req)?;
+    state
+        .storage_manager
+        .test_s3_settings(&test_settings)
+        .await?;
+
+    Ok(Json(s3_test_success_response()))
 }
 
 pub async fn bootstrap_installation(
@@ -216,7 +236,11 @@ pub async fn bootstrap_installation(
     Ok((
         headers,
         Json(InstallBootstrapResponse {
-            user: user_response,
+            user: SharedUserResponse {
+                email: user_response.email,
+                role: user_response.role,
+                created_at: user_response.created_at,
+            },
             favicon_configured: favicon_data_url.is_some(),
             config: settings.to_admin_config(state.storage_manager.restart_required(&settings)),
         }),

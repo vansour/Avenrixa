@@ -22,7 +22,9 @@ use crate::models::{
     BackupDatabaseFamily, BackupFileSummary, BackupObjectRollbackAnchor,
     BackupObjectRollbackStrategy, BackupRestorePrecheckResponse, BackupRestoreResult,
     BackupRestoreScheduleResponse, BackupRestoreStatus, BackupRestoreStatusResponse,
-    BackupRestoreStorageSummary, BackupSemantics, PendingBackupRestore, StorageBackendKind,
+    BackupRestoreStorageSummary, PendingBackupRestore, StorageBackendKind,
+    backup_database_family_from_config, config_database_kind_from_backup_family,
+    infer_backup_semantics,
 };
 use crate::runtime_settings::{RuntimeSettings, StorageSettingsSnapshot, load_from_db};
 
@@ -224,9 +226,9 @@ pub async fn precheck_restore(
         filename: backup.filename,
         backup_created_at: backup.created_at,
         backup_size_bytes: backup.size_bytes,
-        current_database_kind: BackupDatabaseFamily::from_database_kind(config.database.kind),
+        current_database_kind: backup_database_family_from_config(config.database.kind),
         backup_database_kind: backup_database_kind
-            .map(BackupDatabaseFamily::from_database_kind)
+            .map(backup_database_family_from_config)
             .unwrap_or(BackupDatabaseFamily::Unknown),
         semantics,
         integrity_check_passed,
@@ -277,9 +279,9 @@ pub async fn schedule_restore(
 
     let pending = PendingBackupRestore {
         filename: filename.to_string(),
-        database_kind: precheck.backup_database_kind.clone(),
+        database_kind: precheck.backup_database_kind,
         semantics: precheck.semantics.clone(),
-        requested_by_user_id,
+        requested_by_user_id: requested_by_user_id.to_string(),
         requested_by_email: requested_by_email.to_string(),
         scheduled_at: Utc::now(),
         backup_created_at: precheck.backup_created_at,
@@ -793,7 +795,7 @@ fn restore_result(
     BackupRestoreResult {
         status,
         filename: pending.filename.clone(),
-        database_kind: pending.database_kind.clone(),
+        database_kind: pending.database_kind,
         semantics: pending.semantics.clone(),
         message,
         scheduled_at: Some(pending.scheduled_at),
@@ -1205,7 +1207,7 @@ fn storage_summary_from_snapshot(
     snapshot: &StorageSettingsSnapshot,
 ) -> BackupRestoreStorageSummary {
     BackupRestoreStorageSummary {
-        storage_backend: StorageBackendKind::from_runtime(snapshot.storage_backend),
+        storage_backend: crate::models::storage_backend_kind_from_runtime(snapshot.storage_backend),
         local_storage_path: snapshot.local_storage_path.clone(),
         s3_endpoint: snapshot.s3_endpoint.clone(),
         s3_region: snapshot.s3_region.clone(),
@@ -1228,10 +1230,8 @@ fn unknown_storage_summary() -> BackupRestoreStorageSummary {
 }
 
 fn backup_database_kind_from_pending(pending: &PendingBackupRestore) -> Option<DatabaseKind> {
-    pending
-        .database_kind
-        .to_database_kind()
-        .or_else(|| pending.semantics.database_family.to_database_kind())
+    config_database_kind_from_backup_family(pending.database_kind)
+        .or_else(|| config_database_kind_from_backup_family(pending.semantics.database_family))
         .or_else(|| backup_database_kind_from_filename(&pending.filename))
 }
 
@@ -1497,22 +1497,26 @@ async fn backup_file_summary(filename: &str) -> Result<BackupFileSummary, crate:
             .map(chrono::DateTime::<chrono::Utc>::from)
             .unwrap_or_else(Utc::now),
         size_bytes: metadata.len(),
-        semantics: BackupSemantics::infer(filename, backup_database_kind_from_filename(filename)),
+        semantics: infer_backup_semantics(filename, backup_database_kind_from_filename(filename)),
     })
 }
 
 fn normalize_pending_restore(mut pending: PendingBackupRestore) -> PendingBackupRestore {
     if pending.semantics.is_unknown() {
-        pending.semantics =
-            BackupSemantics::infer(&pending.filename, pending.database_kind.to_database_kind());
+        pending.semantics = infer_backup_semantics(
+            &pending.filename,
+            config_database_kind_from_backup_family(pending.database_kind),
+        );
     }
     pending
 }
 
 fn normalize_restore_result(mut result: BackupRestoreResult) -> BackupRestoreResult {
     if result.semantics.is_unknown() {
-        result.semantics =
-            BackupSemantics::infer(&result.filename, result.database_kind.to_database_kind());
+        result.semantics = infer_backup_semantics(
+            &result.filename,
+            config_database_kind_from_backup_family(result.database_kind),
+        );
     }
     result
 }
@@ -1520,13 +1524,14 @@ fn normalize_restore_result(mut result: BackupRestoreResult) -> BackupRestoreRes
 #[cfg(test)]
 mod tests {
     use once_cell::sync::Lazy;
+    use shared_types::backup::{BackupKind, BackupSemantics, RestoreMode};
     use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
     use tokio::sync::Mutex;
 
     use super::*;
     use crate::config::DatabaseKind;
     use crate::db::run_migrations;
-    use crate::models::{BackupDatabaseFamily, BackupKind, BackupRestoreStatus, RestoreMode};
+    use crate::models::{BackupDatabaseFamily, BackupRestoreStatus};
     use crate::runtime_settings::{SETTING_LOCAL_STORAGE_PATH, SETTING_STORAGE_BACKEND};
 
     static TEST_ENV_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
@@ -1762,7 +1767,7 @@ mod tests {
             filename: "backup_legacy.mysql.sql".to_string(),
             database_kind: BackupDatabaseFamily::MySql,
             semantics: BackupSemantics::unknown(),
-            requested_by_user_id: ADMIN_USER_ID,
+            requested_by_user_id: ADMIN_USER_ID.to_string(),
             requested_by_email: "admin@example.com".to_string(),
             scheduled_at: now,
             backup_created_at: now,

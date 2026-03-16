@@ -66,7 +66,7 @@ pub fn UsersSectionController() -> Element {
                 toast_store_for_user_role.show_info(message);
             }
             RoleChangePlan::RequiresConfirmation(pending) => {
-                pending_role_change.set(Some(pending));
+                pending_role_change.set(Some(*pending));
             }
         }
     };

@@ -43,6 +43,10 @@ fn throttled_public_routes() -> Router<AppState> {
             routing::get(install::browse_install_storage_directories),
         )
         .route(
+            "/install/storage/s3/test",
+            routing::post(install::test_install_s3_storage),
+        )
+        .route(
             "/install/bootstrap",
             routing::post(install::bootstrap_installation),
         )
@@ -102,6 +106,10 @@ fn admin_routes() -> Router<AppState> {
         .route(
             "/settings/storage-directories",
             routing::get(admin::browse_admin_storage_directories),
+        )
+        .route(
+            "/settings/storage/s3/test",
+            routing::post(admin::test_admin_s3_storage),
         )
         .route("/settings", routing::get(admin::get_settings_admin))
         .route("/settings/{key}", routing::put(admin::update_setting))

@@ -13,6 +13,6 @@ pub use maintenance::{
 };
 pub use settings::{
     browse_admin_storage_directories, get_admin_settings_config, get_settings_admin,
-    update_admin_settings_config, update_setting,
+    test_admin_s3_storage, update_admin_settings_config, update_setting,
 };
 pub use users::{get_users, update_user_role};

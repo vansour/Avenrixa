@@ -5,7 +5,10 @@ use uuid::Uuid;
 use super::AdminDomainService;
 use crate::db::DatabasePool;
 use crate::error::AppError;
-use crate::models::{AdminUserSummary, AuditLog, AuditLogResponse, SystemStats, UserRole};
+use crate::models::{
+    AdminUserRecord, AdminUserSummary, AuditLog, AuditLogRecord, AuditLogResponse, SystemStats,
+    UserRole,
+};
 
 const LAST_ADMIN_ROLE_CHANGE_ERROR: &str = "系统至少需要保留一个管理员账户";
 
@@ -32,12 +35,24 @@ impl AdminDomainService {
     pub async fn get_users(&self) -> Result<Vec<AdminUserSummary>, AppError> {
         let query = "SELECT id, email, role, created_at FROM users ORDER BY created_at DESC";
         let users = match &self.database {
-            DatabasePool::Postgres(pool) => sqlx::query_as(query).fetch_all(pool).await?,
-            DatabasePool::MySql(pool) => sqlx::query_as(query).fetch_all(pool).await?,
-            DatabasePool::Sqlite(pool) => sqlx::query_as(query).fetch_all(pool).await?,
+            DatabasePool::Postgres(pool) => {
+                sqlx::query_as::<_, AdminUserRecord>(query)
+                    .fetch_all(pool)
+                    .await?
+            }
+            DatabasePool::MySql(pool) => {
+                sqlx::query_as::<_, AdminUserRecord>(query)
+                    .fetch_all(pool)
+                    .await?
+            }
+            DatabasePool::Sqlite(pool) => {
+                sqlx::query_as::<_, AdminUserRecord>(query)
+                    .fetch_all(pool)
+                    .await?
+            }
         };
 
-        Ok(users)
+        Ok(users.into_iter().map(Into::into).collect())
     }
 
     pub async fn update_user_role(
@@ -228,16 +243,19 @@ impl AdminDomainService {
 
         let logs = match &self.database {
             DatabasePool::Postgres(pool) => {
-                sqlx::query_as::<_, AuditLog>(
+                sqlx::query_as::<_, AuditLogRecord>(
                     "SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT $1 OFFSET $2",
                 )
                 .bind(page_size)
                 .bind(offset)
                 .fetch_all(pool)
                 .await?
+                .into_iter()
+                .map(Into::into)
+                .collect()
             }
             DatabasePool::MySql(pool) => {
-                sqlx::query_as::<_, AuditLog>(
+                sqlx::query_as::<_, AuditLogRecord>(
                     "SELECT id, user_id, action, target_type, target_id, details, ip_address, created_at
                      FROM audit_logs
                      ORDER BY created_at DESC
@@ -247,6 +265,9 @@ impl AdminDomainService {
                 .bind(offset)
                 .fetch_all(pool)
                 .await?
+                .into_iter()
+                .map(Into::into)
+                .collect()
             }
             DatabasePool::Sqlite(pool) => {
                 let rows = sqlx::query_as::<_, SqliteAuditLogRow>(
@@ -399,11 +420,11 @@ fn map_sqlite_audit_log(
     (id, user_id, action, target_type, target_id, details, ip_address, created_at): SqliteAuditLogRow,
 ) -> AuditLog {
     AuditLog {
-        id,
-        user_id,
+        id: id.to_string(),
+        user_id: user_id.map(|id| id.to_string()),
         action,
         target_type,
-        target_id,
+        target_id: target_id.map(|id| id.to_string()),
         details: details.and_then(parse_audit_details),
         ip_address,
         created_at,

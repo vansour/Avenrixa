@@ -1,47 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(from = "String", into = "String")]
-pub enum ImageStatus {
-    Active,
-    Deleted,
-    Unknown,
-}
-
-impl ImageStatus {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Active => "active",
-            Self::Deleted => "deleted",
-            Self::Unknown => "unknown",
-        }
-    }
-
-    pub fn parse(value: &str) -> Self {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "active" => Self::Active,
-            "deleted" => Self::Deleted,
-            _ => Self::Unknown,
-        }
-    }
-
-    pub fn is_active(self) -> bool {
-        matches!(self, Self::Active)
-    }
-}
-
-impl From<String> for ImageStatus {
-    fn from(value: String) -> Self {
-        Self::parse(&value)
-    }
-}
-
-impl From<ImageStatus> for String {
-    fn from(value: ImageStatus) -> Self {
-        value.as_str().to_string()
-    }
-}
+pub use shared_types::image::{ImageResponse, ImageStatus};
 
 /// 图片项
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -98,6 +57,21 @@ impl ImageItem {
     }
 }
 
+impl From<ImageResponse> for ImageItem {
+    fn from(value: ImageResponse) -> Self {
+        Self {
+            image_key: value.image_key,
+            filename: value.filename,
+            size: value.size,
+            format: value.format,
+            views: value.views,
+            status: value.status,
+            expires_at: value.expires_at,
+            created_at: value.created_at,
+        }
+    }
+}
+
 /// 分页响应
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PaginatedResponse<T> {
@@ -109,12 +83,33 @@ pub struct PaginatedResponse<T> {
 
 #[cfg(test)]
 mod tests {
-    use super::ImageStatus;
+    use super::{ImageItem, ImageResponse, ImageStatus};
+    use chrono::Utc;
 
     #[test]
     fn image_status_unknown_values_fall_back_safely() {
         assert_eq!(ImageStatus::parse("active"), ImageStatus::Active);
         assert_eq!(ImageStatus::parse("DELETED"), ImageStatus::Deleted);
         assert_eq!(ImageStatus::parse("archived"), ImageStatus::Unknown);
+    }
+
+    #[test]
+    fn image_item_maps_from_api_response() {
+        let now = Utc::now();
+        let item = ImageItem::from(ImageResponse {
+            image_key: "abc123".to_string(),
+            filename: "demo.png".to_string(),
+            size: 1024,
+            format: "png".to_string(),
+            views: 3,
+            status: ImageStatus::Active,
+            expires_at: None,
+            created_at: now,
+        });
+
+        assert_eq!(item.image_key, "abc123");
+        assert_eq!(item.filename, "demo.png");
+        assert_eq!(item.status, ImageStatus::Active);
+        assert_eq!(item.created_at, now);
     }
 }

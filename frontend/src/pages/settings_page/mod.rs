@@ -5,27 +5,35 @@ mod view;
 use crate::app_context::{use_auth_store, use_settings_service, use_toast_store};
 use crate::auth_session::{auth_session_expired_message, handle_auth_session_error};
 use crate::store::{AuthStore, SettingsAnchor, ToastStore};
-use crate::types::api::{AdminSettingsConfig, StorageBackendKind};
+use crate::types::api::{AdminSettingsConfig, StorageBackendKind, TestS3StorageConfigRequest};
 use crate::types::errors::AppError;
 use dioxus::prelude::*;
 use gloo_timers::future::TimeoutFuture;
 
 use controllers::{
-    AccountSectionController, AdvancedSectionController, AuditSectionController,
-    MaintenanceSectionController, SecuritySectionController, SystemSectionController,
-    UsersSectionController,
+    AccountSectionController, MaintenanceSectionController, SecuritySectionController,
+    SystemSectionController, UsersSectionController,
 };
 use view::{
     ADMIN_SETTINGS_SECTIONS, SettingsSection, USER_SETTINGS_SECTIONS, render_settings_fields,
 };
 
-pub use state::{SettingsFormState, default_mail_link_base_url};
+use state::display_mail_smtp_port;
+pub use state::infer_s3_provider_preset;
+pub use state::{S3ProviderPreset, SettingsFormState, default_mail_link_base_url};
 pub use view::{
-    render_general_fields, render_general_fields_compact, render_s3_fields, render_storage_fields,
-    render_storage_fields_compact,
+    render_general_fields, render_general_fields_compact, render_s3_fields,
+    render_s3_fields_compact, render_storage_fields, render_storage_fields_compact,
 };
 
 const SETTINGS_LOAD_RETRY_DELAYS_MS: [u32; 3] = [0, 500, 1500];
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum S3TestFeedbackTone {
+    Neutral,
+    Success,
+    Error,
+}
 
 pub(super) fn settings_auth_expired_message() -> String {
     auth_session_expired_message()
@@ -51,9 +59,14 @@ pub fn SettingsPage(
 
     let mut is_loading = use_signal(|| true);
     let mut is_saving = use_signal(|| false);
+    let mut is_testing_s3 = use_signal(|| false);
     let mut error_message = use_signal(String::new);
     let mut loaded_config = use_signal(|| None::<AdminSettingsConfig>);
+    let mut last_tested_s3_request = use_signal(|| None::<TestS3StorageConfigRequest>);
+    let mut s3_test_feedback = use_signal(String::new);
+    let mut s3_test_feedback_tone = use_signal(|| S3TestFeedbackTone::Neutral);
     let mut reload_tick = use_signal(|| 0_u64);
+    let mut last_loaded_tick = use_signal(|| None::<u64>);
     let mut active_section = use_signal(move || {
         if is_admin {
             SettingsSection::General
@@ -64,11 +77,11 @@ pub fn SettingsPage(
     let mut applied_requested_section = use_signal(|| None::<SettingsAnchor>);
 
     let site_name = use_signal(String::new);
-    let storage_backend = use_signal(|| StorageBackendKind::Local);
+    let storage_backend = use_signal(|| StorageBackendKind::Unknown);
     let local_storage_path = use_signal(String::new);
     let mail_enabled = use_signal(|| false);
     let mail_smtp_host = use_signal(String::new);
-    let mail_smtp_port = use_signal(|| "587".to_string());
+    let mail_smtp_port = use_signal(String::new);
     let mail_smtp_user = use_signal(String::new);
     let mail_smtp_password = use_signal(String::new);
     let mail_smtp_password_set = use_signal(|| false);
@@ -83,6 +96,8 @@ pub fn SettingsPage(
     let s3_secret_key = use_signal(String::new);
     let s3_secret_key_set = use_signal(|| false);
     let s3_force_path_style = use_signal(|| true);
+    let s3_provider_preset = use_signal(|| S3ProviderPreset::Other);
+    let s3_provider_drafts = use_signal(std::collections::BTreeMap::new);
 
     let form = SettingsFormState {
         site_name,
@@ -105,6 +120,8 @@ pub fn SettingsPage(
         s3_secret_key,
         s3_secret_key_set,
         s3_force_path_style,
+        s3_provider_preset,
+        s3_provider_drafts,
     };
 
     use_effect(move || {
@@ -119,17 +136,21 @@ pub fn SettingsPage(
         applied_requested_section.set(requested_section);
     });
 
-    let _load_settings = use_resource({
+    use_effect({
         let settings_service = settings_service.clone();
         let toast_store = toast_store.clone();
         let auth_store = auth_store.clone();
         move || {
-            let _ = reload_tick();
+            let current_tick = reload_tick();
+            if last_loaded_tick() == Some(current_tick) {
+                return;
+            }
+            last_loaded_tick.set(Some(current_tick));
             let settings_service = settings_service.clone();
             let toast_store = toast_store.clone();
             let auth_store = auth_store.clone();
             let mut form = form;
-            async move {
+            spawn(async move {
                 if !is_admin {
                     is_loading.set(false);
                     error_message.set(String::new());
@@ -149,6 +170,9 @@ pub fn SettingsPage(
                         Ok(config) => {
                             loaded_config.set(Some(config.clone()));
                             form.apply_loaded_config(config);
+                            last_tested_s3_request.set(None);
+                            s3_test_feedback.set(String::new());
+                            s3_test_feedback_tone.set(S3TestFeedbackTone::Neutral);
                             is_loading.set(false);
                             return;
                         }
@@ -171,16 +195,27 @@ pub fn SettingsPage(
                 }
 
                 is_loading.set(false);
-            }
+            });
         }
     });
 
     let settings_service_for_save = settings_service.clone();
+    let settings_service_for_test = settings_service.clone();
     let auth_store_for_save = auth_store.clone();
     let toast_store_for_save = toast_store.clone();
     let on_site_name_updated_for_save = on_site_name_updated;
     let handle_save = move |_| {
         if is_saving() {
+            return;
+        }
+
+        let requires_s3_test = loaded_config()
+            .as_ref()
+            .is_some_and(|config| requires_s3_test_confirmation(form, config));
+        if requires_s3_test && !is_current_s3_request_confirmed(form, last_tested_s3_request()) {
+            let message = "请先完成 S3 连通性测试，再保存当前配置".to_string();
+            error_message.set(message.clone());
+            toast_store_for_save.show_error(message);
             return;
         }
 
@@ -204,6 +239,9 @@ pub fn SettingsPage(
                 Ok(config) => {
                     loaded_config.set(Some(config.clone()));
                     form.apply_loaded_config(config.clone());
+                    last_tested_s3_request.set(None);
+                    s3_test_feedback.set(String::new());
+                    s3_test_feedback_tone.set(S3TestFeedbackTone::Neutral);
                     on_site_name_updated.call(config.site_name.clone());
                     toast_store.show_success("设置已保存".to_string());
                 }
@@ -222,6 +260,54 @@ pub fn SettingsPage(
         });
     };
 
+    let handle_test_s3 = move |_| {
+        if is_testing_s3() || is_loading() || is_saving() {
+            return;
+        }
+
+        if let Err(message) = form.validate_s3_for_test() {
+            error_message.set(message.clone());
+            s3_test_feedback.set(message.clone());
+            s3_test_feedback_tone.set(S3TestFeedbackTone::Error);
+            toast_store.show_error(message);
+            return;
+        }
+
+        let req = form.build_s3_test_request();
+        let settings_service = settings_service_for_test.clone();
+        let toast_store = toast_store.clone();
+        let auth_store = auth_store.clone();
+        spawn(async move {
+            is_testing_s3.set(true);
+            error_message.set(String::new());
+            s3_test_feedback.set(String::new());
+            s3_test_feedback_tone.set(S3TestFeedbackTone::Neutral);
+
+            match settings_service.test_s3_storage_config(req.clone()).await {
+                Ok(response) => {
+                    last_tested_s3_request.set(Some(req));
+                    s3_test_feedback.set(response.message.clone());
+                    s3_test_feedback_tone.set(S3TestFeedbackTone::Success);
+                    toast_store.show_success(response.message);
+                }
+                Err(err) => {
+                    let message = format!("S3 测试失败: {}", err);
+                    last_tested_s3_request.set(None);
+                    s3_test_feedback.set(message.clone());
+                    s3_test_feedback_tone.set(S3TestFeedbackTone::Error);
+                    if handle_settings_auth_error(&auth_store, &toast_store, &err) {
+                        error_message.set(settings_auth_expired_message());
+                    } else {
+                        error_message.set(message.clone());
+                        toast_store.show_error(message);
+                    }
+                }
+            }
+
+            is_testing_s3.set(false);
+        });
+    };
+
     let handle_refresh = move |_| {
         if is_loading() {
             return;
@@ -235,7 +321,13 @@ pub fn SettingsPage(
         &USER_SETTINGS_SECTIONS
     };
     let current_section = active_section();
-    let is_form_disabled = is_loading() || is_saving();
+    let requires_s3_test = loaded_config()
+        .as_ref()
+        .is_some_and(|config| requires_s3_test_confirmation(form, config));
+    let s3_test_confirmed =
+        !requires_s3_test || is_current_s3_request_confirmed(form, last_tested_s3_request());
+    let is_form_disabled = is_loading() || is_saving() || is_testing_s3();
+    let save_disabled = is_form_disabled || (requires_s3_test && !s3_test_confirmed);
     let has_restart_notice = loaded_config()
         .as_ref()
         .is_some_and(|config| config.restart_required);
@@ -246,7 +338,17 @@ pub fn SettingsPage(
     let has_unsaved_changes = changed_fields > 0;
     let storage_summary = current_storage_summary(form);
     let mail_summary = current_mail_summary(form);
-    let hero_subtitle = if is_admin {
+    let page_title = if is_admin {
+        "系统设置"
+    } else {
+        "账户设置"
+    };
+    let page_eyebrow = if is_admin {
+        "Admin Console"
+    } else {
+        "Account Console"
+    };
+    let section_description = if is_admin {
         current_section.description()
     } else {
         "管理当前账户信息和密码安全。"
@@ -254,19 +356,15 @@ pub fn SettingsPage(
 
     rsx! {
         div { class: "dashboard-page settings-page",
-            section { class: "page-hero settings-hero settings-hero-rich",
-                div { class: "settings-hero-main settings-hero-main-stack",
+            section { class: "settings-card settings-header",
+                div { class: "settings-header-main",
                     div {
-                        p { class: "settings-eyebrow",
-                            if is_admin { "Admin Console" } else { "Account Console" }
-                        }
-                        h1 { if is_admin { "系统设置" } else { "账户设置" } }
-                        p { class: "settings-hero-copy", "{hero_subtitle}" }
+                        p { class: "settings-eyebrow", "{page_eyebrow}" }
+                        h1 { "{page_title}" }
+                        p { class: "settings-panel-copy", "{section_description}" }
                     }
                     div { class: "settings-pill-row",
-                        span { class: "stat-pill stat-pill-active",
-                            if is_admin { "管理员视图" } else { "用户视图" }
-                        }
+                        span { class: "stat-pill stat-pill-active", "{current_section.label()}" }
                         if is_admin {
                             span { class: "stat-pill", "存储：{storage_summary}" }
                             span { class: "stat-pill", "邮件：{mail_summary}" }
@@ -291,19 +389,7 @@ pub fn SettingsPage(
 
             div { class: "settings-workspace",
                 aside { class: "settings-sidebar",
-                    div { class: "settings-sidebar-card settings-sidebar-intro",
-                        p { class: "settings-eyebrow", "当前分区" }
-                        h2 { "{current_section.label()}" }
-                        p { class: "settings-sidebar-copy", "{current_section.description()}" }
-                        if is_admin {
-                            div { class: "settings-sidebar-meta",
-                                span { class: "stat-pill", "存储：{storage_summary}" }
-                                span { class: "stat-pill", "邮件：{mail_summary}" }
-                            }
-                        }
-                    }
-
-                    nav { class: "settings-sidebar-card settings-nav",
+                    nav { class: "settings-card settings-nav",
                         for section in settings_sections.iter().copied() {
                             button {
                                 r#type: "button",
@@ -315,7 +401,6 @@ pub fn SettingsPage(
                                 onclick: move |_| active_section.set(section),
                                 div { class: "settings-nav-copy",
                                     strong { "{section.label()}" }
-                                    small { "{section.description()}" }
                                 }
                             }
                         }
@@ -327,7 +412,7 @@ pub fn SettingsPage(
                         div { class: "settings-panel-head",
                             div {
                                 h2 { class: "settings-panel-title", "{current_section.title()}" }
-                                p { class: "settings-panel-copy", "{current_section.description()}" }
+                                p { class: "settings-panel-copy", "{section_description}" }
                             }
                             if current_section.uses_global_settings_actions() {
                                 div { class: "settings-panel-badges",
@@ -349,18 +434,6 @@ pub fn SettingsPage(
                             div { class: "error-banner", "{error_message()}" }
                         }
 
-                        if current_section.uses_global_settings_actions() && has_unsaved_changes {
-                            div { class: "settings-banner settings-banner-neutral",
-                                "当前草稿与已生效配置存在差异。保存前请再次确认关键路径、SMTP 参数或对象存储信息。"
-                            }
-                        }
-
-                        if current_section.uses_global_settings_actions() && has_restart_notice {
-                            div { class: "settings-banner settings-banner-neutral",
-                                "当前已生效配置里包含需要重启后端才能完全切换的项目，通常是存储后端、存储路径或 S3 连接信息。"
-                            }
-                        }
-
                         {
                             match current_section {
                                 SettingsSection::Account => rsx! { AccountSectionController {} },
@@ -368,11 +441,39 @@ pub fn SettingsPage(
                                 SettingsSection::System => rsx! { SystemSectionController {} },
                                 SettingsSection::Maintenance => rsx! { MaintenanceSectionController {} },
                                 SettingsSection::Users => rsx! { UsersSectionController {} },
-                                SettingsSection::Audit => rsx! { AuditSectionController {} },
-                                SettingsSection::Advanced => rsx! {
-                                    AdvancedSectionController { on_site_name_updated }
-                                },
                                 _ => render_settings_fields(form, is_form_disabled, current_section),
+                            }
+                        }
+
+                        if current_section == SettingsSection::Storage && form.is_s3_backend() {
+                            div { class: "settings-stack",
+                                div { class: "settings-actions",
+                                    button {
+                                        class: "btn btn-primary",
+                                        onclick: handle_test_s3,
+                                        disabled: is_form_disabled,
+                                        if is_testing_s3() {
+                                            "测试中..."
+                                        } else {
+                                            "测试 S3 连通性"
+                                        }
+                                    }
+                                }
+
+                                if !s3_test_feedback().is_empty() {
+                                    div {
+                                        class: match s3_test_feedback_tone() {
+                                            S3TestFeedbackTone::Success => "settings-banner settings-banner-success",
+                                            S3TestFeedbackTone::Error => "error-banner",
+                                            S3TestFeedbackTone::Neutral => "settings-banner settings-banner-warning",
+                                        },
+                                        "{s3_test_feedback()}"
+                                    }
+                                } else if requires_s3_test {
+                                    div { class: "settings-banner settings-banner-warning",
+                                        "S3 配置已变更，请先完成连通性测试后再保存。"
+                                    }
+                                }
                             }
                         }
 
@@ -387,7 +488,7 @@ pub fn SettingsPage(
                                 button {
                                     class: "btn btn-primary",
                                     onclick: handle_save,
-                                    disabled: is_form_disabled,
+                                    disabled: save_disabled,
                                     if is_saving() { "保存中..." } else { "保存设置" }
                                 }
                             }
@@ -408,8 +509,6 @@ fn settings_section_from_anchor(anchor: SettingsAnchor) -> SettingsSection {
         SettingsAnchor::System => SettingsSection::System,
         SettingsAnchor::Maintenance => SettingsSection::Maintenance,
         SettingsAnchor::Users => SettingsSection::Users,
-        SettingsAnchor::Audit => SettingsSection::Audit,
-        SettingsAnchor::Advanced => SettingsSection::Advanced,
     }
 }
 
@@ -431,7 +530,7 @@ fn count_config_changes(form: SettingsFormState, config: &AdminSettingsConfig) -
     if (form.mail_smtp_host)().trim() != config.mail_smtp_host.trim() {
         changes += 1;
     }
-    if (form.mail_smtp_port)().trim() != config.mail_smtp_port.to_string() {
+    if (form.mail_smtp_port)().trim() != display_mail_smtp_port(config.mail_smtp_port) {
         changes += 1;
     }
     if !trimmed_option_eq((form.mail_smtp_user)(), config.mail_smtp_user.clone()) {
@@ -474,17 +573,69 @@ fn count_config_changes(form: SettingsFormState, config: &AdminSettingsConfig) -
     changes
 }
 
+fn requires_s3_test_confirmation(form: SettingsFormState, config: &AdminSettingsConfig) -> bool {
+    if !form.is_s3_backend() {
+        return false;
+    }
+
+    if config.storage_backend != StorageBackendKind::S3 {
+        return true;
+    }
+
+    has_s3_config_changes(form, config)
+}
+
+fn has_s3_config_changes(form: SettingsFormState, config: &AdminSettingsConfig) -> bool {
+    !trimmed_option_eq((form.s3_endpoint)(), config.s3_endpoint.clone())
+        || !trimmed_option_eq((form.s3_region)(), config.s3_region.clone())
+        || !trimmed_option_eq((form.s3_bucket)(), config.s3_bucket.clone())
+        || !trimmed_option_eq((form.s3_prefix)(), config.s3_prefix.clone())
+        || !trimmed_option_eq((form.s3_access_key)(), config.s3_access_key.clone())
+        || !(form.s3_secret_key)().trim().is_empty()
+        || (form.s3_force_path_style)() != config.s3_force_path_style
+}
+
+fn is_current_s3_request_confirmed(
+    form: SettingsFormState,
+    last_tested_request: Option<TestS3StorageConfigRequest>,
+) -> bool {
+    last_tested_request.is_some_and(|tested| tested == form.build_s3_test_request())
+}
+
 fn trimmed_option_eq(draft: String, current: Option<String>) -> bool {
     let draft = draft.trim();
     let current = current.unwrap_or_default();
     draft == current.trim()
 }
 
-fn current_storage_summary(form: SettingsFormState) -> &'static str {
-    if form.is_s3_backend() {
-        "对象存储"
-    } else {
-        "本地目录"
+fn current_storage_summary(form: SettingsFormState) -> String {
+    match (form.storage_backend)() {
+        StorageBackendKind::Unknown => "未选择".to_string(),
+        StorageBackendKind::Local => {
+            let path = (form.local_storage_path)().trim().to_string();
+            if path.is_empty() {
+                "本地目录".to_string()
+            } else {
+                format!("本地目录 · {path}")
+            }
+        }
+        StorageBackendKind::S3 => {
+            let bucket = (form.s3_bucket)().trim().to_string();
+            let prefix = (form.s3_prefix)().trim().trim_matches('/').to_string();
+            let preset = (form.s3_provider_preset)();
+            let provider_label = match preset {
+                S3ProviderPreset::Other => "对象存储",
+                _ => preset.label(),
+            };
+
+            if bucket.is_empty() {
+                provider_label.to_string()
+            } else if prefix.is_empty() {
+                format!("{provider_label} · {bucket}")
+            } else {
+                format!("{provider_label} · {bucket}/{prefix}")
+            }
+        }
     }
 }
 

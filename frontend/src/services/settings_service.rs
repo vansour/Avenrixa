@@ -1,6 +1,7 @@
 use crate::services::api_client::ApiClient;
 use crate::types::api::{
-    AdminSettingsConfig, StorageDirectoryBrowseResponse, UpdateAdminSettingsConfigRequest,
+    AdminSettingsConfig, StorageDirectoryBrowseResponse, TestS3StorageConfigRequest,
+    TestS3StorageConfigResponse, UpdateAdminSettingsConfigRequest,
 };
 use crate::types::errors::Result;
 
@@ -25,6 +26,15 @@ impl SettingsService {
     ) -> Result<AdminSettingsConfig> {
         self.api_client
             .put_json_response("/api/v1/settings/config", &req)
+            .await
+    }
+
+    pub async fn test_s3_storage_config(
+        &self,
+        req: TestS3StorageConfigRequest,
+    ) -> Result<TestS3StorageConfigResponse> {
+        self.api_client
+            .post_json_response("/api/v1/settings/storage/s3/test", &req)
             .await
     }
 

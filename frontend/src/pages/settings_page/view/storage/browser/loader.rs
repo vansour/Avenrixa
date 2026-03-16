@@ -5,7 +5,7 @@ use dioxus::prelude::*;
 
 use super::super::super::super::{handle_settings_auth_error, settings_auth_expired_message};
 
-pub(super) const DEFAULT_SETTINGS_STORAGE_BROWSER_PATH: &str = "/data/images";
+pub(super) const DEFAULT_SETTINGS_STORAGE_BROWSER_PATH: &str = "/";
 
 pub(super) fn load_settings_storage_directories(
     settings_service: SettingsService,

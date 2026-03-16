@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::models::{AdminSettingsConfig, StorageBackendKind};
+use crate::models::{AdminSettingsConfig, storage_backend_kind_from_runtime};
 
 use super::validation::normalize_s3_prefix;
 
@@ -199,7 +199,7 @@ impl RuntimeSettings {
             .unwrap_or(true);
 
         Self {
-            site_name: env_site_name.unwrap_or_else(|| "Vansour Image".to_string()),
+            site_name: env_site_name.unwrap_or_default(),
             storage_backend: env_backend.unwrap_or(StorageBackend::Local),
             local_storage_path: config.storage.path.clone(),
             mail_enabled: config.mail.enabled,
@@ -237,7 +237,7 @@ impl RuntimeSettings {
     pub fn to_admin_config(&self, restart_required: bool) -> AdminSettingsConfig {
         AdminSettingsConfig {
             site_name: self.site_name.clone(),
-            storage_backend: StorageBackendKind::from_runtime(self.storage_backend),
+            storage_backend: storage_backend_kind_from_runtime(self.storage_backend),
             local_storage_path: self.local_storage_path.clone(),
             mail_enabled: self.mail_enabled,
             mail_smtp_host: self.mail_smtp_host.clone(),

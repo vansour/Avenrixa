@@ -1,6 +1,8 @@
 use crate::services::api_client::ApiClient;
 use crate::store::images::{ImageCollectionKind, ImageStore};
-use crate::types::api::{DeleteRequest, Paginated, PaginationParams, SetExpiryRequest};
+use crate::types::api::{
+    DeleteRequest, ImageResponse, Paginated, PaginationParams, SetExpiryRequest,
+};
 use crate::types::errors::Result;
 use crate::types::models::ImageItem;
 
@@ -30,8 +32,9 @@ impl ImageService {
 
         let result = self
             .api_client
-            .get_json::<Paginated<ImageItem>>(&url)
+            .get_json::<Paginated<ImageResponse>>(&url)
             .await?;
+        let result = map_paginated_images(result);
         self.image_store.replace_page(
             ImageCollectionKind::Active,
             result.data.clone(),
@@ -50,15 +53,24 @@ impl ImageService {
         content_type: Option<String>,
         bytes: Vec<u8>,
     ) -> Result<ImageItem> {
-        self.api_client
-            .post_multipart_file("/api/v1/upload", "file", filename, content_type, bytes)
-            .await
+        let image = self
+            .api_client
+            .post_multipart_file::<ImageResponse>(
+                "/api/v1/upload",
+                "file",
+                filename,
+                content_type,
+                bytes,
+            )
+            .await?;
+        Ok(ImageItem::from(image))
     }
 
     /// 获取单张图片
     pub async fn get_image(&self, image_key: &str) -> Result<ImageItem> {
         let url = format!("/api/v1/images/{}", image_key);
-        self.api_client.get_json(&url).await
+        let image: ImageResponse = self.api_client.get_json(&url).await?;
+        Ok(ImageItem::from(image))
     }
 
     /// 设置过期时间
@@ -93,6 +105,16 @@ impl ImageService {
     }
 }
 
+fn map_paginated_images(result: Paginated<ImageResponse>) -> Paginated<ImageItem> {
+    Paginated {
+        data: result.data.into_iter().map(ImageItem::from).collect(),
+        page: result.page,
+        page_size: result.page_size,
+        total: result.total,
+        has_next: result.has_next,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -119,5 +141,30 @@ mod tests {
         let query = ImageService::build_query_params(&params);
 
         assert_eq!(query, "page_size=20");
+    }
+
+    #[test]
+    fn map_paginated_images_converts_api_items_to_view_items() {
+        let result = map_paginated_images(Paginated {
+            data: vec![ImageResponse {
+                image_key: "img_1".to_string(),
+                filename: "demo.png".to_string(),
+                size: 128,
+                format: "png".to_string(),
+                views: 1,
+                status: crate::types::models::ImageStatus::Active,
+                expires_at: None,
+                created_at: chrono::Utc::now(),
+            }],
+            page: 2,
+            page_size: 20,
+            total: 41,
+            has_next: true,
+        });
+
+        assert_eq!(result.data.len(), 1);
+        assert_eq!(result.data[0].filename, "demo.png");
+        assert_eq!(result.page, 2);
+        assert!(result.has_next);
     }
 }

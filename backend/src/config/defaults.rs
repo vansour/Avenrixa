@@ -67,13 +67,13 @@ impl Default for Config {
             },
             mail: MailConfig {
                 enabled: false,
-                smtp_host: "localhost".to_string(),
-                smtp_port: 587,
+                smtp_host: String::new(),
+                smtp_port: 0,
                 smtp_user: None,
                 smtp_password: None,
-                from_email: "noreply@example.com".to_string(),
-                from_name: "Vansour Image".to_string(),
-                reset_link_base_url: "http://localhost:8080/reset-password".to_string(),
+                from_email: String::new(),
+                from_name: String::new(),
+                reset_link_base_url: String::new(),
             },
         }
     }

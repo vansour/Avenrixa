@@ -1,3 +1,4 @@
+use crate::components::ImageCopyPanel;
 use crate::types::models::ImageItem;
 use dioxus::prelude::*;
 
@@ -57,11 +58,12 @@ pub fn ImageCard(
                         span { class: "image-date", "{created_at_label}" }
                     }
                 }
+                ImageCopyPanel { image: image.clone() }
                 div { class: "image-actions",
                     button {
-                        class: "btn btn-card",
+                        class: "btn btn-card btn-card-primary",
                         onclick: handle_download,
-                        "下载"
+                        "查看原图"
                     }
                     button {
                         class: "btn btn-card btn-card-danger",

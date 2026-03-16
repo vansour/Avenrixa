@@ -1,29 +1,23 @@
+pub use shared_types::bootstrap::{
+    BootstrapDatabaseKind, BootstrapStatusResponse, UpdateBootstrapDatabaseConfigRequest,
+    UpdateBootstrapDatabaseConfigResponse,
+};
+
 use crate::config::DatabaseKind;
-use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize)]
-pub struct BootstrapStatusResponse {
-    pub mode: String,
-    pub database_kind: DatabaseKind,
-    pub database_configured: bool,
-    pub database_url_masked: Option<String>,
-    pub cache_configured: bool,
-    pub cache_url_masked: Option<String>,
-    pub restart_required: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub runtime_error: Option<String>,
+pub fn bootstrap_database_kind_from_config(value: DatabaseKind) -> BootstrapDatabaseKind {
+    match value {
+        DatabaseKind::Postgres => BootstrapDatabaseKind::Postgres,
+        DatabaseKind::MySql => BootstrapDatabaseKind::MySql,
+        DatabaseKind::Sqlite => BootstrapDatabaseKind::Sqlite,
+    }
 }
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct UpdateBootstrapDatabaseConfigRequest {
-    pub database_kind: DatabaseKind,
-    pub database_url: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct UpdateBootstrapDatabaseConfigResponse {
-    pub database_kind: DatabaseKind,
-    pub database_configured: bool,
-    pub database_url_masked: String,
-    pub restart_required: bool,
+pub fn config_database_kind_from_bootstrap(value: BootstrapDatabaseKind) -> Option<DatabaseKind> {
+    match value {
+        BootstrapDatabaseKind::Postgres => Some(DatabaseKind::Postgres),
+        BootstrapDatabaseKind::MySql => Some(DatabaseKind::MySql),
+        BootstrapDatabaseKind::Sqlite => Some(DatabaseKind::Sqlite),
+        BootstrapDatabaseKind::Unknown => None,
+    }
 }

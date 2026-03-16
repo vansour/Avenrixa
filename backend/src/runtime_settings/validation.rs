@@ -1,5 +1,8 @@
 use crate::error::AppError;
-use crate::models::{StorageBackendKind, UpdateAdminSettingsConfigRequest};
+use crate::models::{
+    StorageBackendKind, UpdateAdminSettingsConfigRequest, runtime_storage_backend_from_kind,
+    storage_backend_kind_from_runtime,
+};
 use lettre::Address;
 use reqwest::Url;
 
@@ -74,13 +77,11 @@ pub(crate) fn validate_and_merge(
     }
     current.site_name = site_name.to_string();
 
-    current.storage_backend = req
-        .storage_backend
-        .to_runtime()
+    current.storage_backend = runtime_storage_backend_from_kind(req.storage_backend)
         .ok_or_else(|| AppError::ValidationError("存储后端必须是 local 或 s3".to_string()))?;
 
     let local_path = req.local_storage_path.trim();
-    if local_path.is_empty() {
+    if current.storage_backend == StorageBackend::Local && local_path.is_empty() {
         return Err(AppError::ValidationError(
             "本地存储路径不能为空".to_string(),
         ));
@@ -193,7 +194,7 @@ pub fn validate_raw_setting_update(
 ) -> Result<RuntimeSettings, AppError> {
     let mut req = UpdateAdminSettingsConfigRequest {
         site_name: current.site_name.clone(),
-        storage_backend: StorageBackendKind::from_runtime(current.storage_backend),
+        storage_backend: storage_backend_kind_from_runtime(current.storage_backend),
         local_storage_path: current.local_storage_path.clone(),
         mail_enabled: current.mail_enabled,
         mail_smtp_host: current.mail_smtp_host.clone(),

@@ -1,5 +1,7 @@
 use crate::app_context::{use_auth_store, use_image_service, use_toast_store};
 use crate::auth_session::{auth_session_expired_message, handle_auth_session_error};
+use crate::components::ImageCopyPanel;
+use crate::types::models::ImageItem;
 use dioxus::html::FileData;
 use dioxus::prelude::*;
 #[cfg(target_arch = "wasm32")]
@@ -192,11 +194,68 @@ fn focus_upload_paste_target() {
 #[cfg(not(target_arch = "wasm32"))]
 fn focus_upload_paste_target() {}
 
+fn push_uploaded_image(images: &mut Vec<ImageItem>, image: ImageItem) {
+    images.retain(|existing| existing.image_key != image.image_key);
+    images.insert(0, image);
+}
+
+#[component]
+fn UploadResultCard(image: ImageItem) -> Element {
+    let preview_url = image.url();
+    let thumbnail_url = image.thumbnail_url();
+    let display_name = image.display_name();
+    let format_label = image.format.to_uppercase();
+    let size_label = image.size_formatted();
+    let created_at_label = image.created_at_label();
+
+    rsx! {
+        section { class: "upload-result-card",
+            a {
+                class: "upload-result-preview",
+                href: "{preview_url}",
+                target: "_blank",
+                rel: "noreferrer",
+                img {
+                    src: "{thumbnail_url}",
+                    alt: "{display_name}",
+                    loading: "lazy"
+                }
+            }
+
+            div { class: "upload-result-head",
+                div {
+                    p { class: "upload-result-eyebrow", "本次上传" }
+                    h3 { class: "upload-result-title", "{display_name}" }
+                }
+                a {
+                    class: "upload-result-link",
+                    href: "{preview_url}",
+                    target: "_blank",
+                    rel: "noreferrer",
+                    "查看原图"
+                }
+            }
+
+            div { class: "upload-result-main",
+                div { class: "upload-result-meta",
+                    span { class: "upload-result-chip", "{format_label}" }
+                    span { class: "upload-result-chip", "{size_label}" }
+                    span { class: "upload-result-chip", "{created_at_label}" }
+                }
+
+                ImageCopyPanel { image: image.clone() }
+            }
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 async fn submit_upload(
     image_service: crate::services::ImageService,
     auth_store: crate::store::auth::AuthStore,
     toast_store: crate::store::toast_store::ToastStore,
     mut selected_file: Signal<Option<FileData>>,
+    mut uploaded_images: Signal<Vec<ImageItem>>,
     mut success_message: Signal<String>,
     mut error_message: Signal<String>,
     filename: String,
@@ -211,6 +270,7 @@ async fn submit_upload(
     {
         Ok(image) => {
             let message = format!("{success_prefix}: {}", image.filename);
+            uploaded_images.with_mut(|images| push_uploaded_image(images, image.clone()));
             success_message.set(message.clone());
             toast_store.show_success(message);
             selected_file.set(None);
@@ -237,6 +297,7 @@ pub fn UploadPage() -> Element {
     let mut selected_file = use_signal(|| None::<FileData>);
     let mut is_uploading = use_signal(|| false);
     let mut is_drag_over = use_signal(|| false);
+    let uploaded_images = use_signal(Vec::<ImageItem>::new);
     let mut success_message = use_signal(String::new);
     let mut error_message = use_signal(String::new);
 
@@ -349,6 +410,7 @@ pub fn UploadPage() -> Element {
                     auth_store,
                     toast_store,
                     selected_file,
+                    uploaded_images,
                     success_message,
                     error_message,
                     filename,
@@ -397,6 +459,7 @@ pub fn UploadPage() -> Element {
                 auth_store,
                 toast_store,
                 selected_file,
+                uploaded_images,
                 success_message,
                 error_message,
                 filename,
@@ -458,6 +521,7 @@ pub fn UploadPage() -> Element {
                 auth_store,
                 toast_store,
                 selected_file,
+                uploaded_images,
                 success_message,
                 error_message,
                 filename,
@@ -553,6 +617,24 @@ pub fn UploadPage() -> Element {
                     }
                     if !error_message().is_empty() {
                         p { class: "upload-message upload-message-error", "{error_message()}" }
+                    }
+                }
+            }
+
+            if !uploaded_images().is_empty() {
+                section { class: "upload-results-section",
+                    div { class: "upload-results-head",
+                        h2 { class: "upload-results-title", "本次上传" }
+                        p { class: "upload-results-count", "共 {uploaded_images().len()} 张" }
+                    }
+
+                    div { class: "upload-results-grid",
+                        {uploaded_images().into_iter().map(|image| rsx! {
+                            UploadResultCard {
+                                key: "{image.image_key}",
+                                image
+                            }
+                        })}
                     }
                 }
             }

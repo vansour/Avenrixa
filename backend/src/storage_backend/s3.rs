@@ -8,10 +8,7 @@ use crate::error::AppError;
 use crate::runtime_settings::RuntimeSettings;
 
 impl StorageManager {
-    pub(super) async fn resolve_s3_client(
-        &self,
-        settings: &RuntimeSettings,
-    ) -> Result<CachedS3Client, AppError> {
+    pub(super) fn build_s3_client(settings: &RuntimeSettings) -> Result<CachedS3Client, AppError> {
         let endpoint = required_s3_setting(settings.s3_endpoint.as_deref(), "endpoint")?;
         let region = required_s3_setting(settings.s3_region.as_deref(), "region")?;
         let bucket = required_s3_setting(settings.s3_bucket.as_deref(), "bucket")?;
@@ -26,13 +23,6 @@ impl StorageManager {
             "{}|{}|{}|{}|{}|{}",
             endpoint, region, bucket, access_key, secret_key, settings.s3_force_path_style
         );
-
-        if let Some(cached) = self.s3_client_cache.read().await.as_ref()
-            && cached.signature == signature
-        {
-            return Ok(cached.clone());
-        }
-
         let creds = Credentials::new(access_key, secret_key, None, None, "runtime-settings");
         let mut builder = S3ConfigBuilder::new()
             .behavior_version(BehaviorVersion::latest())
@@ -44,12 +34,24 @@ impl StorageManager {
         }
         let client = S3Client::from_conf(builder.build());
 
-        let next = CachedS3Client {
+        Ok(CachedS3Client {
             signature,
             bucket,
             prefix,
             client,
-        };
+        })
+    }
+
+    pub(super) async fn resolve_s3_client(
+        &self,
+        settings: &RuntimeSettings,
+    ) -> Result<CachedS3Client, AppError> {
+        let next = Self::build_s3_client(settings)?;
+        if let Some(cached) = self.s3_client_cache.read().await.as_ref()
+            && cached.signature == next.signature
+        {
+            return Ok(cached.clone());
+        }
         let mut guard = self.s3_client_cache.write().await;
         *guard = Some(next.clone());
         Ok(next)

@@ -5,6 +5,7 @@ use crate::cache::CacheCommands;
 use crate::db::DatabasePool;
 use crate::error::AppError;
 use crate::models::{ComponentStatus, HealthMetrics, HealthState, HealthStatus};
+use crate::runtime_settings::StorageBackend;
 
 fn build_version_label(
     app_version: Option<&str>,
@@ -32,6 +33,44 @@ fn app_version_label() -> String {
         env!("CARGO_PKG_VERSION"),
         option_env!("APP_REVISION"),
     )
+}
+
+fn describe_storage_backend(settings: &crate::runtime_settings::RuntimeSettings) -> String {
+    match settings.storage_backend {
+        StorageBackend::Local => {
+            format!("本地存储 · {}", settings.local_storage_path.trim())
+        }
+        StorageBackend::S3 => {
+            let bucket = settings.s3_bucket.as_deref().unwrap_or("未配置桶");
+            let endpoint = settings.s3_endpoint.as_deref().unwrap_or("未配置 endpoint");
+            let provider = infer_s3_provider(
+                settings.s3_endpoint.as_deref(),
+                settings.s3_region.as_deref(),
+            );
+            format!("{provider} · {bucket} · {endpoint}")
+        }
+    }
+}
+
+fn infer_s3_provider(endpoint: Option<&str>, region: Option<&str>) -> &'static str {
+    let endpoint = endpoint
+        .map(str::trim)
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let region = region
+        .map(str::trim)
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+
+    if endpoint.contains(".r2.cloudflarestorage.com") || region == "auto" {
+        "Cloudflare R2"
+    } else if endpoint.contains("amazonaws.com") {
+        "AWS S3"
+    } else if endpoint.contains("minio") || endpoint.contains("9000") {
+        "MinIO / S3"
+    } else {
+        "对象存储"
+    }
 }
 
 impl AdminDomainService {
@@ -68,8 +107,12 @@ impl AdminDomainService {
             self.cache_status.clone()
         };
 
+        let storage_settings = self.storage_manager.active_settings();
         let storage_status = match self.storage_manager.check_health().await {
-            Ok(_) => ComponentStatus::healthy(),
+            Ok(_) => ComponentStatus {
+                status: HealthState::Healthy,
+                message: Some(describe_storage_backend(&storage_settings)),
+            },
             Err(e) => {
                 overall_status = HealthState::Unhealthy;
                 ComponentStatus::unhealthy(e.to_string())
@@ -186,7 +229,8 @@ impl AdminDomainService {
 
 #[cfg(test)]
 mod tests {
-    use super::build_version_label;
+    use super::{build_version_label, describe_storage_backend, infer_s3_provider};
+    use crate::runtime_settings::{RuntimeSettings, StorageBackend};
 
     const PACKAGE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -201,8 +245,8 @@ mod tests {
     #[test]
     fn build_version_label_prefers_explicit_app_version() {
         assert_eq!(
-            build_version_label(Some("0.1.0"), PACKAGE_VERSION, None),
-            "0.1.0"
+            build_version_label(Some("0.1.1"), PACKAGE_VERSION, None),
+            "0.1.1"
         );
     }
 
@@ -219,6 +263,43 @@ mod tests {
         assert_eq!(
             build_version_label(Some(PACKAGE_VERSION), "ignored", Some("dev")),
             PACKAGE_VERSION
+        );
+    }
+
+    #[test]
+    fn infer_s3_provider_detects_r2() {
+        assert_eq!(
+            infer_s3_provider(Some("https://demo.r2.cloudflarestorage.com"), Some("auto")),
+            "Cloudflare R2"
+        );
+    }
+
+    #[test]
+    fn describe_storage_backend_formats_s3_summary() {
+        let settings = RuntimeSettings {
+            site_name: "Vansour Image".to_string(),
+            storage_backend: StorageBackend::S3,
+            local_storage_path: "/data/images".to_string(),
+            mail_enabled: false,
+            mail_smtp_host: String::new(),
+            mail_smtp_port: 587,
+            mail_smtp_user: None,
+            mail_smtp_password: None,
+            mail_from_email: String::new(),
+            mail_from_name: String::new(),
+            mail_link_base_url: String::new(),
+            s3_endpoint: Some("https://demo.r2.cloudflarestorage.com".to_string()),
+            s3_region: Some("auto".to_string()),
+            s3_bucket: Some("images".to_string()),
+            s3_prefix: None,
+            s3_access_key: None,
+            s3_secret_key: None,
+            s3_force_path_style: false,
+        };
+
+        assert_eq!(
+            describe_storage_backend(&settings),
+            "Cloudflare R2 · images · https://demo.r2.cloudflarestorage.com"
         );
     }
 }

@@ -61,7 +61,7 @@ async fn insert_postgres_audit(
     ip_address: Option<&str>,
     details: Option<serde_json::Value>,
 ) {
-    let audit_log = AuditLog {
+    let audit_log = AuditLogRecord {
         id: Uuid::new_v4(),
         user_id,
         action: action.to_string(),
@@ -107,7 +107,7 @@ async fn insert_mysql_audit(
     ip_address: Option<&str>,
     details: Option<serde_json::Value>,
 ) {
-    let audit_log = AuditLog {
+    let audit_log = AuditLogRecord {
         id: Uuid::new_v4(),
         user_id,
         action: action.to_string(),

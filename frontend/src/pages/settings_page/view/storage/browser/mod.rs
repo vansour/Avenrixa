@@ -79,52 +79,42 @@ pub(super) fn LocalStoragePathPicker(form: SettingsFormState, disabled: bool) ->
                     content_class: "storage-browser-modal-shell".to_string(),
                     on_close: move |_| browser_open.set(false),
                     div { class: "install-path-browser",
-                        div { class: "install-path-browser-summary",
-                            div {
-                                p { class: "install-path-browser-label", "当前目录" }
-                                code { class: "install-path-browser-current", "{browser_current_path()}" }
-                            }
-                            p { class: "install-path-browser-meta",
-                                if browser_loading() {
-                                    "正在读取目录..."
-                                } else {
-                                    "{directory_entries.len()} 个子目录"
+                        div { class: "install-path-browser-head",
+                            code { class: "install-path-browser-current", "{browser_current_path()}" }
+                            div { class: "install-path-browser-toolbar",
+                                button {
+                                    class: "btn btn-ghost",
+                                    r#type: "button",
+                                    disabled: disabled || browser_loading() || browser_parent_path().is_none(),
+                                    onclick: move |_| {
+                                        if let Some(parent_path) = browser_parent_path() {
+                                            load_settings_storage_directories(
+                                                browse_parent_service.clone(),
+                                                browse_parent_auth_store.clone(),
+                                                browse_parent_toast_store.clone(),
+                                                StorageBrowserSignals {
+                                                    loading: browser_loading,
+                                                    error: browser_error,
+                                                    current_path: browser_current_path,
+                                                    parent_path: browser_parent_path,
+                                                    directories: browser_directories,
+                                                },
+                                                parent_path,
+                                            );
+                                        }
+                                    },
+                                    "上一级"
                                 }
-                            }
-                        }
-                        div { class: "install-path-browser-toolbar",
-                            button {
-                                class: "btn btn-ghost",
-                                r#type: "button",
-                                disabled: disabled || browser_loading() || browser_parent_path().is_none(),
-                                onclick: move |_| {
-                                    if let Some(parent_path) = browser_parent_path() {
-                                        load_settings_storage_directories(
-                                            browse_parent_service.clone(),
-                                            browse_parent_auth_store.clone(),
-                                            browse_parent_toast_store.clone(),
-                                            StorageBrowserSignals {
-                                                loading: browser_loading,
-                                                error: browser_error,
-                                                current_path: browser_current_path,
-                                                parent_path: browser_parent_path,
-                                                directories: browser_directories,
-                                            },
-                                            parent_path,
-                                        );
-                                    }
-                                },
-                                "上一级"
-                            }
-                            button {
-                                class: "btn btn-primary",
-                                r#type: "button",
-                                disabled: disabled,
-                                onclick: move |_| {
-                                    local_storage_path.set(browser_current_path());
-                                    browser_open.set(false);
-                                },
-                                "选择当前文件夹"
+                                button {
+                                    class: "btn btn-primary",
+                                    r#type: "button",
+                                    disabled: disabled,
+                                    onclick: move |_| {
+                                        local_storage_path.set(browser_current_path());
+                                        browser_open.set(false);
+                                    },
+                                    "选择当前文件夹"
+                                }
                             }
                         }
                         div { class: "install-path-browser-panel",

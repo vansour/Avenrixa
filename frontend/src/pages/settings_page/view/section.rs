@@ -14,11 +14,9 @@ pub enum SettingsSection {
     System,
     Maintenance,
     Users,
-    Audit,
-    Advanced,
 }
 
-pub const ADMIN_SETTINGS_SECTIONS: [SettingsSection; 9] = [
+pub const ADMIN_SETTINGS_SECTIONS: [SettingsSection; 7] = [
     SettingsSection::General,
     SettingsSection::Storage,
     SettingsSection::Security,
@@ -26,8 +24,6 @@ pub const ADMIN_SETTINGS_SECTIONS: [SettingsSection; 9] = [
     SettingsSection::System,
     SettingsSection::Maintenance,
     SettingsSection::Users,
-    SettingsSection::Audit,
-    SettingsSection::Advanced,
 ];
 
 pub const USER_SETTINGS_SECTIONS: [SettingsSection; 2] =
@@ -43,8 +39,6 @@ impl SettingsSection {
             Self::System => "系统状态",
             Self::Maintenance => "维护工具",
             Self::Users => "用户与权限",
-            Self::Audit => "审计日志",
-            Self::Advanced => "高级设置",
         }
     }
 
@@ -54,15 +48,13 @@ impl SettingsSection {
 
     pub fn description(self) -> &'static str {
         match self {
-            Self::Account => "查看当前登录账户信息，并管理当前会话。",
-            Self::General => "维护站点名称、邮件发送和验证链接等基础配置。",
-            Self::Storage => "配置图片写入位置，并决定使用本地目录还是对象存储。",
-            Self::Security => "修改当前账户密码，收紧登录安全。",
-            Self::System => "查看健康检查、容量和整体运行状态。",
-            Self::Maintenance => "执行清理与备份等高风险维护操作。",
-            Self::Users => "查看账户列表，并调整用户权限。",
-            Self::Audit => "追踪关键管理操作与系统事件。",
-            Self::Advanced => "处理底层键值配置，仅在明确知道影响时修改。",
+            Self::Account => "查看当前账户和会话状态。",
+            Self::General => "管理站点名称和邮件配置。",
+            Self::Storage => "配置本地目录或 S3。",
+            Self::Security => "修改密码和登录安全。",
+            Self::System => "查看健康与容量状态。",
+            Self::Maintenance => "执行清理、备份和恢复。",
+            Self::Users => "管理用户和权限。",
         }
     }
 

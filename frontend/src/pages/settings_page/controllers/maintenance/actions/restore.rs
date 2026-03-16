@@ -8,6 +8,7 @@ use super::super::super::{
     restore_precheck_error_message, set_settings_action_error,
 };
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn schedule_restore(
     admin_service: AdminService,
     auth_store: AuthStore,
@@ -41,6 +42,7 @@ pub(crate) async fn schedule_restore(
     processing_restore_filename.set(None);
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn precheck_restore(
     admin_service: AdminService,
     auth_store: AuthStore,

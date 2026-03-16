@@ -5,6 +5,7 @@ use super::super::super::shared::{
     backup_kind_label, backup_supports_restore, format_storage_bytes_u64, format_timestamp,
 };
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn render_backup_files_section(
     backup_files: Vec<(BackupFileSummary, String)>,
     pending_restore_filename: Option<String>,

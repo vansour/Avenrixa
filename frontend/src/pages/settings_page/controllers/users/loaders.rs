@@ -6,6 +6,7 @@ use std::collections::HashMap;
 
 use super::super::set_settings_load_error;
 
+#[allow(clippy::let_underscore_future, clippy::too_many_arguments)]
 pub(super) fn use_users_loader(
     admin_service: AdminService,
     auth_store: AuthStore,

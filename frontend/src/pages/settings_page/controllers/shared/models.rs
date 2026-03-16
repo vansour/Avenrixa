@@ -33,10 +33,3 @@ pub(crate) struct PendingUserRoleChange {
     pub(crate) next_role: UserRole,
     pub(crate) plan: ConfirmationPlan,
 }
-
-#[derive(Clone, PartialEq, Eq)]
-pub(crate) struct PendingSettingChange {
-    pub(crate) key: String,
-    pub(crate) next_value: String,
-    pub(crate) plan: ConfirmationPlan,
-}

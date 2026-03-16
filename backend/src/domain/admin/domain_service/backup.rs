@@ -11,7 +11,10 @@ use crate::backup_manifest::{backup_directory, capture_backup_manifest, write_ba
 use crate::config::{DatabaseKind, normalize_mysql_compatible_url};
 use crate::db::DatabasePool;
 use crate::error::AppError;
-use crate::models::{BackupFileSummary, BackupResponse, BackupSemantics};
+use crate::models::{
+    BackupFileSummary, BackupResponse, BackupSemantics, backup_semantics_from_database_kind,
+    infer_backup_semantics,
+};
 use crate::runtime_settings::StorageSettingsSnapshot;
 
 struct MySqlDumpTarget {
@@ -71,7 +74,7 @@ impl AdminDomainService {
                 continue;
             };
             let created_at = file_timestamp(&metadata).unwrap_or_else(Utc::now);
-            let semantics = BackupSemantics::infer(&filename, None);
+            let semantics = infer_backup_semantics(&filename, None);
 
             backups.push(BackupFileSummary {
                 filename,
@@ -101,7 +104,7 @@ impl AdminDomainService {
 
         match &self.database {
             DatabasePool::Postgres(_) => {
-                let semantics = BackupSemantics::from_database_kind(DatabaseKind::Postgres);
+                let semantics = backup_semantics_from_database_kind(DatabaseKind::Postgres);
                 let filename = format!("backup_{}.sql", Uuid::new_v4());
                 let backup_path = backup_path(&filename)?;
                 let database = self.database.clone();
@@ -265,7 +268,7 @@ impl AdminDomainService {
                 })
             }
             DatabasePool::MySql(_) => {
-                let semantics = BackupSemantics::from_database_kind(DatabaseKind::MySql);
+                let semantics = backup_semantics_from_database_kind(DatabaseKind::MySql);
                 let filename = format!("backup_{}.mysql.sql", Uuid::new_v4());
                 let backup_path = backup_path(&filename)?;
                 let database = self.database.clone();
@@ -455,7 +458,7 @@ impl AdminDomainService {
                 })
             }
             DatabasePool::Sqlite(pool) => {
-                let semantics = BackupSemantics::from_database_kind(DatabaseKind::Sqlite);
+                let semantics = backup_semantics_from_database_kind(DatabaseKind::Sqlite);
                 let filename = format!("backup_{}.sqlite3", Uuid::new_v4());
                 let backup_path = backup_path(&filename)?;
                 let backup_sql = format!(

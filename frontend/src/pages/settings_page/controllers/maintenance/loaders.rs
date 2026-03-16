@@ -5,6 +5,7 @@ use dioxus::prelude::*;
 
 use super::super::set_settings_load_error;
 
+#[allow(clippy::let_underscore_future, clippy::too_many_arguments)]
 pub(super) fn use_backups_loader(
     admin_service: AdminService,
     auth_store: AuthStore,
@@ -35,6 +36,7 @@ pub(super) fn use_backups_loader(
     });
 }
 
+#[allow(clippy::let_underscore_future, clippy::too_many_arguments)]
 pub(super) fn use_restore_status_loader(
     admin_service: AdminService,
     auth_store: AuthStore,

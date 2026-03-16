@@ -3,7 +3,7 @@
 # 阶段 1: 统一构建环境 (Builder)
 # ==========================================
 FROM rust:trixie AS builder
-ARG APP_VERSION=1.0.0
+ARG APP_VERSION=0.1.1
 ARG APP_REVISION=dev
 ARG BUILD_DATE=unknown
 ENV APP_VERSION=${APP_VERSION}
@@ -31,6 +31,7 @@ RUN set -eux; \
 COPY Cargo.toml Cargo.lock ./
 COPY backend/Cargo.toml ./backend/
 COPY frontend/Cargo.toml ./frontend/
+COPY shared-types/ ./shared-types/
 
 # 利用“假文件”技巧，预先下载和编译前后端的第三方依赖库
 RUN mkdir -p backend/src frontend/src \
@@ -58,11 +59,14 @@ RUN rm -rf backend/src frontend/src
 # 这一步一旦源码有变动，Docker 会自动使后面的缓存失效，无需手动 echo 时间戳
 COPY backend/ ./backend/
 COPY frontend/ ./frontend/
+COPY shared-types/ ./shared-types/
 
 # 5. 编译后端
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/app/target \
+    cargo clean -p shared-types -p backend -p frontend \
+    && \
     touch backend/src/main.rs \
     && cargo build --release --bin vansour-image \
     && cp /app/target/release/vansour-image /app/vansour-image
@@ -86,7 +90,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 # 阶段 2: 最终运行时环境 (Runtime)
 # ==========================================
 FROM debian:trixie-slim AS runtime
-ARG APP_VERSION=1.0.0
+ARG APP_VERSION=0.1.1
 ARG APP_REVISION=dev
 ARG BUILD_DATE=unknown
 LABEL org.opencontainers.image.title="vansour-image" \
