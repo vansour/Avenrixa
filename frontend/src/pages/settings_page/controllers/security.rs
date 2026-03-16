@@ -22,7 +22,7 @@ pub fn SecuritySectionController() -> Element {
         .as_ref()
         .is_some_and(|user| user.role.is_admin());
     let min_password_length = if current_user_is_admin { 12 } else { 6 };
-    let helper_text = if current_user_is_admin {
+    let _min_password_hint = if current_user_is_admin {
         "管理员密码至少需要 12 个字符，建议包含大小写字母、数字与符号。".to_string()
     } else {
         "新密码长度需在 6 到 100 个字符之间。".to_string()
@@ -108,7 +108,6 @@ pub fn SecuritySectionController() -> Element {
             confirm_password,
             error_message: error_message(),
             success_message: success_message(),
-            helper_text,
             is_submitting: is_updating_password(),
             on_submit: handle_change_password,
         }

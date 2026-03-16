@@ -348,12 +348,6 @@ pub fn SettingsPage(
     } else {
         "Account Console"
     };
-    let section_description = if is_admin {
-        current_section.description()
-    } else {
-        "管理当前账户信息和密码安全。"
-    };
-
     rsx! {
         div { class: "dashboard-page settings-page",
             section { class: "settings-card settings-header",
@@ -361,7 +355,6 @@ pub fn SettingsPage(
                     div {
                         p { class: "settings-eyebrow", "{page_eyebrow}" }
                         h1 { "{page_title}" }
-                        p { class: "settings-panel-copy", "{section_description}" }
                     }
                     div { class: "settings-pill-row",
                         span { class: "stat-pill stat-pill-active", "{current_section.label()}" }
@@ -412,7 +405,6 @@ pub fn SettingsPage(
                         div { class: "settings-panel-head",
                             div {
                                 h2 { class: "settings-panel-title", "{current_section.title()}" }
-                                p { class: "settings-panel-copy", "{section_description}" }
                             }
                             if current_section.uses_global_settings_actions() {
                                 div { class: "settings-panel-badges",

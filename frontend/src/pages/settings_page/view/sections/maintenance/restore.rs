@@ -36,9 +36,6 @@ pub(super) fn render_restore_section(
     rsx! {
         div { class: "settings-subcard",
             h3 { "数据库恢复状态" }
-            p { class: "settings-section-copy",
-                "当前恢复是冷恢复流程：写入计划后会在下一次启动前执行。按 1.0 范围，当前页面内的 SQLite 数据库快照恢复仅作为 Experimental 能力保留；PostgreSQL 是默认 GA 主路径，但恢复统一走运维脚本。"
-            }
 
             div { class: "settings-list-toolbar",
                 div { class: "settings-toolbar-meta",
@@ -71,7 +68,7 @@ pub(super) fn render_restore_section(
 
                 if let Some(pending) = pending_restore.clone() {
                     div { class: "settings-banner settings-banner-warning",
-                        "检测到待执行的数据库恢复计划。请立即重启服务；真正的数据库替换或导入会在下一次启动前完成。"
+                        "检测到待执行恢复计划，请重启服务完成恢复。"
                     }
                     article { class: "settings-entity-card",
                         div { class: "settings-entity-main",
@@ -84,14 +81,10 @@ pub(super) fn render_restore_section(
                                     "计划写入于 {format_timestamp(pending.scheduled_at)} · 备份创建于 {format_timestamp(pending.backup_created_at)} · {format_storage_bytes_u64(pending.backup_size_bytes)}"
                                 }
                                 p { class: "settings-action-note",
-                                    "申请人 {pending.requested_by_email}。恢复完成后，当前所有登录会话都会失效。"
+                                    "申请人 {pending.requested_by_email} · 完成后当前登录会话会失效"
                                 }
                             }
                         }
-                    }
-                } else {
-                    div { class: "settings-banner settings-banner-neutral",
-                        "当前没有待执行的数据库恢复计划。当前页面内只有 SQLite 数据库快照可写入恢复计划，且这条能力在 1.0 范围内按 Experimental 保留；其他备份类型仅支持下载或运维侧恢复。"
                     }
                 }
 

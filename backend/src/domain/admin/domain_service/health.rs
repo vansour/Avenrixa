@@ -10,21 +10,13 @@ use crate::runtime_settings::StorageBackend;
 fn build_version_label(
     app_version: Option<&str>,
     fallback_version: &str,
-    revision: Option<&str>,
+    _revision: Option<&str>,
 ) -> String {
-    let version = app_version
+    app_version
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .unwrap_or(fallback_version);
-
-    let revision = revision
-        .map(str::trim)
-        .filter(|value| !value.is_empty() && *value != "unknown" && *value != "dev");
-
-    match revision {
-        Some(revision) => format!("{version} ({revision})"),
-        None => version.to_string(),
-    }
+        .unwrap_or(fallback_version)
+        .to_string()
 }
 
 fn app_version_label() -> String {
@@ -251,10 +243,10 @@ mod tests {
     }
 
     #[test]
-    fn build_version_label_appends_revision_when_present() {
+    fn build_version_label_ignores_revision_when_present() {
         assert_eq!(
-            build_version_label(Some(PACKAGE_VERSION), "ignored", Some("abc123def456")),
-            format!("{PACKAGE_VERSION} (abc123def456)")
+            build_version_label(Some("0.1.1-rc.1"), "ignored", Some("abc123def456")),
+            "0.1.1-rc.1"
         );
     }
 

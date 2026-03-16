@@ -510,7 +510,7 @@ async function phaseInstallAndBackup(page) {
   const backupRowText = (await backupRow.textContent()) || "";
   assert.match(
     backupRowText,
-    /当前这类备份仅支持下载或运维侧恢复/,
+    /仅支持下载或运维恢复/,
     "backup row should explain that page restore is unavailable"
   );
 
@@ -549,7 +549,7 @@ async function phaseVerifyBackupAudit(page) {
   await clickSettingsNav(page, "维护工具");
   await waitForText(page, config.backupFilename, "维护工具中的备份文件名");
   await waitForText(page, /逻辑导出|SQLite 数据库快照/, "维护工具数据库类型文案");
-  await waitForText(page, "当前这类备份仅支持下载或运维侧恢复", "维护工具恢复限制文案");
+  await waitForText(page, "仅支持下载或运维恢复", "维护工具恢复限制文案");
 
   return { backupFilename: config.backupFilename };
 }

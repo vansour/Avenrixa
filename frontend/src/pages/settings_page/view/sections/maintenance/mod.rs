@@ -60,10 +60,6 @@ pub fn MaintenanceSettingsSection(
                 div { class: "settings-banner settings-banner-success", "{success_message}" }
             }
 
-            div { class: "settings-banner settings-banner-neutral",
-                "维护工具已启用分级确认：过期图片永久删除和数据库恢复都属于高风险操作，需要输入确认词；数据库备份可直接执行。"
-            }
-
             div { class: "settings-metric-grid",
                 {render_metric_card("最近备份文件", last_backup_name)}
                 {render_metric_card("最近备份时间", last_backup_time)}
@@ -77,7 +73,6 @@ pub fn MaintenanceSettingsSection(
                             span { class: "settings-risk-badge is-danger", "Danger" }
                         }
                         h3 { "永久删除过期图片" }
-                        p { class: "settings-action-note", "批量删除所有已过期图片，并同步移除文件与数据库记录。" }
                     }
                     button {
                         class: "btn btn-danger",
@@ -93,7 +88,6 @@ pub fn MaintenanceSettingsSection(
                             span { class: "settings-risk-badge is-safe", "Safe" }
                         }
                         h3 { "数据库备份" }
-                        p { class: "settings-action-note", "生成当前数据库级备份；SQLite 会导出数据库快照，MySQL / MariaDB 与 PostgreSQL 会导出逻辑备份。" }
                     }
                     button {
                         class: "btn btn-primary",

@@ -1,6 +1,6 @@
 # 0.1 RC Runbook
 
-本文档对应 `0.1.0-rc.1` 候选版的收口阶段。阶段 1 已经把默认 GA 主链路收进统一门禁；阶段 2 的目标不是再扩大功能范围，而是把候选版资产做成可追溯、可复跑、可发布。
+本文档对应 `0.1.1-rc.1` 候选版的收口阶段。阶段 1 已经把默认 GA 主链路收进统一门禁；阶段 2 的目标不是再扩大功能范围，而是把候选版资产做成可追溯、可复跑、可发布。
 
 ## 统一入口
 
@@ -27,9 +27,9 @@ GitHub Actions 手动触发：
 
 ## 当前候选版
 
-- 版本：`0.1.0-rc.1`
-- 本地默认镜像引用：`ghcr.io/vansour/vansour-image:0.1.0-rc.1`
-- GitHub Actions 默认发布引用：`ghcr.io/<repository_owner>/vansour-image:0.1.0-rc.1`
+- 版本：`0.1.1-rc.1`
+- 本地默认镜像引用：`ghcr.io/vansour/vansour-image:0.1.1-rc.1`
+- GitHub Actions 默认发布引用：`ghcr.io/<repository_owner>/vansour-image:0.1.1-rc.1`
 
 ## 常用参数
 

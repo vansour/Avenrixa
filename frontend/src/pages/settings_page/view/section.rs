@@ -46,18 +46,6 @@ impl SettingsSection {
         self.label()
     }
 
-    pub fn description(self) -> &'static str {
-        match self {
-            Self::Account => "查看当前账户和会话状态。",
-            Self::General => "管理站点名称和邮件配置。",
-            Self::Storage => "配置本地目录或 S3。",
-            Self::Security => "修改密码和登录安全。",
-            Self::System => "查看健康与容量状态。",
-            Self::Maintenance => "执行清理、备份和恢复。",
-            Self::Users => "管理用户和权限。",
-        }
-    }
-
     pub fn uses_global_settings_actions(self) -> bool {
         matches!(self, Self::General | Self::Storage)
     }

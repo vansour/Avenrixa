@@ -10,13 +10,7 @@ workspace_package_version() {
 
 build_version_label() {
   local version="$1"
-  local revision="${2:-}"
-
-  if [[ -n "${revision}" && "${revision}" != "dev" && "${revision}" != "unknown" ]]; then
-    printf '%s (%s)' "${version}" "${revision}"
-  else
-    printf '%s' "${version}"
-  fi
+  printf '%s' "${version}"
 }
 
 WORKSPACE_VERSION="$(workspace_package_version)"
