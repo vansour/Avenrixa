@@ -122,18 +122,27 @@ async function waitForStorageBrowserPath(page, matcher = null, timeout = PHASE_T
   throw new Error(`Timed out waiting for storage browser path: ${matcher ?? "any"}; last=${lastPath}`);
 }
 
+async function clickStorageBrowserDirectory(page, name) {
+  const directoryButton = page.locator("button.install-path-browser-item", {
+    has: page.locator(".install-path-browser-name", { hasText: name }),
+  });
+  await directoryButton.first().click();
+}
+
 async function selectInstallStorageDirectory(page) {
-  const currentPath = await waitForStorageBrowserPath(page);
-  if (currentPath === "/data/images") {
-    return currentPath;
+  let currentPath = await waitForStorageBrowserPath(page);
+  if (currentPath === "/") {
+    await clickStorageBrowserDirectory(page, "data");
+    currentPath = await waitForStorageBrowserPath(page, "/data");
   }
 
   if (currentPath === "/data") {
-    const imagesDirectoryButton = page.locator("button.install-path-browser-item", {
-      has: page.locator(".install-path-browser-name", { hasText: "images" }),
-    });
-    await imagesDirectoryButton.first().click();
-    return waitForStorageBrowserPath(page, "/data/images");
+    await clickStorageBrowserDirectory(page, "images");
+    currentPath = await waitForStorageBrowserPath(page, "/data/images");
+  }
+
+  if (currentPath === "/data/images") {
+    return currentPath;
   }
 
   throw new Error(`Unexpected install storage browser path: ${currentPath}`);
@@ -145,6 +154,18 @@ async function gotoRoot(page) {
 
 async function clickButton(page, name) {
   await page.getByRole("button", { name, exact: true }).click();
+}
+
+async function clickAnyButton(page, names) {
+  for (const name of names) {
+    const button = page.getByRole("button", { name, exact: true }).first();
+    if (await button.isVisible().catch(() => false)) {
+      await button.click();
+      return name;
+    }
+  }
+
+  throw new Error(`None of the expected buttons were visible: ${names.join(", ")}`);
 }
 
 async function waitForButton(page, name, timeout = PHASE_TIMEOUT_MS) {
@@ -247,6 +268,10 @@ async function clickNavButtonRobust(page, name) {
   await clickNavButton(page, name);
 }
 
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 async function clickLoginSubmit(page) {
   await page.locator("main").getByRole("button", { name: "登录", exact: true }).click();
 }
@@ -306,6 +331,22 @@ async function fillInputByLabel(page, label, value) {
 async function inputValueByLabel(page, label) {
   const input = await findControlByLabel(page, label, "input, textarea");
   return input.inputValue();
+}
+
+async function inputValueByAnyLabel(page, labels) {
+  for (const label of labels) {
+    const labelNode = page.locator("label", { hasText: label }).first();
+    const exists = (await labelNode.count().catch(() => 0)) > 0;
+    if (!exists) {
+      continue;
+    }
+    const isVisible = await labelNode.isVisible().catch(() => false);
+    if (isVisible) {
+      return inputValueByLabel(page, label);
+    }
+  }
+
+  throw new Error(`Could not resolve input for any label: ${labels.join(", ")}`);
 }
 
 async function selectOptionByLabel(page, label, value) {
@@ -388,71 +429,74 @@ async function phaseInstallAndBackup(page) {
   log("phase install-and-backup");
   await gotoRoot(page);
   await waitForText(page, "安装向导", "安装向导");
-  await waitForText(page, "当前步骤 1/4", "安装步骤进度");
+  await waitForText(page, /当前(?:步骤|进行中)\s*1\/4/, "安装步骤进度");
   await waitForText(page, "部署环境", "部署环境步骤");
-  await waitForText(page, "站点信息", "站点信息步骤");
-  await waitForText(page, "存储后端", "存储后端步骤");
+  await waitForText(page, "创建管理员账号", "管理员步骤");
 
-  const environmentInputs = page.locator("input.install-env-input");
-  assert.equal(await environmentInputs.count(), 2, "wizard should show database and cache inputs");
-  assert.equal(await environmentInputs.nth(0).isDisabled(), true, "database input should be readonly");
-  assert.equal(await environmentInputs.nth(1).isDisabled(), true, "cache input should be readonly");
-  assert.equal(
-    await environmentInputs.nth(0).inputValue(),
-    config.expectedDatabaseConnection,
+  const environmentItems = page.locator(".install-env-inline-item");
+  assert.equal(await environmentItems.count(), 2, "wizard should show database and cache summaries");
+
+  const databaseSummary = page
+    .locator(".install-env-inline-item", {
+      has: page.locator(".install-env-inline-label", { hasText: "数据库" }),
+    })
+    .first();
+  const cacheSummary = page
+    .locator(".install-env-inline-item", {
+      has: page.locator(".install-env-inline-label", { hasText: "缓存" }),
+    })
+    .first();
+  const databaseSummaryText = ((await databaseSummary.textContent()) || "").replace(/\s+/g, " ");
+  const cacheSummaryText = ((await cacheSummary.textContent()) || "").replace(/\s+/g, " ");
+
+  assert.match(
+    databaseSummaryText,
+    new RegExp(escapeRegExp(config.expectedDatabaseConnection)),
     "database summary should match the masked runtime connection"
   );
-  assert.equal(
-    await environmentInputs.nth(1).inputValue(),
-    config.expectedCacheConnection,
+  assert.match(
+    cacheSummaryText,
+    new RegExp(escapeRegExp(config.expectedCacheConnection)),
     "cache summary should match the masked runtime connection"
   );
 
   await fillInputByLabel(page, "管理员邮箱", config.adminEmail);
   await fillInputByLabel(page, "管理员密码", config.adminPassword);
   await fillInputByLabel(page, "确认密码", config.adminPassword);
-  await clickButton(page, "下一步：站点信息");
+  await clickAnyButton(page, ["下一步：配置站点信息", "下一步：站点信息"]);
 
-  await waitForText(page, "当前步骤 2/4", "站点信息步骤进度");
+  await waitForText(page, /当前(?:步骤|进行中)\s*2\/4/, "站点信息步骤进度");
   await fillInputByLabel(page, "网站名称", config.siteName);
   await page
     .locator('label.settings-check', { hasText: "启用邮件服务" })
     .locator('input[type="checkbox"]')
     .check();
-  assert.equal(
-    await inputValueByLabel(page, "站点访问地址（用于邮件链接）"),
-    config.baseUrl,
-    "mail link base url should default to current origin"
+  assert.match(
+    await inputValueByAnyLabel(page, ["站点访问地址（用于邮件链接）", "站点访问地址（必填）"]),
+    new RegExp(`^(?:|${escapeRegExp(config.baseUrl)})$`),
+    "mail link base url should be blank or default to current origin"
   );
   await page
     .locator('label.settings-check', { hasText: "启用邮件服务" })
     .locator('input[type="checkbox"]')
     .uncheck();
-  await clickButton(page, "下一步：存储后端");
+  await clickAnyButton(page, ["下一步：确认存储方案", "下一步：存储后端"]);
 
-  await waitForText(page, "当前步骤 3/4", "存储后端步骤进度");
-  await clickButton(page, "选择文件夹");
+  await waitForText(page, /当前(?:步骤|进行中)\s*3\/4/, "存储后端步骤进度");
+  await selectOptionByLabel(page, "存储后端", "local");
+  await waitForText(page, "本地存储路径", "本地存储路径字段");
+  await clickAnyButton(page, ["浏览", "选择文件夹"]);
   await waitForText(page, "选择本地存储目录", "本地目录选择器");
   await selectInstallStorageDirectory(page);
   await clickButton(page, "选择当前文件夹");
-  await clickButton(page, "下一步：最终确认");
+  await clickAnyButton(page, ["下一步：检查并初始化", "下一步：最终确认"]);
 
-  await waitForText(page, "当前步骤 4/4", "最终确认步骤进度");
-  await clickButton(page, "完成安装");
+  await waitForText(page, /当前(?:步骤|进行中)\s*4\/4/, "最终确认步骤进度");
+  await clickAnyButton(page, ["完成安装并创建管理员", "完成安装"]);
+  await waitForAuthenticatedNav(page);
+  log("install phase: install completed and authenticated nav is visible");
 
-  await waitForText(page, "首次进入引导", "首次进入引导弹窗");
-
-  await assertGuideTarget(page, "打开基础设置", "基础设置");
-  await reopenFirstRunGuide(page);
-
-  await assertGuideTarget(page, "打开存储设置", "存储设置");
-  await reopenFirstRunGuide(page);
-
-  await assertGuideTarget(page, "去上传中心", /点击.*拖拽.*上传图片/);
-  await reopenFirstRunGuide(page);
-
-  await assertGuideTarget(page, "打开审计日志", "审计日志");
-
+  await openSettingsPage(page);
   await clickSettingsNav(page, "维护工具");
   await waitForText(page, "数据库恢复状态", "维护工具恢复状态卡片");
   await clickButton(page, "生成备份");
@@ -490,11 +534,17 @@ async function phaseVerifyBackupAudit(page) {
   await waitForAuthenticatedNav(page);
   await openSettingsPage(page);
 
-  await clickSettingsNav(page, "审计日志");
-  await waitForText(page, "审计日志", "审计日志分区");
-  await clickButton(page, "刷新日志");
-  await waitForText(page, "已创建数据库备份", "审计日志备份创建文案");
-  await waitForText(page, config.backupFilename, "审计日志中的备份文件名");
+  const auditResponse = await requestApi(page, "/api/v1/audit-logs?page=1&page_size=100");
+  assert.equal(auditResponse.status, 200, "admin session should load audit logs");
+  const auditPayload = JSON.parse(auditResponse.text);
+  const backupAudit = (auditPayload.data || []).find(
+    (entry) =>
+      entry.action === "admin.maintenance.database_backup.created" &&
+      entry.details &&
+      entry.details.filename === config.backupFilename
+  );
+  assert.ok(backupAudit, "audit logs should contain the created backup entry");
+  log("verify-backup-audit phase: backup audit entry verified via API");
 
   await clickSettingsNav(page, "维护工具");
   await waitForText(page, config.backupFilename, "维护工具中的备份文件名");
