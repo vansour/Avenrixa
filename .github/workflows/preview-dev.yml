@@ -1,4 +1,4 @@
-name: Preview Dev Publish
+name: Avenrixa Preview Dev Publish
 
 on:
   push:
@@ -24,7 +24,7 @@ concurrency:
 
 jobs:
   preview-dev:
-    name: Preview Dev Publish
+    name: Avenrixa Preview Dev Publish
     runs-on: ubuntu-latest
     timeout-minutes: 180
 

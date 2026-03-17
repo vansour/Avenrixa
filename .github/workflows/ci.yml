@@ -1,4 +1,4 @@
-name: CI
+name: Avenrixa CI
 
 on:
   pull_request:
@@ -63,31 +63,31 @@ jobs:
         include:
           - name: default-redis8
             coverage_label: GA
-            compose_project_name: vansour-image-ci
+            compose_project_name: avenrixa-ci
             compose_variant: postgres
             smoke_flow: postgres
             cache_mode: redis8
           - name: default-no-cache
             coverage_label: Supplemental
-            compose_project_name: vansour-image-ci-nocache
+            compose_project_name: avenrixa-ci-nocache
             compose_variant: postgres
             smoke_flow: health
             cache_mode: none
           - name: mysql-redis8
             coverage_label: Supplemental
-            compose_project_name: vansour-image-ci-mysql
+            compose_project_name: avenrixa-ci-mysql
             compose_variant: mysql
             smoke_flow: auto
             cache_mode: redis8
           - name: mysql-dragonfly
             coverage_label: Supplemental
-            compose_project_name: vansour-image-ci-mysql-dragonfly
+            compose_project_name: avenrixa-ci-mysql-dragonfly
             compose_variant: mysql
             smoke_flow: auto
             cache_mode: dragonfly
           - name: mariadb-redis8
             coverage_label: Supplemental
-            compose_project_name: vansour-image-ci-mariadb
+            compose_project_name: avenrixa-ci-mariadb
             compose_variant: mariadb
             smoke_flow: auto
             cache_mode: redis8
@@ -120,15 +120,15 @@ jobs:
       matrix:
         include:
           - name: mysql-redis8
-            compose_project_name: vansour-image-ci-browser-mysql
+            compose_project_name: avenrixa-ci-browser-mysql
             compose_variant: mysql
             cache_mode: redis8
           - name: mysql-no-cache
-            compose_project_name: vansour-image-ci-browser-mysql-nocache
+            compose_project_name: avenrixa-ci-browser-mysql-nocache
             compose_variant: mysql
             cache_mode: none
           - name: mariadb-redis8
-            compose_project_name: vansour-image-ci-browser-mariadb
+            compose_project_name: avenrixa-ci-browser-mariadb
             compose_variant: mariadb
             cache_mode: redis8
 

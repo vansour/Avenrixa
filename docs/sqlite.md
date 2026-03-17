@@ -245,4 +245,4 @@ PRESERVE_STACK_ON_FAILURE=1 \
 - 打印最近的容器日志
 - 保留容器、数据目录和临时 cookie/workspace 路径，方便继续手动排查
 
-另外，仓库内已经新增独立的 GitHub Actions workflow `SQLite E2E (Supplemental)`，用于手动或定时执行这套全链路回归。
+另外，仓库内已经新增独立的 GitHub Actions workflow `Avenrixa SQLite E2E (Supplemental)`，用于手动或定时执行这套全链路回归。

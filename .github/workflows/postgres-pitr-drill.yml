@@ -1,4 +1,4 @@
-name: PostgreSQL PITR Drill (GA)
+name: Avenrixa PostgreSQL PITR Drill (GA)
 
 on:
   workflow_dispatch:
@@ -13,7 +13,7 @@ env:
 
 jobs:
   postgres-pitr-drill:
-    name: PostgreSQL PITR Drill [GA] (${{ matrix.pitr_target_mode }})
+    name: Avenrixa PostgreSQL PITR Drill [GA] (${{ matrix.pitr_target_mode }})
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
@@ -37,7 +37,7 @@ jobs:
         continue-on-error: true
         env:
           PITR_TARGET_MODE: ${{ matrix.pitr_target_mode }}
-          COMPOSE_PROJECT_NAME: vansour-image-postgres-pitr-drill-ci-${{ matrix.pitr_target_mode }}
+          COMPOSE_PROJECT_NAME: avenrixa-postgres-pitr-drill-ci-${{ matrix.pitr_target_mode }}
           COMPOSE_VARIANT: postgres
           ARTIFACT_DIR: ops-backups/postgres-pitr-drill-${{ matrix.pitr_target_mode }}
           DOCKER_BUILDKIT: "1"
@@ -48,7 +48,7 @@ jobs:
       - name: Dump compose state after failure
         if: steps.postgres_pitr_drill.outcome != 'success'
         env:
-          COMPOSE_PROJECT_NAME: vansour-image-postgres-pitr-drill-ci-${{ matrix.pitr_target_mode }}
+          COMPOSE_PROJECT_NAME: avenrixa-postgres-pitr-drill-ci-${{ matrix.pitr_target_mode }}
           COMPOSE_VARIANT: postgres
         run: |
           ./scripts/compose-runtime.sh ps
@@ -57,7 +57,7 @@ jobs:
       - name: Cleanup PostgreSQL PITR drill stack
         if: always()
         env:
-          COMPOSE_PROJECT_NAME: vansour-image-postgres-pitr-drill-ci-${{ matrix.pitr_target_mode }}
+          COMPOSE_PROJECT_NAME: avenrixa-postgres-pitr-drill-ci-${{ matrix.pitr_target_mode }}
           COMPOSE_VARIANT: postgres
           ARTIFACT_DIR: ops-backups/postgres-pitr-drill-${{ matrix.pitr_target_mode }}
         run: |

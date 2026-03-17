@@ -1,4 +1,4 @@
-name: Release 0.1 RC Preflight
+name: Avenrixa Release 0.1 RC Preflight
 
 on:
   push:
@@ -24,7 +24,7 @@ concurrency:
 
 jobs:
   release-rc-preflight:
-    name: Release 0.1 RC Preflight
+    name: Avenrixa Release 0.1 RC Preflight
     runs-on: ubuntu-latest
     timeout-minutes: 240
 
