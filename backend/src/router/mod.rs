@@ -81,9 +81,9 @@ mod tests {
 
     fn sample_s3_runtime_settings() -> RuntimeSettings {
         RuntimeSettings {
-            site_name: "Vansour Image".to_string(),
+            site_name: "Avenrixa".to_string(),
             storage_backend: StorageBackend::S3,
-            local_storage_path: "/tmp/vansour-image".to_string(),
+            local_storage_path: "/tmp/avenrixa".to_string(),
             mail_enabled: false,
             mail_smtp_host: String::new(),
             mail_smtp_port: 587,
@@ -285,7 +285,7 @@ mod tests {
                     "admin_password": "Password123!",
                     "favicon_data_url": null,
                     "config": {
-                        "site_name": "Vansour Image",
+                        "site_name": "Avenrixa",
                         "storage_backend": "local",
                         "local_storage_path": selected_path.to_string_lossy(),
                         "mail_enabled": false,

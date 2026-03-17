@@ -28,7 +28,7 @@ async fn send_verification_mail(
         &mail,
         recipient_email,
         recipient_name,
-        "Vansour Image 邮箱验证",
+        "Avenrixa 邮箱验证",
         body,
     )
     .await

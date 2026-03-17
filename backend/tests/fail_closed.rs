@@ -25,7 +25,7 @@ fn configured_runtime_database_failure_exits_instead_of_falling_back_to_bootstra
     )
     .expect("bootstrap config should be written");
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_vansour-image"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_avenrixa"))
         .env("JWT_SECRET", "short-secret")
         .env("RUST_LOG", "error")
         .env("SERVER_HOST", "127.0.0.1")

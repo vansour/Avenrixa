@@ -14,7 +14,7 @@ done
 APP_HOST_PORT="8080"
 MAILPIT_HTTP_PORT="18025"
 MAILPIT_SMTP_PORT="11025"
-COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-vansour-image-sqlite-e2e}"
+COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-avenrixa-sqlite-e2e}"
 COMPOSE_VARIANT="${COMPOSE_VARIANT:-sqlite}"
 COMPOSE_ENABLE_MAILPIT="${COMPOSE_ENABLE_MAILPIT:-1}"
 PRESERVE_STACK_ON_FAILURE="${PRESERVE_STACK_ON_FAILURE:-0}"
@@ -26,7 +26,7 @@ USER_PASSWORD="${USER_PASSWORD:-Password123456!}"
 USER_NEW_PASSWORD="${USER_NEW_PASSWORD:-Password654321!}"
 SITE_NAME="${SITE_NAME:-SQLite E2E Smoke}"
 MAIL_FROM_EMAIL="${MAIL_FROM_EMAIL:-noreply@example.com}"
-MAIL_FROM_NAME="${MAIL_FROM_NAME:-Vansour Image}"
+MAIL_FROM_NAME="${MAIL_FROM_NAME:-Avenrixa}"
 LINK_BASE_URL="${LINK_BASE_URL:-http://127.0.0.1:${APP_HOST_PORT}/login}"
 SQLITE_DATABASE_URL="${SQLITE_DATABASE_URL:-/data/sqlite/app.db}"
 
@@ -288,7 +288,7 @@ curl -fsS \
   -d "$(jq -n --arg email "${USER_EMAIL}" --arg password "${USER_PASSWORD}" '{email: $email, password: $password}')" \
   >/dev/null
 
-VERIFY_MESSAGE_ID="$(mailpit_message_id "${USER_EMAIL}" "Vansour Image 邮箱验证" 60)"
+VERIFY_MESSAGE_ID="$(mailpit_message_id "${USER_EMAIL}" "Avenrixa 邮箱验证" 60)"
 VERIFY_TOKEN="$(mailpit_extract_token "${VERIFY_MESSAGE_ID}")"
 
 curl -fsS \
@@ -420,7 +420,7 @@ curl -fsS \
   -d "$(jq -n --arg email "${USER_EMAIL}" '{email: $email}')" \
   >/dev/null
 
-RESET_MESSAGE_ID="$(mailpit_message_id "${USER_EMAIL}" "Vansour Image 密码重置" 60)"
+RESET_MESSAGE_ID="$(mailpit_message_id "${USER_EMAIL}" "Avenrixa 密码重置" 60)"
 RESET_TOKEN="$(mailpit_extract_token "${RESET_MESSAGE_ID}")"
 
 curl -fsS \

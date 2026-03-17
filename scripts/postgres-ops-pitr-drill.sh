@@ -15,7 +15,7 @@ DRILL_SITE_NAME_AFTER_TARGET="${DRILL_SITE_NAME_AFTER_TARGET:-PostgreSQL PITR Dr
 DRILL_LINK_BASE_URL="${DRILL_LINK_BASE_URL:-http://127.0.0.1:${APP_HOST_PORT}/login}"
 DATA_DIR="${DATA_DIR:-data}"
 PITR_TARGET_MODE="${PITR_TARGET_MODE:-name}"
-COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-vansour-image-postgres-pitr-drill-${PITR_TARGET_MODE}}"
+COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-avenrixa-postgres-pitr-drill-${PITR_TARGET_MODE}}"
 ARTIFACT_DIR="${ARTIFACT_DIR:-ops-backups/postgres-pitr-drill-${PITR_TARGET_MODE}}"
 POSTGRES_ENABLE_WAL_ARCHIVE="${POSTGRES_ENABLE_WAL_ARCHIVE:-1}"
 POSTGRES_WAL_ARCHIVE_HOST_DIR="${POSTGRES_WAL_ARCHIVE_HOST_DIR:-${ARTIFACT_DIR}/wal-archive}"
@@ -167,7 +167,7 @@ install_postgres_app() {
           mail_smtp_user: null,
           mail_smtp_password: null,
           mail_from_email: "noreply@example.com",
-          mail_from_name: "Vansour Image",
+          mail_from_name: "Avenrixa",
           mail_link_base_url: $link_base_url,
           s3_endpoint: null,
           s3_region: null,

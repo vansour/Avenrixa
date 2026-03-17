@@ -20,7 +20,7 @@ volumes:
 
 services:
   app:
-    container_name: vansour-image-app
+    container_name: avenrixa-app
     build:
       context: .
       dockerfile: Dockerfile
@@ -116,7 +116,7 @@ services:
     #     condition: service_healthy
     # environment:
     #   DATABASE_KIND: mysql
-    #   DATABASE_URL: mysql://vansour_image:replace-with-strong-app-password@mysql:3306/image
+    #   DATABASE_URL: mysql://avenrixa:replace-with-strong-app-password@mysql:3306/image
     #   REDIS_URL: redis://cache:6379
     #   JWT_SECRET: replace-with-a-random-secret-at-least-32-characters
     #   AUTH_COOKIE_SECURE: "true"
@@ -133,7 +133,7 @@ services:
     #     condition: service_healthy
     # environment:
     #   DATABASE_KIND: mysql
-    #   DATABASE_URL: mariadb://vansour_image:replace-with-strong-app-password@mysql:3306/image
+    #   DATABASE_URL: mariadb://avenrixa:replace-with-strong-app-password@mysql:3306/image
     #   REDIS_URL: redis://cache:6379
     #   JWT_SECRET: replace-with-a-random-secret-at-least-32-characters
     #   AUTH_COOKIE_SECURE: "true"
@@ -154,7 +154,7 @@ services:
     #   AUTH_COOKIE_SAME_SITE: Strict
 
   postgres:
-    container_name: vansour-image-postgres
+    container_name: avenrixa-postgres
     image: ${POSTGRES_IMAGE:-postgres:18}
     environment:
       POSTGRES_DB: image
@@ -175,7 +175,7 @@ services:
   # MySQL 8.4 开发 / 联调 / 烟测：
   #
   # mysql:
-  #   container_name: vansour-image-mysql
+  #   container_name: avenrixa-mysql
   #   image: mysql:8.4
   #   environment:
   #     MYSQL_DATABASE: image
@@ -194,17 +194,17 @@ services:
   # MySQL 8.4 长期运维：
   #
   # mysql:
-  #   container_name: vansour-image-mysql
+  #   container_name: avenrixa-mysql
   #   image: mysql:8.4
   #   environment:
   #     MYSQL_DATABASE: image
-  #     MYSQL_USER: vansour_image
+  #     MYSQL_USER: avenrixa
   #     MYSQL_PASSWORD: replace-with-strong-app-password
   #     MYSQL_ROOT_PASSWORD: replace-with-strong-root-password
   #   volumes:
   #     - "mysql_data:/var/lib/mysql"
   #   healthcheck:
-  #     test: mysqladmin ping -h 127.0.0.1 -uvansour_image -preplace-with-strong-app-password
+  #     test: mysqladmin ping -h 127.0.0.1 -uavenrixa -preplace-with-strong-app-password
   #     interval: 5s
   #     timeout: 5s
   #     retries: 10
@@ -213,7 +213,7 @@ services:
   # MariaDB 12 开发 / 联调 / 烟测：
   #
   # mysql:
-  #   container_name: vansour-image-mariadb
+  #   container_name: avenrixa-mariadb
   #   image: mariadb:12
   #   environment:
   #     MARIADB_DATABASE: image
@@ -238,15 +238,15 @@ services:
   # MariaDB 12 长期运维：
   #
   # mysql:
-  #   container_name: vansour-image-mariadb
+  #   container_name: avenrixa-mariadb
   #   image: mariadb:12
   #   environment:
   #     MARIADB_DATABASE: image
-  #     MARIADB_USER: vansour_image
+  #     MARIADB_USER: avenrixa
   #     MARIADB_PASSWORD: replace-with-strong-app-password
   #     MARIADB_ROOT_PASSWORD: replace-with-strong-root-password
   #     MYSQL_DATABASE: image
-  #     MYSQL_USER: vansour_image
+  #     MYSQL_USER: avenrixa
   #     MYSQL_PASSWORD: replace-with-strong-app-password
   #     MYSQL_ROOT_PASSWORD: replace-with-strong-root-password
   #   volumes:
@@ -254,14 +254,14 @@ services:
   #   healthcheck:
   #     test:
   #       - CMD-SHELL
-  #       - mariadb-admin ping -h 127.0.0.1 -uvansour_image -preplace-with-strong-app-password || mysqladmin ping -h 127.0.0.1 -uvansour_image -preplace-with-strong-app-password
+  #       - mariadb-admin ping -h 127.0.0.1 -uavenrixa -preplace-with-strong-app-password || mysqladmin ping -h 127.0.0.1 -uavenrixa -preplace-with-strong-app-password
   #     interval: 5s
   #     timeout: 5s
   #     retries: 10
   #   restart: unless-stopped
 
   cache:
-    container_name: vansour-image-cache
+    container_name: avenrixa-cache
     image: redis:8
     healthcheck:
       test: redis-cli ping
@@ -274,7 +274,7 @@ services:
   # 把上面的 `cache` 服务改成下面这样：
   #
   # cache:
-  #   container_name: vansour-image-cache
+  #   container_name: avenrixa-cache
   #   image: ghcr.io/dragonflydb/dragonfly:latest
   #   command: --dir=/data
   #   healthcheck:

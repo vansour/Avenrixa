@@ -954,7 +954,7 @@ mod tests {
 
     fn sample_runtime_settings(local_storage_path: String) -> RuntimeSettings {
         RuntimeSettings {
-            site_name: "Vansour Image".to_string(),
+            site_name: "Avenrixa".to_string(),
             storage_backend: StorageBackend::Local,
             local_storage_path,
             mail_enabled: false,

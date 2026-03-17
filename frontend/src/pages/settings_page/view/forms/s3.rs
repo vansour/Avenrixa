@@ -63,7 +63,7 @@ fn render_s3_fields_inner(form: SettingsFormState, disabled: bool) -> Element {
             span { "存储桶（必填）" }
             input {
                 r#type: "text",
-                placeholder: "vansour-image",
+                placeholder: "avenrixa",
                 value: "{s3_bucket()}",
                 oninput: move |event| s3_bucket.set(event.value()),
                 disabled,

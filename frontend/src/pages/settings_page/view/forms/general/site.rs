@@ -20,7 +20,7 @@ pub(super) fn render_site_name_section(
                     span { "网站名称（必填）" }
                     input {
                         r#type: "text",
-                        placeholder: "例如：Vansour Image",
+                        placeholder: "例如：Avenrixa",
                         value: "{site_name()}",
                         oninput: move |event| site_name.set(event.value()),
                         disabled,

@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT_DIR}"
 
-COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-vansour-image-postgres-ops-drill}"
+COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-avenrixa-postgres-ops-drill}"
 COMPOSE_VARIANT="${COMPOSE_VARIANT:-postgres}"
 APP_HOST_PORT="${APP_HOST_PORT:-8080}"
 PRESERVE_STACK_ON_FAILURE="${PRESERVE_STACK_ON_FAILURE:-0}"
@@ -188,7 +188,7 @@ install_postgres_app() {
           mail_smtp_user: null,
           mail_smtp_password: null,
           mail_from_email: "noreply@example.com",
-          mail_from_name: "Vansour Image",
+          mail_from_name: "Avenrixa",
           mail_link_base_url: $link_base_url,
           s3_endpoint: null,
           s3_region: null,
