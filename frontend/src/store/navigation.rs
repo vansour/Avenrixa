@@ -204,10 +204,8 @@ fn bind_browser_navigation(
     }) as Box<dyn FnMut(web_sys::Event)>);
 
     if let Some(window) = web_sys::window() {
-        let _ = window.add_event_listener_with_callback(
-            "popstate",
-            callback.as_ref().unchecked_ref(),
-        );
+        let _ =
+            window.add_event_listener_with_callback("popstate", callback.as_ref().unchecked_ref());
     }
 
     Rc::new(BrowserNavigationBinding { callback })
