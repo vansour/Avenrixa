@@ -500,7 +500,7 @@ mod tests {
             mail_smtp_user: Some("mailer".to_string()),
             mail_smtp_password: Some("secret".to_string()),
             mail_from_email: "noreply@example.com".to_string(),
-            mail_from_name: "Vansour".to_string(),
+            mail_from_name: "Avenrixa".to_string(),
             mail_link_base_url: "https://img.example.com/reset".to_string(),
             s3_endpoint: Some("https://minio.example.com".to_string()),
             s3_region: Some("us-east-1".to_string()),

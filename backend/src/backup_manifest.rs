@@ -72,7 +72,7 @@ pub fn storage_signature(snapshot: &StorageSettingsSnapshot) -> String {
 }
 
 pub(crate) fn backup_directory() -> PathBuf {
-    std::env::var("VANSOUR_IMAGE_BACKUP_DIR")
+    std::env::var("AVENRIXA_BACKUP_DIR")
         .ok()
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(DEFAULT_BACKUP_DIR))
