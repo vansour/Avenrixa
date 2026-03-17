@@ -76,10 +76,10 @@ compose_variant_default_database_url() {
       printf 'mariadb://user:pass@mysql:3306/image'
       ;;
     mysql-ops)
-      printf 'mysql://vansour_image:replace-with-strong-app-password@mysql:3306/image'
+      printf 'mysql://avenrixa:replace-with-strong-app-password@mysql:3306/image'
       ;;
     mariadb-ops)
-      printf 'mariadb://vansour_image:replace-with-strong-app-password@mysql:3306/image'
+      printf 'mariadb://avenrixa:replace-with-strong-app-password@mysql:3306/image'
       ;;
     *)
       echo "Unsupported COMPOSE_VARIANT: ${COMPOSE_VARIANT}" >&2
@@ -359,7 +359,7 @@ compose_runtime_generate() {
 
   case "${COMPOSE_VARIANT}" in
     postgres)
-      app_container_name="vansour-image-app"
+      app_container_name="avenrixa-app"
       database_kind="postgresql"
       app_depends_on=$'    depends_on:\n      postgres:\n        condition: service_healthy'
       volumes_block=$'volumes:\n  postgres_data:\n'
@@ -388,7 +388,7 @@ EOF
       fi
       database_service_block=$(cat <<EOF
   postgres:
-    container_name: vansour-image-postgres
+    container_name: avenrixa-postgres
     image: ${POSTGRES_IMAGE}
     environment:
       POSTGRES_DB: image
@@ -407,42 +407,42 @@ EOF
       database_service_block+=$'\n'
       ;;
     sqlite)
-      app_container_name="vansour-image-sqlite-app"
+      app_container_name="avenrixa-sqlite-app"
       database_kind="sqlite"
       app_depends_on=""
       volumes_block=""
       ;;
     mysql)
-      app_container_name="vansour-image-mysql-app"
+      app_container_name="avenrixa-mysql-app"
       database_kind="mysql"
       app_depends_on=$'    depends_on:\n      mysql:\n        condition: service_healthy'
       volumes_block=$'volumes:\n  mysql_data:\n'
-      database_service_block=$'  mysql:\n    container_name: vansour-image-mysql\n    image: mysql:8.4\n    environment:\n      MYSQL_DATABASE: image\n      MYSQL_USER: user\n      MYSQL_PASSWORD: pass\n      MYSQL_ROOT_PASSWORD: rootpass\n    volumes:\n      - "mysql_data:/var/lib/mysql"\n    healthcheck:\n      test: mysqladmin ping -h 127.0.0.1 -uuser -ppass\n      interval: 5s\n      timeout: 5s\n      retries: 10\n    restart: unless-stopped\n'
+      database_service_block=$'  mysql:\n    container_name: avenrixa-mysql\n    image: mysql:8.4\n    environment:\n      MYSQL_DATABASE: image\n      MYSQL_USER: user\n      MYSQL_PASSWORD: pass\n      MYSQL_ROOT_PASSWORD: rootpass\n    volumes:\n      - "mysql_data:/var/lib/mysql"\n    healthcheck:\n      test: mysqladmin ping -h 127.0.0.1 -uuser -ppass\n      interval: 5s\n      timeout: 5s\n      retries: 10\n    restart: unless-stopped\n'
       ;;
     mariadb)
-      app_container_name="vansour-image-mariadb-app"
+      app_container_name="avenrixa-mariadb-app"
       database_kind="mysql"
       app_depends_on=$'    depends_on:\n      mysql:\n        condition: service_healthy'
       volumes_block=$'volumes:\n  mariadb_data:\n'
-      database_service_block=$'  mysql:\n    container_name: vansour-image-mariadb\n    image: mariadb:12\n    environment:\n      MARIADB_DATABASE: image\n      MARIADB_USER: user\n      MARIADB_PASSWORD: pass\n      MARIADB_ROOT_PASSWORD: rootpass\n      MYSQL_DATABASE: image\n      MYSQL_USER: user\n      MYSQL_PASSWORD: pass\n      MYSQL_ROOT_PASSWORD: rootpass\n    volumes:\n      - "mariadb_data:/var/lib/mysql"\n    healthcheck:\n      test:\n        - CMD-SHELL\n        - mariadb-admin ping -h 127.0.0.1 -uuser -ppass || mysqladmin ping -h 127.0.0.1 -uuser -ppass\n      interval: 5s\n      timeout: 5s\n      retries: 10\n    restart: unless-stopped\n'
+      database_service_block=$'  mysql:\n    container_name: avenrixa-mariadb\n    image: mariadb:12\n    environment:\n      MARIADB_DATABASE: image\n      MARIADB_USER: user\n      MARIADB_PASSWORD: pass\n      MARIADB_ROOT_PASSWORD: rootpass\n      MYSQL_DATABASE: image\n      MYSQL_USER: user\n      MYSQL_PASSWORD: pass\n      MYSQL_ROOT_PASSWORD: rootpass\n    volumes:\n      - "mariadb_data:/var/lib/mysql"\n    healthcheck:\n      test:\n        - CMD-SHELL\n        - mariadb-admin ping -h 127.0.0.1 -uuser -ppass || mysqladmin ping -h 127.0.0.1 -uuser -ppass\n      interval: 5s\n      timeout: 5s\n      retries: 10\n    restart: unless-stopped\n'
       ;;
     mysql-ops)
-      app_container_name="vansour-image-mysql-app"
+      app_container_name="avenrixa-mysql-app"
       database_kind="mysql"
       app_depends_on=$'    depends_on:\n      mysql:\n        condition: service_healthy'
       volumes_block=$'volumes:\n  mysql_data:\n'
       auth_cookie_secure="${AUTH_COOKIE_SECURE:-true}"
       jwt_secret="${JWT_SECRET:-replace-with-a-random-secret-at-least-32-characters}"
-      database_service_block=$'  mysql:\n    container_name: vansour-image-mysql\n    image: mysql:8.4\n    environment:\n      MYSQL_DATABASE: image\n      MYSQL_USER: vansour_image\n      MYSQL_PASSWORD: replace-with-strong-app-password\n      MYSQL_ROOT_PASSWORD: replace-with-strong-root-password\n    volumes:\n      - "mysql_data:/var/lib/mysql"\n    healthcheck:\n      test: mysqladmin ping -h 127.0.0.1 -uvansour_image -preplace-with-strong-app-password\n      interval: 5s\n      timeout: 5s\n      retries: 10\n    restart: unless-stopped\n'
+      database_service_block=$'  mysql:\n    container_name: avenrixa-mysql\n    image: mysql:8.4\n    environment:\n      MYSQL_DATABASE: image\n      MYSQL_USER: avenrixa\n      MYSQL_PASSWORD: replace-with-strong-app-password\n      MYSQL_ROOT_PASSWORD: replace-with-strong-root-password\n    volumes:\n      - "mysql_data:/var/lib/mysql"\n    healthcheck:\n      test: mysqladmin ping -h 127.0.0.1 -uavenrixa -preplace-with-strong-app-password\n      interval: 5s\n      timeout: 5s\n      retries: 10\n    restart: unless-stopped\n'
       ;;
     mariadb-ops)
-      app_container_name="vansour-image-mariadb-app"
+      app_container_name="avenrixa-mariadb-app"
       database_kind="mysql"
       app_depends_on=$'    depends_on:\n      mysql:\n        condition: service_healthy'
       volumes_block=$'volumes:\n  mariadb_data:\n'
       auth_cookie_secure="${AUTH_COOKIE_SECURE:-true}"
       jwt_secret="${JWT_SECRET:-replace-with-a-random-secret-at-least-32-characters}"
-      database_service_block=$'  mysql:\n    container_name: vansour-image-mariadb\n    image: mariadb:12\n    environment:\n      MARIADB_DATABASE: image\n      MARIADB_USER: vansour_image\n      MARIADB_PASSWORD: replace-with-strong-app-password\n      MARIADB_ROOT_PASSWORD: replace-with-strong-root-password\n      MYSQL_DATABASE: image\n      MYSQL_USER: vansour_image\n      MYSQL_PASSWORD: replace-with-strong-app-password\n      MYSQL_ROOT_PASSWORD: replace-with-strong-root-password\n    volumes:\n      - "mariadb_data:/var/lib/mysql"\n    healthcheck:\n      test:\n        - CMD-SHELL\n        - mariadb-admin ping -h 127.0.0.1 -uvansour_image -preplace-with-strong-app-password || mysqladmin ping -h 127.0.0.1 -uvansour_image -preplace-with-strong-app-password\n      interval: 5s\n      timeout: 5s\n      retries: 10\n    restart: unless-stopped\n'
+      database_service_block=$'  mysql:\n    container_name: avenrixa-mariadb\n    image: mariadb:12\n    environment:\n      MARIADB_DATABASE: image\n      MARIADB_USER: avenrixa\n      MARIADB_PASSWORD: replace-with-strong-app-password\n      MARIADB_ROOT_PASSWORD: replace-with-strong-root-password\n      MYSQL_DATABASE: image\n      MYSQL_USER: avenrixa\n      MYSQL_PASSWORD: replace-with-strong-app-password\n      MYSQL_ROOT_PASSWORD: replace-with-strong-root-password\n    volumes:\n      - "mariadb_data:/var/lib/mysql"\n    healthcheck:\n      test:\n        - CMD-SHELL\n        - mariadb-admin ping -h 127.0.0.1 -uavenrixa -preplace-with-strong-app-password || mysqladmin ping -h 127.0.0.1 -uavenrixa -preplace-with-strong-app-password\n      interval: 5s\n      timeout: 5s\n      retries: 10\n    restart: unless-stopped\n'
       ;;
     *)
       echo "Unsupported COMPOSE_VARIANT: ${COMPOSE_VARIANT}" >&2
@@ -484,10 +484,10 @@ EOF
 
   case "${CACHE_MODE}" in
     redis8)
-      cache_service_block=$'  cache:\n    container_name: vansour-image-cache\n    image: redis:8\n    healthcheck:\n      test: redis-cli ping\n      interval: 5s\n      timeout: 5s\n      retries: 5\n    restart: unless-stopped\n'
+      cache_service_block=$'  cache:\n    container_name: avenrixa-cache\n    image: redis:8\n    healthcheck:\n      test: redis-cli ping\n      interval: 5s\n      timeout: 5s\n      retries: 5\n    restart: unless-stopped\n'
       ;;
     dragonfly)
-      cache_service_block=$'  cache:\n    container_name: vansour-image-cache\n    image: ghcr.io/dragonflydb/dragonfly:latest\n    command: --dir=/data\n    healthcheck:\n      test: redis-cli ping\n      interval: 5s\n      timeout: 5s\n      retries: 5\n    restart: unless-stopped\n'
+      cache_service_block=$'  cache:\n    container_name: avenrixa-cache\n    image: ghcr.io/dragonflydb/dragonfly:latest\n    command: --dir=/data\n    healthcheck:\n      test: redis-cli ping\n      interval: 5s\n      timeout: 5s\n      retries: 5\n    restart: unless-stopped\n'
       ;;
     none)
       cache_service_block=""
@@ -501,7 +501,7 @@ EOF
   if [[ "${COMPOSE_ENABLE_MAILPIT}" == "1" ]]; then
     mailpit_service_block=$(cat <<EOF
   mailpit:
-    container_name: vansour-image-sqlite-mailpit
+    container_name: avenrixa-sqlite-mailpit
     image: axllent/mailpit:latest
     ports:
       - "${MAILPIT_HTTP_PORT}:8025"

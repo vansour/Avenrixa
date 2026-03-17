@@ -110,7 +110,7 @@ mod tests {
 
     fn sample_runtime_settings(local_storage_path: String) -> RuntimeSettings {
         RuntimeSettings {
-            site_name: "Vansour Image".to_string(),
+            site_name: "Avenrixa".to_string(),
             storage_backend: StorageBackend::Local,
             local_storage_path,
             mail_enabled: false,
@@ -133,9 +133,9 @@ mod tests {
 
     fn sample_s3_runtime_settings() -> RuntimeSettings {
         RuntimeSettings {
-            site_name: "Vansour Image".to_string(),
+            site_name: "Avenrixa".to_string(),
             storage_backend: StorageBackend::S3,
-            local_storage_path: "/tmp/vansour-image".to_string(),
+            local_storage_path: "/tmp/avenrixa".to_string(),
             mail_enabled: false,
             mail_smtp_host: String::new(),
             mail_smtp_port: 587,

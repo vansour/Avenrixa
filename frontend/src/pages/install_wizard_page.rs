@@ -15,7 +15,7 @@ use dioxus::html::FileData;
 use dioxus::prelude::*;
 
 const MIN_ADMIN_PASSWORD_LENGTH: usize = 12;
-const DEFAULT_INSTALL_SITE_NAME: &str = "Vansour Image";
+const DEFAULT_INSTALL_SITE_NAME: &str = "Avenrixa";
 const DEFAULT_INSTALL_STORAGE_BROWSER_PATH: &str = "/";
 const INSTALL_WIZARD_STEPS: [InstallWizardStep; 4] = [
     InstallWizardStep::Admin,
@@ -1371,7 +1371,7 @@ mod tests {
     #[test]
     fn initial_local_storage_path_keeps_empty_value_until_user_selects_directory() {
         let config = AdminSettingsConfig {
-            site_name: "Vansour Image".to_string(),
+            site_name: "Avenrixa".to_string(),
             storage_backend: StorageBackendKind::Local,
             local_storage_path: "   ".to_string(),
             mail_enabled: false,
@@ -1398,7 +1398,7 @@ mod tests {
     #[test]
     fn initial_site_name_clears_default_brand_name() {
         let default_config = AdminSettingsConfig {
-            site_name: "Vansour Image".to_string(),
+            site_name: "Avenrixa".to_string(),
             storage_backend: StorageBackendKind::Local,
             local_storage_path: String::new(),
             mail_enabled: false,

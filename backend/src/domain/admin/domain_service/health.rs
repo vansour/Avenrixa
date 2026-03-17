@@ -277,7 +277,7 @@ mod tests {
     #[test]
     fn describe_storage_backend_formats_s3_summary() {
         let settings = RuntimeSettings {
-            site_name: "Vansour Image".to_string(),
+            site_name: "Avenrixa".to_string(),
             storage_backend: StorageBackend::S3,
             local_storage_path: "/data/images".to_string(),
             mail_enabled: false,

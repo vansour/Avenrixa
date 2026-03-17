@@ -214,7 +214,7 @@ mod tests {
     #[test]
     fn admin_settings_deserializes_storage_backend_enum() {
         let config: AdminSettingsConfig = serde_json::from_value(serde_json::json!({
-            "site_name": "Vansour Image",
+            "site_name": "Avenrixa",
             "storage_backend": "s3",
             "local_storage_path": "/data/images",
             "mail_enabled": false,

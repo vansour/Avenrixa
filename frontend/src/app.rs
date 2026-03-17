@@ -11,7 +11,7 @@ use dioxus::prelude::*;
 use gloo_timers::future::TimeoutFuture;
 
 const AUTH_BOOTSTRAP_RETRY_DELAYS_MS: [u32; 3] = [0, 600, 1800];
-const DEFAULT_APP_DISPLAY_NAME: &str = "Vansour Image";
+const DEFAULT_APP_DISPLAY_NAME: &str = "Avenrixa";
 
 /// 应用程序入口组件
 #[component]

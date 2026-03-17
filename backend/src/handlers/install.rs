@@ -335,7 +335,7 @@ mod tests {
 
     fn sample_runtime_settings() -> RuntimeSettings {
         RuntimeSettings {
-            site_name: "Vansour Image".to_string(),
+            site_name: "Avenrixa".to_string(),
             storage_backend: StorageBackend::S3,
             local_storage_path: "/data/images".to_string(),
             mail_enabled: true,
@@ -377,7 +377,7 @@ mod tests {
     fn public_install_status_config_redacts_runtime_details_after_install() {
         let config = public_install_status_config(&sample_runtime_settings(), true, true);
 
-        assert_eq!(config.site_name, "Vansour Image");
+        assert_eq!(config.site_name, "Avenrixa");
         assert_eq!(config.storage_backend, StorageBackendKind::S3);
         assert!(config.mail_enabled);
         assert!(config.local_storage_path.is_empty());

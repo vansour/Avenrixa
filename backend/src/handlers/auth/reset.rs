@@ -29,7 +29,7 @@ async fn send_password_reset_mail(
         &mail,
         recipient_email,
         recipient_name,
-        "Vansour Image 密码重置",
+        "Avenrixa 密码重置",
         body,
     )
     .await

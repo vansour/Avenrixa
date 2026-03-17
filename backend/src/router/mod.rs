@@ -410,7 +410,7 @@ mod tests {
                             "admin_password": "Password123!",
                             "favicon_data_url": null,
                             "config": {
-                                "site_name": "Vansour Image",
+                                "site_name": "Avenrixa",
                                 "storage_backend": "local",
                                 "local_storage_path": selected_path.to_string_lossy(),
                                 "mail_enabled": false,

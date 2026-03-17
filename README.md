@@ -98,7 +98,7 @@ mariadb://user:pass@mysql:3306/image
 如果你使用长期运维模板且改成手动填写，常见写法则应与模板中的应用账户保持一致，例如：
 
 ```text
-mysql://vansour_image:replace-with-strong-app-password@mysql:3306/image
+mysql://avenrixa:replace-with-strong-app-password@mysql:3306/image
 ```
 
 `REDIS_URL` 现在也是可选项。默认 Compose 会带上 Redis 8 `cache` 服务；如果你的自定义部署没有提供 `REDIS_URL`，应用会以“无外部缓存”模式启动，登录态与核心功能仍然可用，只是列表/哈希缓存与健康状态会显示为 `disabled` 或 `degraded`。
