@@ -1,4 +1,4 @@
-name: MySQL Family Ops Drill (Supplemental)
+name: Avenrixa MySQL Family Ops Drill (Supplemental)
 
 on:
   workflow_dispatch:
@@ -13,7 +13,7 @@ env:
 
 jobs:
   mysql-ops-drill:
-    name: MySQL Family Ops Drill [Supplemental] (${{ matrix.name }})
+    name: Avenrixa MySQL Family Ops Drill [Supplemental] (${{ matrix.name }})
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
@@ -21,11 +21,11 @@ jobs:
       matrix:
         include:
           - name: mysql
-            compose_project_name: vansour-image-mysql-ops-drill-ci
+            compose_project_name: avenrixa-mysql-ops-drill-ci
             compose_variant: mysql
             data_dir: data-mysql
           - name: mariadb
-            compose_project_name: vansour-image-mariadb-ops-drill-ci
+            compose_project_name: avenrixa-mariadb-ops-drill-ci
             compose_variant: mariadb
             data_dir: data-mariadb
 

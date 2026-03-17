@@ -1,4 +1,4 @@
-name: SQLite E2E (Supplemental)
+name: Avenrixa SQLite E2E (Supplemental)
 
 on:
   workflow_dispatch:
@@ -13,7 +13,7 @@ env:
 
 jobs:
   sqlite-e2e:
-    name: SQLite E2E Smoke [Supplemental] (${{ matrix.cache_mode }})
+    name: Avenrixa SQLite E2E Smoke [Supplemental] (${{ matrix.cache_mode }})
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
@@ -36,7 +36,7 @@ jobs:
         id: sqlite_e2e
         continue-on-error: true
         env:
-          COMPOSE_PROJECT_NAME: vansour-image-sqlite-e2e-ci-${{ matrix.cache_mode }}
+          COMPOSE_PROJECT_NAME: avenrixa-sqlite-e2e-ci-${{ matrix.cache_mode }}
           COMPOSE_VARIANT: sqlite
           COMPOSE_ENABLE_MAILPIT: "1"
           CACHE_MODE: ${{ matrix.cache_mode }}
@@ -48,7 +48,7 @@ jobs:
       - name: Dump compose state after failure
         if: steps.sqlite_e2e.outcome != 'success'
         env:
-          COMPOSE_PROJECT_NAME: vansour-image-sqlite-e2e-ci-${{ matrix.cache_mode }}
+          COMPOSE_PROJECT_NAME: avenrixa-sqlite-e2e-ci-${{ matrix.cache_mode }}
           COMPOSE_VARIANT: sqlite
           COMPOSE_ENABLE_MAILPIT: "1"
           CACHE_MODE: ${{ matrix.cache_mode }}
@@ -59,7 +59,7 @@ jobs:
       - name: Cleanup SQLite E2E stack
         if: always()
         env:
-          COMPOSE_PROJECT_NAME: vansour-image-sqlite-e2e-ci-${{ matrix.cache_mode }}
+          COMPOSE_PROJECT_NAME: avenrixa-sqlite-e2e-ci-${{ matrix.cache_mode }}
           COMPOSE_VARIANT: sqlite
           COMPOSE_ENABLE_MAILPIT: "1"
           CACHE_MODE: ${{ matrix.cache_mode }}

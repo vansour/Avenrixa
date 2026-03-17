@@ -1,4 +1,4 @@
-name: PostgreSQL Ops Drill (GA)
+name: Avenrixa PostgreSQL Ops Drill (GA)
 
 on:
   workflow_dispatch:
@@ -13,7 +13,7 @@ env:
 
 jobs:
   postgres-ops-drill:
-    name: PostgreSQL Ops Drill [GA]
+    name: Avenrixa PostgreSQL Ops Drill [GA]
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
@@ -30,7 +30,7 @@ jobs:
         id: postgres_ops_drill
         continue-on-error: true
         env:
-          COMPOSE_PROJECT_NAME: vansour-image-postgres-ops-drill-ci
+          COMPOSE_PROJECT_NAME: avenrixa-postgres-ops-drill-ci
           COMPOSE_VARIANT: postgres
           DOCKER_BUILDKIT: "1"
           COMPOSE_DOCKER_CLI_BUILD: "1"
@@ -40,7 +40,7 @@ jobs:
       - name: Dump compose state after failure
         if: steps.postgres_ops_drill.outcome != 'success'
         env:
-          COMPOSE_PROJECT_NAME: vansour-image-postgres-ops-drill-ci
+          COMPOSE_PROJECT_NAME: avenrixa-postgres-ops-drill-ci
           COMPOSE_VARIANT: postgres
         run: |
           ./scripts/compose-runtime.sh ps
@@ -49,7 +49,7 @@ jobs:
       - name: Cleanup PostgreSQL ops drill stack
         if: always()
         env:
-          COMPOSE_PROJECT_NAME: vansour-image-postgres-ops-drill-ci
+          COMPOSE_PROJECT_NAME: avenrixa-postgres-ops-drill-ci
           COMPOSE_VARIANT: postgres
         run: |
           ./scripts/compose-runtime.sh down -v --remove-orphans || true
