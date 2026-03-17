@@ -3,8 +3,10 @@ mod json;
 mod multipart;
 
 use crate::types::errors::{AppError, Result};
+use futures::future::{LocalBoxFuture, Shared};
 use reqwest::header;
 use reqwest::{Client, Response};
+use std::sync::{Arc, Mutex};
 
 fn serialize_json<T: serde::Serialize>(value: &T) -> Result<String> {
     serde_json::to_string(value)
@@ -40,12 +42,17 @@ fn extract_error_message(body: &str) -> Option<String> {
 pub struct ApiClient {
     client: Client,
     base_url: String,
+    refresh_coordinator: Arc<RefreshCoordinator>,
 }
 
 impl ApiClient {
     pub fn new(base_url: String) -> Self {
         let client = Client::builder().build().unwrap_or_else(|_| Client::new());
-        Self { client, base_url }
+        Self {
+            client,
+            base_url,
+            refresh_coordinator: Arc::new(RefreshCoordinator::default()),
+        }
     }
 
     pub(super) fn build_headers(&self) -> header::HeaderMap {
@@ -112,5 +119,125 @@ impl ApiClient {
         {
             builder
         }
+    }
+}
+
+type SharedRefreshFuture = Shared<LocalBoxFuture<'static, Result<bool>>>;
+
+#[derive(Clone)]
+struct RefreshFlight {
+    id: u64,
+    future: SharedRefreshFuture,
+}
+
+#[derive(Default)]
+struct RefreshCoordinatorState {
+    next_id: u64,
+    in_flight: Option<RefreshFlight>,
+}
+
+#[derive(Default)]
+struct RefreshCoordinator {
+    state: Mutex<RefreshCoordinatorState>,
+}
+
+impl RefreshCoordinator {
+    fn shared_refresh<F>(&self, build: F) -> (u64, SharedRefreshFuture)
+    where
+        F: FnOnce() -> SharedRefreshFuture,
+    {
+        let mut guard = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(flight) = guard.in_flight.as_ref() {
+            return (flight.id, flight.future.clone());
+        }
+
+        guard.next_id = guard.next_id.wrapping_add(1);
+        let id = guard.next_id;
+        let future = build();
+        guard.in_flight = Some(RefreshFlight {
+            id,
+            future: future.clone(),
+        });
+        (id, future)
+    }
+
+    fn finish(&self, id: u64) {
+        let mut guard = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if guard
+            .in_flight
+            .as_ref()
+            .is_some_and(|flight| flight.id == id)
+        {
+            guard.in_flight = None;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::FutureExt;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+
+    #[tokio::test]
+    async fn refresh_coordinator_reuses_single_in_flight_future() {
+        let coordinator = RefreshCoordinator::default();
+        let executions = Arc::new(AtomicUsize::new(0));
+
+        let first_runs = executions.clone();
+        let (first_id, first) = coordinator.shared_refresh(move || {
+            async move {
+                first_runs.fetch_add(1, Ordering::SeqCst);
+                tokio::time::sleep(Duration::from_millis(20)).await;
+                Ok(true)
+            }
+            .boxed_local()
+            .shared()
+        });
+
+        let second_runs = executions.clone();
+        let (second_id, second) = coordinator.shared_refresh(move || {
+            async move {
+                second_runs.fetch_add(1, Ordering::SeqCst);
+                Ok(false)
+            }
+            .boxed_local()
+            .shared()
+        });
+
+        assert_eq!(first_id, second_id);
+
+        let (first_result, second_result) = tokio::join!(first, second);
+
+        assert_eq!(first_result.expect("first refresh should succeed"), true);
+        assert_eq!(second_result.expect("second refresh should succeed"), true);
+        assert_eq!(executions.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn refresh_coordinator_keeps_newer_future_when_old_waiter_finishes_late() {
+        let coordinator = RefreshCoordinator::default();
+
+        let (old_id, old_future) =
+            coordinator.shared_refresh(|| async { Ok(true) }.boxed_local().shared());
+        assert!(old_future.await.expect("old refresh should succeed"));
+        coordinator.finish(old_id);
+
+        let (new_id, _new_future) =
+            coordinator.shared_refresh(|| async { Ok(false) }.boxed_local().shared());
+        assert_ne!(old_id, new_id);
+
+        coordinator.finish(old_id);
+        let (joined_id, _joined_future) =
+            coordinator.shared_refresh(|| async { Ok(true) }.boxed_local().shared());
+
+        assert_eq!(joined_id, new_id);
     }
 }

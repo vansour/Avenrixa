@@ -25,6 +25,8 @@ pub struct AdminSettingsConfig {
     pub s3_secret_key_set: bool,
     pub s3_force_path_style: bool,
     pub restart_required: bool,
+    #[serde(default)]
+    pub settings_version: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -67,6 +69,8 @@ pub struct TestS3StorageConfigResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateAdminSettingsConfigRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_settings_version: Option<String>,
     pub site_name: String,
     pub storage_backend: StorageBackendKind,
     pub local_storage_path: String,

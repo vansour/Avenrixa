@@ -112,14 +112,6 @@ pub enum DatabaseKind {
 }
 
 impl DatabaseKind {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Postgres => "postgresql",
-            Self::MySql => "mysql",
-            Self::Sqlite => "sqlite",
-        }
-    }
-
     pub fn parse(value: &str) -> Result<Self, ConfigError> {
         match value.trim().to_ascii_lowercase().as_str() {
             "postgresql" | "postgres" => Ok(Self::Postgres),

@@ -193,6 +193,7 @@ pub fn validate_raw_setting_update(
     value: &str,
 ) -> Result<RuntimeSettings, AppError> {
     let mut req = UpdateAdminSettingsConfigRequest {
+        expected_settings_version: None,
         site_name: current.site_name.clone(),
         storage_backend: storage_backend_kind_from_runtime(current.storage_backend),
         local_storage_path: current.local_storage_path.clone(),
@@ -322,6 +323,7 @@ mod tests {
 
     fn local_request() -> UpdateAdminSettingsConfigRequest {
         UpdateAdminSettingsConfigRequest {
+            expected_settings_version: None,
             site_name: "New Site".to_string(),
             storage_backend: StorageBackendKind::Local,
             local_storage_path: "/srv/images".to_string(),

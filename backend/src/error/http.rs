@@ -41,6 +41,7 @@ fn status_for(error: &AppError) -> StatusCode {
         AppError::RateLimitExceeded(_) => StatusCode::TOO_MANY_REQUESTS,
         AppError::InvalidPagination => StatusCode::BAD_REQUEST,
         AppError::ValidationError(_) => StatusCode::BAD_REQUEST,
+        AppError::Conflict(_) => StatusCode::CONFLICT,
         AppError::StorageBackendMisconfigured(_) => StatusCode::SERVICE_UNAVAILABLE,
         AppError::DatabaseError(_) => StatusCode::INTERNAL_SERVER_ERROR,
         AppError::CacheError(_) => StatusCode::INTERNAL_SERVER_ERROR,

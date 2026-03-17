@@ -234,6 +234,33 @@ impl RuntimeSettings {
         }
     }
 
+    pub fn settings_version(&self) -> String {
+        let payload = serde_json::json!({
+            "site_name": self.site_name,
+            "storage_backend": self.storage_backend.as_str(),
+            "local_storage_path": self.local_storage_path,
+            "mail_enabled": self.mail_enabled,
+            "mail_smtp_host": self.mail_smtp_host,
+            "mail_smtp_port": self.mail_smtp_port,
+            "mail_smtp_user": self.mail_smtp_user,
+            "mail_smtp_password": self.mail_smtp_password,
+            "mail_from_email": self.mail_from_email,
+            "mail_from_name": self.mail_from_name,
+            "mail_link_base_url": self.mail_link_base_url,
+            "s3_endpoint": self.s3_endpoint,
+            "s3_region": self.s3_region,
+            "s3_bucket": self.s3_bucket,
+            "s3_prefix": self.s3_prefix,
+            "s3_access_key": self.s3_access_key,
+            "s3_secret_key": self.s3_secret_key,
+            "s3_force_path_style": self.s3_force_path_style,
+        });
+
+        blake3::hash(payload.to_string().as_bytes())
+            .to_hex()
+            .to_string()
+    }
+
     pub fn to_admin_config(&self, restart_required: bool) -> AdminSettingsConfig {
         AdminSettingsConfig {
             site_name: self.site_name.clone(),
@@ -263,6 +290,7 @@ impl RuntimeSettings {
                 .unwrap_or(false),
             s3_force_path_style: self.s3_force_path_style,
             restart_required,
+            settings_version: self.settings_version(),
         }
     }
 }
@@ -285,5 +313,16 @@ mod tests {
         let settings = RuntimeSettings::from_defaults(&config);
 
         assert!(settings.to_admin_config(true).restart_required);
+    }
+
+    #[test]
+    fn settings_version_changes_when_runtime_settings_change() {
+        let config = crate::config::Config::default();
+        let mut settings = RuntimeSettings::from_defaults(&config);
+        let original = settings.settings_version();
+
+        settings.site_name = "Changed".to_string();
+
+        assert_ne!(original, settings.settings_version());
     }
 }

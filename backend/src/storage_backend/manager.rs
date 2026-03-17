@@ -46,9 +46,11 @@ impl StorageManager {
         settings: &RuntimeSettings,
     ) -> Result<(), AppError> {
         if settings.storage_backend == StorageBackend::Local {
-            fs::create_dir_all(&settings.local_storage_path).await?;
-            let images_perms = PermissionsExt::from_mode(0o755);
-            let _ = fs::set_permissions(&settings.local_storage_path, images_perms).await;
+            if settings.local_storage_path.trim().is_empty() {
+                return Err(AppError::ValidationError(
+                    "本地存储路径不能为空".to_string(),
+                ));
+            }
             return Ok(());
         }
 
@@ -66,6 +68,8 @@ impl StorageManager {
             )));
         }
 
+        Self::apply_runtime_side_effects(&settings).await?;
+
         {
             let mut guard = self
                 .active_settings
@@ -76,6 +80,21 @@ impl StorageManager {
 
         *self.s3_client_cache.write().await = None;
         *self.s3_health_cache.write().await = None;
+        Ok(())
+    }
+
+    async fn apply_runtime_side_effects(settings: &RuntimeSettings) -> Result<(), AppError> {
+        if settings.storage_backend == StorageBackend::Local {
+            Self::ensure_local_storage_directory(&settings.local_storage_path).await?;
+        }
+
+        Ok(())
+    }
+
+    async fn ensure_local_storage_directory(path: &str) -> Result<(), AppError> {
+        fs::create_dir_all(path).await?;
+        let images_perms = PermissionsExt::from_mode(0o755);
+        let _ = fs::set_permissions(path, images_perms).await;
         Ok(())
     }
 
@@ -318,6 +337,27 @@ mod tests {
         );
         assert!(
             tokio::fs::try_exists(&next_path)
+                .await
+                .expect("existence check should succeed")
+        );
+    }
+
+    #[tokio::test]
+    async fn validate_runtime_settings_does_not_create_local_directory() {
+        let temp_dir = tempdir().expect("temp dir should be created");
+        let initial_path = temp_dir.path().join("initial");
+        let next_path = temp_dir.path().join("validate-only").join("images");
+        let manager = StorageManager::new(sample_runtime_settings(
+            initial_path.to_string_lossy().into(),
+        ));
+
+        manager
+            .validate_runtime_settings(&sample_runtime_settings(next_path.to_string_lossy().into()))
+            .await
+            .expect("runtime settings should validate");
+
+        assert!(
+            !tokio::fs::try_exists(&next_path)
                 .await
                 .expect("existence check should succeed")
         );

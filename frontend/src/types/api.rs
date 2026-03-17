@@ -189,7 +189,7 @@ mod tests {
             "database": { "status": "healthy", "message": null },
             "cache": { "status": "disabled", "message": "cache off" },
             "storage": { "status": "unhealthy", "message": "disk error" },
-            "version": "0.1.2-rc.1",
+            "version": "0.1.2-rc.2",
             "uptime_seconds": 60,
             "metrics": null
         }))

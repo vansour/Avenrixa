@@ -1,17 +1,19 @@
+mod apply;
+
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 
+use self::apply::{PersistAndApplyInput, persist_and_apply};
 use crate::config::Config;
 use crate::db::DatabasePool;
 use crate::error::AppError;
 use crate::models::UpdateAdminSettingsConfigRequest;
 use crate::storage_backend::StorageManager;
-use tracing::error;
 
 use super::model::{RuntimeSettings, admin_setting_policy};
-use super::store::{load_from_db, persist_settings};
+use super::store::load_from_db;
 use super::validation::{validate_and_merge, validate_raw_setting_update};
 
 const SETTINGS_CACHE_TTL: Duration = Duration::from_secs(5);
@@ -21,6 +23,7 @@ pub struct RuntimeSettingsService {
     pool: DatabasePool,
     defaults: RuntimeSettings,
     cache: Arc<RwLock<Option<(Instant, RuntimeSettings)>>>,
+    update_lock: Arc<Mutex<()>>,
 }
 
 impl RuntimeSettingsService {
@@ -29,6 +32,7 @@ impl RuntimeSettingsService {
             pool,
             defaults: RuntimeSettings::from_defaults(config),
             cache: Arc::new(RwLock::new(None)),
+            update_lock: Arc::new(Mutex::new(())),
         }
     }
 
@@ -55,9 +59,18 @@ impl RuntimeSettingsService {
         req: UpdateAdminSettingsConfigRequest,
         storage_manager: &StorageManager,
     ) -> Result<RuntimeSettings, AppError> {
+        let _guard = self.update_lock.lock().await;
         let current = self.get_runtime_settings().await?;
+        self.ensure_expected_settings_version(req.expected_settings_version.as_deref(), &current)?;
         let validated = validate_and_merge(current, req)?;
-        self.persist_and_apply(validated, storage_manager).await
+        persist_and_apply(
+            self,
+            &PersistAndApplyInput {
+                validated: &validated,
+                storage_manager,
+            },
+        )
+        .await
     }
 
     pub async fn update_raw_setting(
@@ -66,6 +79,7 @@ impl RuntimeSettingsService {
         value: &str,
         storage_manager: &StorageManager,
     ) -> Result<RuntimeSettings, AppError> {
+        let _guard = self.update_lock.lock().await;
         if !admin_setting_policy(key).editable {
             return Err(AppError::ValidationError(
                 "该设置项受保护，不能通过高级设置直接修改".to_string(),
@@ -74,59 +88,32 @@ impl RuntimeSettingsService {
 
         let current = self.get_runtime_settings().await?;
         let validated = validate_raw_setting_update(current, key, value)?;
-        self.persist_and_apply(validated, storage_manager).await
+        persist_and_apply(
+            self,
+            &PersistAndApplyInput {
+                validated: &validated,
+                storage_manager,
+            },
+        )
+        .await
     }
 
-    async fn persist_and_apply(
+    fn ensure_expected_settings_version(
         &self,
-        validated: RuntimeSettings,
-        storage_manager: &StorageManager,
-    ) -> Result<RuntimeSettings, AppError> {
-        let previous = self.get_runtime_settings().await?;
-        storage_manager
-            .validate_runtime_settings(&validated)
-            .await?;
-        persist_settings(&self.pool, &validated).await?;
-
-        if let Err(apply_error) = storage_manager
-            .apply_runtime_settings(validated.clone())
-            .await
-        {
-            let rollback_result = self
-                .rollback_after_apply_failure(&previous, storage_manager)
-                .await;
-            return match rollback_result {
-                Ok(()) => Err(apply_error),
-                Err(rollback_error) => {
-                    error!(
-                        "runtime settings apply failed and rollback failed: apply={}, rollback={}",
-                        apply_error, rollback_error
-                    );
-                    Err(AppError::Internal(anyhow::anyhow!(
-                        "运行时设置应用失败，且回滚失败: apply={}, rollback={}",
-                        apply_error,
-                        rollback_error
-                    )))
-                }
-            };
+        expected: Option<&str>,
+        current: &RuntimeSettings,
+    ) -> Result<(), AppError> {
+        let Some(expected) = expected.map(str::trim).filter(|value| !value.is_empty()) else {
+            return Ok(());
+        };
+        let current_version = current.settings_version();
+        if expected == current_version {
+            return Ok(());
         }
 
-        self.invalidate_cache().await;
-        self.get_runtime_settings().await
-    }
-
-    async fn rollback_after_apply_failure(
-        &self,
-        previous: &RuntimeSettings,
-        storage_manager: &StorageManager,
-    ) -> Result<(), AppError> {
-        persist_settings(&self.pool, previous).await?;
-        self.invalidate_cache().await;
-        storage_manager
-            .apply_runtime_settings(previous.clone())
-            .await?;
-        self.invalidate_cache().await;
-        Ok(())
+        Err(AppError::Conflict(
+            "设置已被其他管理员更新，请刷新后重新确认变更".to_string(),
+        ))
     }
 }
 
@@ -183,6 +170,33 @@ mod tests {
         }
     }
 
+    fn request_from_settings(
+        settings: &RuntimeSettings,
+        expected_settings_version: Option<String>,
+    ) -> UpdateAdminSettingsConfigRequest {
+        UpdateAdminSettingsConfigRequest {
+            expected_settings_version,
+            site_name: settings.site_name.clone(),
+            storage_backend: StorageBackendKind::Local,
+            local_storage_path: settings.local_storage_path.clone(),
+            mail_enabled: settings.mail_enabled,
+            mail_smtp_host: settings.mail_smtp_host.clone(),
+            mail_smtp_port: Some(settings.mail_smtp_port),
+            mail_smtp_user: settings.mail_smtp_user.clone(),
+            mail_smtp_password: settings.mail_smtp_password.clone(),
+            mail_from_email: settings.mail_from_email.clone(),
+            mail_from_name: settings.mail_from_name.clone(),
+            mail_link_base_url: settings.mail_link_base_url.clone(),
+            s3_endpoint: settings.s3_endpoint.clone(),
+            s3_region: settings.s3_region.clone(),
+            s3_bucket: settings.s3_bucket.clone(),
+            s3_prefix: settings.s3_prefix.clone(),
+            s3_access_key: settings.s3_access_key.clone(),
+            s3_secret_key: settings.s3_secret_key.clone(),
+            s3_force_path_style: Some(settings.s3_force_path_style),
+        }
+    }
+
     #[tokio::test]
     async fn update_admin_settings_config_rolls_back_persisted_settings_when_apply_fails() {
         let context = setup_service().await;
@@ -199,23 +213,8 @@ mod tests {
             .update_admin_settings_config(
                 UpdateAdminSettingsConfigRequest {
                     site_name: "Rollback Test".to_string(),
-                    storage_backend: StorageBackendKind::Local,
                     local_storage_path: requested_path.to_string_lossy().into_owned(),
-                    mail_enabled: false,
-                    mail_smtp_host: String::new(),
-                    mail_smtp_port: Some(587),
-                    mail_smtp_user: None,
-                    mail_smtp_password: None,
-                    mail_from_email: String::new(),
-                    mail_from_name: String::new(),
-                    mail_link_base_url: String::new(),
-                    s3_endpoint: None,
-                    s3_region: None,
-                    s3_bucket: None,
-                    s3_prefix: None,
-                    s3_access_key: None,
-                    s3_secret_key: None,
-                    s3_force_path_style: Some(true),
+                    ..request_from_settings(&original, Some(original.settings_version()))
                 },
                 &context.storage_manager,
             )
@@ -244,5 +243,52 @@ mod tests {
             .expect("rolled back settings should load");
         assert_eq!(current.local_storage_path, original.local_storage_path);
         assert_eq!(current.site_name, original.site_name);
+    }
+
+    #[tokio::test]
+    async fn update_admin_settings_config_rejects_stale_settings_version() {
+        let context = setup_service().await;
+        let original = context
+            .service
+            .get_runtime_settings()
+            .await
+            .expect("initial settings should load");
+        let original_version = original.settings_version();
+
+        let first_request = UpdateAdminSettingsConfigRequest {
+            site_name: "First Update".to_string(),
+            ..request_from_settings(&original, Some(original_version.clone()))
+        };
+        let updated = context
+            .service
+            .update_admin_settings_config(first_request, &context.storage_manager)
+            .await
+            .expect("first update should succeed");
+        assert_eq!(updated.site_name, "First Update");
+
+        let stale_request = UpdateAdminSettingsConfigRequest {
+            local_storage_path: context
+                ._temp_dir
+                .path()
+                .join("stale-write")
+                .to_string_lossy()
+                .into_owned(),
+            ..request_from_settings(&original, Some(original_version))
+        };
+        let error = context
+            .service
+            .update_admin_settings_config(stale_request, &context.storage_manager)
+            .await
+            .expect_err("stale request should be rejected");
+
+        assert!(matches!(error, AppError::Conflict(message) if message.contains("刷新后重新确认")));
+
+        let current = context
+            .service
+            .get_runtime_settings()
+            .await
+            .expect("current settings should load");
+        assert_eq!(current.site_name, "First Update");
+        assert_eq!(current.local_storage_path, original.local_storage_path);
     }
 }

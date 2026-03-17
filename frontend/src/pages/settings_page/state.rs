@@ -291,8 +291,12 @@ impl SettingsFormState {
         }
     }
 
-    pub fn build_update_request(&self) -> UpdateAdminSettingsConfigRequest {
+    pub fn build_update_request(
+        &self,
+        expected_settings_version: Option<String>,
+    ) -> UpdateAdminSettingsConfigRequest {
         UpdateAdminSettingsConfigRequest {
+            expected_settings_version,
             site_name: (self.site_name)().trim().to_string(),
             storage_backend: (self.storage_backend)(),
             local_storage_path: (self.local_storage_path)().trim().to_string(),

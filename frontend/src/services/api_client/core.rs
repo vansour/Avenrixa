@@ -1,4 +1,5 @@
 use crate::types::errors::{AppError, Result};
+use futures::FutureExt;
 use reqwest::StatusCode;
 
 use super::ApiClient;
@@ -19,6 +20,18 @@ impl ApiClient {
     }
 
     pub(super) async fn try_refresh_session(&self) -> Result<bool> {
+        let client = self.clone();
+        let (refresh_id, refresh_future) = self.refresh_coordinator.shared_refresh(move || {
+            async move { client.perform_refresh_session().await }
+                .boxed_local()
+                .shared()
+        });
+        let result = refresh_future.await;
+        self.refresh_coordinator.finish(refresh_id);
+        result
+    }
+
+    async fn perform_refresh_session(&self) -> Result<bool> {
         let url = self.url("/api/v1/auth/refresh");
         let response = self
             .with_credentials(self.client.post(url))

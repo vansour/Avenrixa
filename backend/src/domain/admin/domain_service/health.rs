@@ -268,8 +268,8 @@ mod tests {
     #[test]
     fn build_version_label_ignores_revision_when_present() {
         assert_eq!(
-            build_version_label(Some("0.1.2-rc.1"), "ignored", Some("abc123def456")),
-            "0.1.2-rc.1"
+            build_version_label(Some("0.1.2-rc.2"), "ignored", Some("abc123def456")),
+            "0.1.2-rc.2"
         );
     }
 
