@@ -237,6 +237,36 @@ pub async fn create_admin_account_sqlite_tx(
     })
 }
 
+pub async fn delete_admin_account_tx(
+    tx: &mut Transaction<'_, Postgres>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM users WHERE id = $1")
+        .bind(ADMIN_USER_ID)
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}
+
+pub async fn delete_admin_account_mysql_tx(
+    tx: &mut Transaction<'_, MySql>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM users WHERE id = ?")
+        .bind(ADMIN_USER_ID)
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}
+
+pub async fn delete_admin_account_sqlite_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM users WHERE id = ?1")
+        .bind(ADMIN_USER_ID)
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}
+
 pub async fn mark_app_installed_tx(tx: &mut Transaction<'_, Postgres>) -> Result<(), sqlx::Error> {
     upsert_setting_tx(tx, INSTALL_STATE_SETTING_KEY, "true").await
 }

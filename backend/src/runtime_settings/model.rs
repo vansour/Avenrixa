@@ -101,7 +101,7 @@ pub fn mask_admin_setting_value(key: &str, value: &str) -> String {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum StorageBackend {
     Local,
     S3,
@@ -126,7 +126,7 @@ impl StorageBackend {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct StorageSettingsSnapshot {
     pub storage_backend: StorageBackend,
     pub local_storage_path: String,

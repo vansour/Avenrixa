@@ -1,7 +1,10 @@
 use chrono::{DateTime, Utc};
 use reqwest::Url;
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
+use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::process::{Child, Command};
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
@@ -23,6 +26,12 @@ struct MySqlDumpTarget {
     username: String,
     password: Option<String>,
     database: String,
+}
+
+const DEFAULT_BACKUP_COMMAND_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+
+struct ExternalCommandOutcome {
+    stderr_excerpt: Option<String>,
 }
 
 fn spawn_backup_audit(
@@ -109,90 +118,37 @@ impl AdminDomainService {
                 let backup_path = backup_path(&filename)?;
                 let database = self.database.clone();
                 let database_url = &self.config.database.url;
-                let child = tokio::process::Command::new("pg_dump")
+                let dump_bin = pg_dump_binary().map_err(AppError::Internal)?;
+                let mut command = Command::new(&dump_bin);
+                command
                     .arg("--dbname")
                     .arg(database_url)
                     .arg("--format=plain")
                     .arg("--no-owner")
                     .arg("--no-acl")
-                    .stdout(std::process::Stdio::piped())
-                    .spawn();
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped());
 
-                let mut child = match child {
-                    Ok(child) => child,
-                    Err(e) => {
-                        error!("Failed to spawn pg_dump process: {}", e);
-                        spawn_backup_audit(
-                            database,
-                            admin_user_id,
-                            "admin.maintenance.database_backup.failed",
-                            serde_json::json!({
-                                "admin_email": admin_email,
-                                "error": e.to_string(),
-                                "result": "failed",
-                                "risk_level": "info",
-                                "database_kind": "postgresql",
-                            }),
-                        );
-                        return Err(AppError::Internal(anyhow::anyhow!(
-                            "Failed to execute pg_dump: {}",
-                            e
-                        )));
-                    }
-                };
-
-                let mut stdout = child.stdout.take().expect("Failed to capture stdout");
-                let mut buffer = Vec::new();
-                let _ = stdout.read_to_end(&mut buffer).await;
-
-                let mut file = tokio::fs::File::create(&backup_path).await?;
-                file.write_all(&buffer).await?;
-
-                let status = child.wait().await;
-                match status {
-                    Ok(status) => {
-                        if !status.success() {
-                            error!("pg_dump failed with status: {}", status);
-                            let _ = tokio::fs::remove_file(&backup_path).await;
+                let warning_excerpt =
+                    match run_streaming_dump_command("pg_dump", command, &backup_path).await {
+                        Ok(outcome) => outcome.stderr_excerpt,
+                        Err(error) => {
+                            error!("pg_dump backup failed: {}", error);
                             spawn_backup_audit(
-                                self.database.clone(),
+                                database,
                                 admin_user_id,
                                 "admin.maintenance.database_backup.failed",
                                 serde_json::json!({
                                     "admin_email": admin_email,
-                                    "error": status.to_string(),
+                                    "error": error.to_string(),
                                     "result": "failed",
                                     "risk_level": "info",
                                     "database_kind": "postgresql",
                                 }),
                             );
-                            return Err(AppError::Internal(anyhow::anyhow!(
-                                "pg_dump failed with exit code: {}",
-                                status
-                            )));
+                            return Err(AppError::Internal(error));
                         }
-                    }
-                    Err(e) => {
-                        error!("Failed to wait for pg_dump: {}", e);
-                        let _ = tokio::fs::remove_file(&backup_path).await;
-                        spawn_backup_audit(
-                            self.database.clone(),
-                            admin_user_id,
-                            "admin.maintenance.database_backup.failed",
-                            serde_json::json!({
-                                "admin_email": admin_email,
-                                "error": e.to_string(),
-                                "result": "failed",
-                                "risk_level": "info",
-                                "database_kind": "postgresql",
-                            }),
-                        );
-                        return Err(AppError::Internal(anyhow::anyhow!(
-                            "pg_dump wait error: {}",
-                            e
-                        )));
-                    }
-                }
+                    };
 
                 let backup_size_bytes = match ensure_nonempty_backup_file(&backup_path).await {
                     Ok(size) => size,
@@ -258,6 +214,7 @@ impl AdminDomainService {
                         "restore_mode": semantics.restore_mode.clone(),
                         "ui_restore_supported": semantics.ui_restore_supported,
                         "backup_size_bytes": backup_size_bytes,
+                        "warning_excerpt": warning_excerpt,
                     }),
                 );
 
@@ -280,7 +237,7 @@ impl AdminDomainService {
                     let _ = tokio::fs::remove_file(&backup_path).await;
                 }
 
-                let mut command = tokio::process::Command::new(&dump_bin);
+                let mut command = Command::new(&dump_bin);
                 command
                     .arg("--protocol=TCP")
                     .arg(format!("--host={}", dump_target.host))
@@ -296,89 +253,34 @@ impl AdminDomainService {
                     .arg("--events")
                     .arg(format!("--result-file={}", backup_path.display()))
                     .arg(&dump_target.database)
-                    .stderr(std::process::Stdio::piped());
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::piped());
                 if let Some(password) = dump_target.password.as_ref() {
                     command.env("MYSQL_PWD", password);
                 }
 
-                let child = command.spawn();
-                let child = match child {
-                    Ok(child) => child,
-                    Err(error) => {
-                        error!("Failed to spawn mysqldump process: {}", error);
-                        spawn_backup_audit(
-                            database,
-                            admin_user_id,
-                            "admin.maintenance.database_backup.failed",
-                            serde_json::json!({
-                                "admin_email": admin_email,
-                                "error": error.to_string(),
-                                "result": "failed",
-                                "risk_level": "info",
-                                "database_kind": "mysql",
-                            }),
-                        );
-                        return Err(AppError::Internal(anyhow::anyhow!(
-                            "Failed to execute mysqldump: {}",
-                            error
-                        )));
-                    }
-                };
-
-                let output = child.wait_with_output().await;
-                let warning_excerpt = match output {
-                    Ok(output) => {
-                        let stderr_excerpt = process_output_excerpt(&output.stderr);
-                        if !output.status.success() {
-                            error!("mysqldump failed with status: {}", output.status);
-                            let _ = tokio::fs::remove_file(&backup_path).await;
+                let warning_excerpt =
+                    match run_dump_command_with_result_file("mysqldump", command, &backup_path)
+                        .await
+                    {
+                        Ok(outcome) => outcome.stderr_excerpt,
+                        Err(error) => {
+                            error!("mysqldump backup failed: {}", error);
                             spawn_backup_audit(
-                                self.database.clone(),
+                                database,
                                 admin_user_id,
                                 "admin.maintenance.database_backup.failed",
                                 serde_json::json!({
                                     "admin_email": admin_email,
-                                    "error": stderr_excerpt
-                                        .clone()
-                                        .unwrap_or_else(|| output.status.to_string()),
+                                    "error": error.to_string(),
                                     "result": "failed",
                                     "risk_level": "info",
                                     "database_kind": "mysql",
                                 }),
                             );
-                            return Err(AppError::Internal(anyhow::anyhow!(
-                                "mysqldump failed: {}",
-                                stderr_excerpt
-                                    .clone()
-                                    .unwrap_or_else(|| output.status.to_string())
-                            )));
+                            return Err(AppError::Internal(error));
                         }
-                        if let Some(stderr_excerpt) = stderr_excerpt.as_ref() {
-                            warn!("mysqldump completed with warnings: {}", stderr_excerpt);
-                        }
-                        stderr_excerpt
-                    }
-                    Err(error) => {
-                        error!("Failed to wait for mysqldump: {}", error);
-                        let _ = tokio::fs::remove_file(&backup_path).await;
-                        spawn_backup_audit(
-                            self.database.clone(),
-                            admin_user_id,
-                            "admin.maintenance.database_backup.failed",
-                            serde_json::json!({
-                                "admin_email": admin_email,
-                                "error": error.to_string(),
-                                "result": "failed",
-                                "risk_level": "info",
-                                "database_kind": "mysql",
-                            }),
-                        );
-                        return Err(AppError::Internal(anyhow::anyhow!(
-                            "mysqldump wait error: {}",
-                            error
-                        )));
-                    }
-                };
+                    };
 
                 let backup_size_bytes = match ensure_nonempty_backup_file(&backup_path).await {
                     Ok(size) => size,
@@ -730,9 +632,177 @@ async fn persist_backup_manifest(
     write_backup_manifest(&manifest).await
 }
 
+fn backup_command_timeout() -> Duration {
+    std::env::var("VANSOUR_IMAGE_BACKUP_COMMAND_TIMEOUT_SECS")
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .filter(|value| *value > 0)
+        .map(Duration::from_secs)
+        .unwrap_or(DEFAULT_BACKUP_COMMAND_TIMEOUT)
+}
+
+async fn run_streaming_dump_command(
+    command_name: &str,
+    mut command: Command,
+    output_path: &Path,
+) -> anyhow::Result<ExternalCommandOutcome> {
+    let mut child = spawn_dump_command(command_name, &mut command)?;
+    let mut stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| anyhow::anyhow!("{} 未提供可读取的 stdout", command_name))?;
+    let stderr_task = capture_stderr_task(command_name, &mut child)?;
+    let timeout = backup_command_timeout();
+    let mut file = tokio::fs::File::create(output_path).await?;
+
+    match tokio::time::timeout(timeout, tokio::io::copy(&mut stdout, &mut file)).await {
+        Ok(Ok(_)) => {
+            file.flush().await?;
+        }
+        Ok(Err(error)) => {
+            kill_dump_process(command_name, &mut child).await;
+            let _ = collect_stderr_excerpt(stderr_task).await;
+            cleanup_backup_file(output_path).await;
+            return Err(anyhow::anyhow!(
+                "{} 输出流写入失败: {}",
+                command_name,
+                error
+            ));
+        }
+        Err(_) => {
+            kill_dump_process(command_name, &mut child).await;
+            let _ = collect_stderr_excerpt(stderr_task).await;
+            cleanup_backup_file(output_path).await;
+            return Err(anyhow::anyhow!(
+                "{} 超时，{} 秒内未完成",
+                command_name,
+                timeout.as_secs()
+            ));
+        }
+    }
+
+    let stderr_excerpt =
+        finalize_dump_command(command_name, child, stderr_task, output_path).await?;
+    Ok(ExternalCommandOutcome { stderr_excerpt })
+}
+
+async fn run_dump_command_with_result_file(
+    command_name: &str,
+    mut command: Command,
+    output_path: &Path,
+) -> anyhow::Result<ExternalCommandOutcome> {
+    let mut child = spawn_dump_command(command_name, &mut command)?;
+    let stderr_task = capture_stderr_task(command_name, &mut child)?;
+    let stderr_excerpt =
+        finalize_dump_command(command_name, child, stderr_task, output_path).await?;
+    Ok(ExternalCommandOutcome { stderr_excerpt })
+}
+
+fn spawn_dump_command(command_name: &str, command: &mut Command) -> anyhow::Result<Child> {
+    command
+        .spawn()
+        .map_err(|error| anyhow::anyhow!("无法启动 {}: {}", command_name, error))
+}
+
+fn capture_stderr_task(
+    command_name: &str,
+    child: &mut Child,
+) -> anyhow::Result<tokio::task::JoinHandle<Vec<u8>>> {
+    let mut stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| anyhow::anyhow!("{} 未提供可读取的 stderr", command_name))?;
+    Ok(tokio::spawn(async move {
+        let mut buffer = Vec::new();
+        let _ = stderr.read_to_end(&mut buffer).await;
+        buffer
+    }))
+}
+
+async fn finalize_dump_command(
+    command_name: &str,
+    mut child: Child,
+    stderr_task: tokio::task::JoinHandle<Vec<u8>>,
+    output_path: &Path,
+) -> anyhow::Result<Option<String>> {
+    let timeout = backup_command_timeout();
+    let status = match tokio::time::timeout(timeout, child.wait()).await {
+        Ok(Ok(status)) => status,
+        Ok(Err(error)) => {
+            cleanup_backup_file(output_path).await;
+            let _ = collect_stderr_excerpt(stderr_task).await;
+            return Err(anyhow::anyhow!("等待 {} 结束失败: {}", command_name, error));
+        }
+        Err(_) => {
+            kill_dump_process(command_name, &mut child).await;
+            cleanup_backup_file(output_path).await;
+            let _ = collect_stderr_excerpt(stderr_task).await;
+            return Err(anyhow::anyhow!(
+                "{} 超时，{} 秒内未退出",
+                command_name,
+                timeout.as_secs()
+            ));
+        }
+    };
+
+    let stderr_excerpt = collect_stderr_excerpt(stderr_task).await;
+    if !status.success() {
+        cleanup_backup_file(output_path).await;
+        return Err(anyhow::anyhow!(
+            "{} 执行失败: {}",
+            command_name,
+            stderr_excerpt.clone().unwrap_or_else(|| status.to_string())
+        ));
+    }
+    if let Some(stderr_excerpt) = stderr_excerpt.as_ref() {
+        warn!(
+            "{} completed with warnings: {}",
+            command_name, stderr_excerpt
+        );
+    }
+
+    Ok(stderr_excerpt)
+}
+
+async fn collect_stderr_excerpt(stderr_task: tokio::task::JoinHandle<Vec<u8>>) -> Option<String> {
+    match stderr_task.await {
+        Ok(bytes) => process_output_excerpt(&bytes),
+        Err(error) => Some(format!("stderr capture failed: {}", error)),
+    }
+}
+
+async fn kill_dump_process(command_name: &str, child: &mut Child) {
+    if let Err(error) = child.kill().await {
+        warn!("failed to kill {} after error: {}", command_name, error);
+    }
+    let _ = child.wait().await;
+}
+
+async fn cleanup_backup_file(path: &Path) {
+    let _ = tokio::fs::remove_file(path).await;
+}
+
+fn pg_dump_binary() -> anyhow::Result<String> {
+    override_or_binary("VANSOUR_IMAGE_PG_DUMP_BIN", &["pg_dump"])
+        .ok_or_else(|| anyhow::anyhow!("未找到 pg_dump"))
+}
+
 fn mysql_dump_binary() -> anyhow::Result<String> {
-    find_first_binary(&["mysqldump", "mariadb-dump"])
-        .ok_or_else(|| anyhow::anyhow!("未找到 mysqldump 或 mariadb-dump"))
+    override_or_binary(
+        "VANSOUR_IMAGE_MYSQL_DUMP_BIN",
+        &["mysqldump", "mariadb-dump"],
+    )
+    .ok_or_else(|| anyhow::anyhow!("未找到 mysqldump 或 mariadb-dump"))
+}
+
+fn override_or_binary(env_key: &str, candidates: &[&str]) -> Option<String> {
+    if let Some(path) = std::env::var_os(env_key)
+        .map(PathBuf::from)
+        .filter(|path| !path.as_os_str().is_empty())
+    {
+        return Some(path.to_string_lossy().into_owned());
+    }
+    find_first_binary(candidates)
 }
 
 fn find_first_binary(candidates: &[&str]) -> Option<String> {
@@ -820,5 +890,191 @@ fn process_output_excerpt(bytes: &[u8]) -> Option<String> {
         Some(format!("{}...(truncated)", excerpt))
     } else {
         Some(excerpt)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{Config, DatabaseKind};
+    use crate::models::ComponentStatus;
+    use crate::runtime_settings::{RuntimeSettings, StorageBackend};
+    use crate::storage_backend::StorageManager;
+    use std::ffi::OsString;
+    use std::os::unix::fs::PermissionsExt;
+    use std::sync::{Arc, OnceLock};
+    use tempfile::TempDir;
+    use tokio::sync::Mutex;
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    struct ScopedEnv {
+        previous: Vec<(String, Option<OsString>)>,
+    }
+
+    impl ScopedEnv {
+        fn set(key: &str, value: impl Into<OsString>) -> Self {
+            let previous = std::env::var_os(key);
+            #[allow(unused_unsafe)]
+            unsafe {
+                std::env::set_var(key, value.into());
+            }
+            Self {
+                previous: vec![(key.to_string(), previous)],
+            }
+        }
+
+        fn and_set(mut self, key: &str, value: impl Into<OsString>) -> Self {
+            let previous = std::env::var_os(key);
+            #[allow(unused_unsafe)]
+            unsafe {
+                std::env::set_var(key, value.into());
+            }
+            self.previous.push((key.to_string(), previous));
+            self
+        }
+    }
+
+    impl Drop for ScopedEnv {
+        fn drop(&mut self) {
+            for (key, previous) in self.previous.drain(..).rev() {
+                #[allow(unused_unsafe)]
+                unsafe {
+                    match previous {
+                        Some(previous) => std::env::set_var(&key, previous),
+                        None => std::env::remove_var(&key),
+                    }
+                }
+            }
+        }
+    }
+
+    fn sample_runtime_settings(local_storage_path: String) -> RuntimeSettings {
+        RuntimeSettings {
+            site_name: "Vansour Image".to_string(),
+            storage_backend: StorageBackend::Local,
+            local_storage_path,
+            mail_enabled: false,
+            mail_smtp_host: String::new(),
+            mail_smtp_port: 587,
+            mail_smtp_user: None,
+            mail_smtp_password: None,
+            mail_from_email: String::new(),
+            mail_from_name: String::new(),
+            mail_link_base_url: String::new(),
+            s3_endpoint: None,
+            s3_region: None,
+            s3_bucket: None,
+            s3_prefix: None,
+            s3_access_key: None,
+            s3_secret_key: None,
+            s3_force_path_style: true,
+        }
+    }
+
+    fn build_postgres_backup_service(temp_dir: &TempDir) -> AdminDomainService {
+        let mut config = Config::default();
+        config.database.kind = DatabaseKind::Postgres;
+        config.database.url = "postgres://localhost/test".to_string();
+        config.storage.path = temp_dir
+            .path()
+            .join("storage")
+            .to_string_lossy()
+            .into_owned();
+
+        let database = DatabasePool::Postgres(
+            sqlx::PgPool::connect_lazy("postgres://localhost/test")
+                .expect("lazy postgres pool should be created"),
+        );
+        let storage_manager = Arc::new(StorageManager::new(sample_runtime_settings(
+            config.storage.path.clone(),
+        )));
+
+        AdminDomainService::new(
+            database,
+            None,
+            ComponentStatus::healthy(),
+            config,
+            storage_manager,
+        )
+    }
+
+    fn write_script(path: &Path, body: &str) {
+        std::fs::write(path, body).expect("script should be written");
+        let mut permissions = std::fs::metadata(path)
+            .expect("script metadata should load")
+            .permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(path, permissions).expect("script should be executable");
+    }
+
+    #[tokio::test]
+    async fn postgres_backup_streams_stdout_to_file_and_persists_manifest() {
+        let _env_guard = env_lock().lock().await;
+        let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+        let backup_dir = temp_dir.path().join("backups");
+        let script_path = temp_dir.path().join("fake-pg-dump.sh");
+        write_script(
+            &script_path,
+            "#!/bin/sh\nprintf 'CREATE TABLE demo(id int);\\n'\n",
+        );
+        let _env = ScopedEnv::set("VANSOUR_IMAGE_BACKUP_DIR", backup_dir.as_os_str())
+            .and_set("VANSOUR_IMAGE_PG_DUMP_BIN", script_path.as_os_str());
+
+        let service = build_postgres_backup_service(&temp_dir);
+        let response = service
+            .backup_database(Uuid::new_v4(), "admin@example.com")
+            .await
+            .expect("backup should succeed");
+
+        let backup_file = backup_dir.join(&response.filename);
+        let manifest_file = backup_dir.join(format!("{}.manifest.json", response.filename));
+        let contents = tokio::fs::read_to_string(&backup_file)
+            .await
+            .expect("backup file should exist");
+
+        assert_eq!(contents, "CREATE TABLE demo(id int);\n");
+        assert!(
+            tokio::fs::try_exists(&manifest_file)
+                .await
+                .expect("manifest should exist")
+        );
+    }
+
+    #[tokio::test]
+    async fn postgres_backup_timeout_removes_partial_file() {
+        let _env_guard = env_lock().lock().await;
+        let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+        let backup_dir = temp_dir.path().join("backups");
+        let script_path = temp_dir.path().join("fake-pg-dump-timeout.sh");
+        write_script(
+            &script_path,
+            "#!/bin/sh\nprintf 'partial dump'; sleep 2; printf 'late tail'\n",
+        );
+        let _env = ScopedEnv::set("VANSOUR_IMAGE_BACKUP_DIR", backup_dir.as_os_str())
+            .and_set("VANSOUR_IMAGE_PG_DUMP_BIN", script_path.as_os_str())
+            .and_set("VANSOUR_IMAGE_BACKUP_COMMAND_TIMEOUT_SECS", "1");
+
+        let service = build_postgres_backup_service(&temp_dir);
+        let error = service
+            .backup_database(Uuid::new_v4(), "admin@example.com")
+            .await
+            .expect_err("backup timeout should fail");
+
+        assert!(matches!(error, AppError::Internal(_)));
+        let mut entries = tokio::fs::read_dir(&backup_dir)
+            .await
+            .expect("backup dir should be readable");
+        assert!(
+            entries
+                .next_entry()
+                .await
+                .expect("backup dir iteration should succeed")
+                .is_none(),
+            "timed out backup should not leave partial files"
+        );
     }
 }

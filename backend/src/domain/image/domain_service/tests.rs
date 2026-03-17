@@ -1,34 +1,26 @@
 use super::*;
 use crate::config::Config;
-use crate::db::DatabasePool;
+use crate::db::{DatabasePool, run_migrations};
 use crate::domain::image::mock_repository::MockImageRepository;
 use crate::image_processor::ImageProcessor;
 use crate::models::ImageStatus;
 use crate::runtime_settings::{RuntimeSettings, StorageBackend};
 use crate::storage_backend::StorageManager;
+use async_trait::async_trait;
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use std::sync::Arc;
 use tempfile::TempDir;
 
-struct TestServiceContext {
-    service: ImageDomainService<MockImageRepository>,
+struct TestServiceContext<I: ImageRepository> {
+    service: ImageDomainService<I>,
     _temp_dir: TempDir,
 }
 
-async fn setup_service() -> TestServiceContext {
-    let mut config = Config::default();
-    config.storage.enable_file_check = false;
-    let image_processor = ImageProcessor::new(1920, 1080, 80);
-
-    let cache = None;
-    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
-    let local_storage_path = temp_dir.path().join("images");
-    config.storage.path = local_storage_path.to_string_lossy().into_owned();
-
-    let pool = sqlx::PgPool::connect_lazy("postgres://localhost/test").unwrap();
-    let storage_manager = Arc::new(StorageManager::new(RuntimeSettings {
+fn sample_runtime_settings(local_storage_path: String) -> RuntimeSettings {
+    RuntimeSettings {
         site_name: "Vansour Image".to_string(),
         storage_backend: StorageBackend::Local,
-        local_storage_path: config.storage.path.clone(),
+        local_storage_path,
         mail_enabled: false,
         mail_smtp_host: "smtp.example.com".to_string(),
         mail_smtp_port: 587,
@@ -44,9 +36,27 @@ async fn setup_service() -> TestServiceContext {
         s3_access_key: None,
         s3_secret_key: None,
         s3_force_path_style: true,
-    }));
+    }
+}
+
+async fn setup_service_with_repository<I: ImageRepository>(
+    database: DatabasePool,
+    image_repository: I,
+) -> TestServiceContext<I> {
+    let mut config = Config::default();
+    config.storage.enable_file_check = false;
+    let image_processor = ImageProcessor::new(1920, 1080, 80);
+
+    let cache = None;
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let local_storage_path = temp_dir.path().join("images");
+    config.storage.path = local_storage_path.to_string_lossy().into_owned();
+
+    let storage_manager = Arc::new(StorageManager::new(sample_runtime_settings(
+        config.storage.path.clone(),
+    )));
     let dependencies = ImageDomainServiceDependencies::new(
-        DatabasePool::Postgres(pool),
+        database,
         cache,
         config,
         image_processor,
@@ -54,8 +64,209 @@ async fn setup_service() -> TestServiceContext {
     );
 
     TestServiceContext {
-        service: ImageDomainService::new(dependencies, MockImageRepository::new()),
+        service: ImageDomainService::new(dependencies, image_repository),
         _temp_dir: temp_dir,
+    }
+}
+
+async fn setup_service() -> TestServiceContext<MockImageRepository> {
+    let pool = sqlx::PgPool::connect_lazy("postgres://localhost/test").unwrap();
+    setup_service_with_repository(DatabasePool::Postgres(pool), MockImageRepository::new()).await
+}
+
+async fn setup_sqlite_service<I: ImageRepository>(
+    image_repository: I,
+) -> (TestServiceContext<I>, sqlx::SqlitePool) {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let database_path = temp_dir.path().join("image-domain-service.db");
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(
+            SqliteConnectOptions::new()
+                .filename(&database_path)
+                .create_if_missing(true)
+                .foreign_keys(true),
+        )
+        .await
+        .expect("sqlite pool should be created");
+    let database = DatabasePool::Sqlite(pool.clone());
+    run_migrations(&database)
+        .await
+        .expect("sqlite migrations should succeed");
+
+    let mut config = Config::default();
+    config.storage.enable_file_check = false;
+    let image_processor = ImageProcessor::new(1920, 1080, 80);
+    let cache = None;
+    let local_storage_path = temp_dir.path().join("images");
+    config.storage.path = local_storage_path.to_string_lossy().into_owned();
+    let storage_manager = Arc::new(StorageManager::new(sample_runtime_settings(
+        config.storage.path.clone(),
+    )));
+    let dependencies = ImageDomainServiceDependencies::new(
+        database,
+        cache,
+        config,
+        image_processor,
+        storage_manager,
+    );
+
+    (
+        TestServiceContext {
+            service: ImageDomainService::new(dependencies, image_repository),
+            _temp_dir: temp_dir,
+        },
+        pool,
+    )
+}
+
+async fn storage_entry_count<I: ImageRepository>(service: &ImageDomainService<I>) -> usize {
+    let storage_path = std::path::Path::new(&service.config.storage.path);
+    if !tokio::fs::try_exists(storage_path)
+        .await
+        .expect("storage path existence check should succeed")
+    {
+        return 0;
+    }
+
+    let mut entries = tokio::fs::read_dir(storage_path)
+        .await
+        .expect("storage dir should be readable");
+    let mut count = 0;
+    while entries
+        .next_entry()
+        .await
+        .expect("storage dir iteration should succeed")
+        .is_some()
+    {
+        count += 1;
+    }
+    count
+}
+
+struct FaultyImageRepository {
+    inner: MockImageRepository,
+    fail_on_create: bool,
+    fail_on_hard_delete: bool,
+}
+
+impl FaultyImageRepository {
+    fn fail_create() -> Self {
+        Self {
+            inner: MockImageRepository::new(),
+            fail_on_create: true,
+            fail_on_hard_delete: false,
+        }
+    }
+
+    fn fail_hard_delete() -> Self {
+        Self {
+            inner: MockImageRepository::new(),
+            fail_on_create: false,
+            fail_on_hard_delete: true,
+        }
+    }
+}
+
+#[async_trait]
+impl ImageRepository for FaultyImageRepository {
+    async fn find_image_by_id(&self, id: Uuid) -> Result<Option<Image>, sqlx::Error> {
+        self.inner.find_image_by_id(id).await
+    }
+
+    async fn find_images_by_user_paginated(
+        &self,
+        user_id: Uuid,
+        limit: i32,
+        offset: i32,
+    ) -> Result<Vec<Image>, sqlx::Error> {
+        self.inner
+            .find_images_by_user_paginated(user_id, limit, offset)
+            .await
+    }
+
+    async fn create_image(&self, image: &Image) -> Result<(), sqlx::Error> {
+        if self.fail_on_create {
+            return Err(sqlx::Error::RowNotFound);
+        }
+        self.inner.create_image(image).await
+    }
+
+    async fn update_image(&self, image: &Image) -> Result<(), sqlx::Error> {
+        self.inner.update_image(image).await
+    }
+
+    async fn find_images_by_user_and_ids(
+        &self,
+        user_id: Uuid,
+        image_ids: &[Uuid],
+    ) -> Result<Vec<Image>, sqlx::Error> {
+        self.inner
+            .find_images_by_user_and_ids(user_id, image_ids)
+            .await
+    }
+
+    async fn find_images_by_user_and_hashes(
+        &self,
+        user_id: Uuid,
+        image_keys: &[String],
+    ) -> Result<Vec<Image>, sqlx::Error> {
+        self.inner
+            .find_images_by_user_and_hashes(user_id, image_keys)
+            .await
+    }
+
+    async fn find_filenames_still_referenced_excluding_ids(
+        &self,
+        filenames: &[String],
+        excluded_ids: &[Uuid],
+    ) -> Result<Vec<String>, sqlx::Error> {
+        self.inner
+            .find_filenames_still_referenced_excluding_ids(filenames, excluded_ids)
+            .await
+    }
+
+    async fn find_media_keys_still_referenced_excluding_ids(
+        &self,
+        media_keys: &[String],
+        excluded_ids: &[Uuid],
+    ) -> Result<Vec<String>, sqlx::Error> {
+        self.inner
+            .find_media_keys_still_referenced_excluding_ids(media_keys, excluded_ids)
+            .await
+    }
+
+    async fn hard_delete_images_by_user(
+        &self,
+        user_id: Uuid,
+        image_ids: &[Uuid],
+    ) -> Result<u64, sqlx::Error> {
+        if self.fail_on_hard_delete {
+            return Err(sqlx::Error::RowNotFound);
+        }
+        self.inner
+            .hard_delete_images_by_user(user_id, image_ids)
+            .await
+    }
+
+    async fn find_image_by_hash(
+        &self,
+        hash: &str,
+        user_id: Uuid,
+    ) -> Result<Option<Image>, sqlx::Error> {
+        self.inner.find_image_by_hash(hash, user_id).await
+    }
+
+    async fn find_image_by_hash_global(&self, hash: &str) -> Result<Option<Image>, sqlx::Error> {
+        self.inner.find_image_by_hash_global(hash).await
+    }
+
+    async fn find_image_by_filename(
+        &self,
+        filename: &str,
+        user_id: Uuid,
+    ) -> Result<Option<Image>, sqlx::Error> {
+        self.inner.find_image_by_filename(filename, user_id).await
     }
 }
 
@@ -359,6 +570,99 @@ async fn test_cross_user_duplicate_upload_creates_second_record_without_filename
 }
 
 #[tokio::test]
+async fn test_upload_generates_persistent_thumbnail() {
+    let context = setup_service().await;
+    let service = &context.service;
+    let user_id = Uuid::new_v4();
+
+    let image = service
+        .upload_image(
+            user_id,
+            "alice",
+            "with-thumb.png".to_string(),
+            sample_png_bytes(),
+            Some("image/png".to_string()),
+        )
+        .await
+        .expect("upload should succeed");
+
+    let thumbnail_key = image
+        .thumbnail
+        .clone()
+        .expect("uploaded image should have thumbnail key");
+    assert!(
+        thumbnail_key.ends_with(".webp"),
+        "thumbnail should use webp derivative"
+    );
+    assert!(
+        tokio::fs::try_exists(
+            std::path::Path::new(&service.config.storage.path).join(&thumbnail_key)
+        )
+        .await
+        .expect("thumbnail file existence check should succeed")
+    );
+}
+
+#[tokio::test]
+async fn test_upload_compensates_storage_when_metadata_persistence_fails() {
+    let pool = sqlx::PgPool::connect_lazy("postgres://localhost/test").unwrap();
+    let context = setup_service_with_repository(
+        DatabasePool::Postgres(pool),
+        FaultyImageRepository::fail_create(),
+    )
+    .await;
+    let service = &context.service;
+    let user_id = Uuid::new_v4();
+
+    let error = service
+        .upload_image(
+            user_id,
+            "alice",
+            "broken.png".to_string(),
+            sample_png_bytes(),
+            Some("image/png".to_string()),
+        )
+        .await
+        .expect_err("repository failure should bubble up");
+
+    assert!(matches!(
+        error,
+        AppError::DatabaseError(sqlx::Error::RowNotFound)
+    ));
+    assert_eq!(storage_entry_count(service).await, 0);
+}
+
+#[tokio::test]
+async fn test_upload_from_file_cleans_temp_file_on_processing_failure() {
+    let context = setup_service().await;
+    let service = &context.service;
+    let user_id = Uuid::new_v4();
+    let temp_path = context._temp_dir.path().join("pending-upload.png");
+
+    tokio::fs::write(&temp_path, b"not-an-image")
+        .await
+        .expect("temp upload should be written");
+
+    let result = service
+        .upload_image_from_file(
+            user_id,
+            "alice",
+            "pending-upload.png".to_string(),
+            temp_path.clone(),
+            Some("image/png".to_string()),
+        )
+        .await;
+
+    assert!(result.is_err(), "invalid payload should fail processing");
+    assert!(
+        !tokio::fs::try_exists(&temp_path)
+            .await
+            .expect("temp path existence check should succeed"),
+        "temp upload file should always be cleaned up"
+    );
+}
+
+#[tokio::test]
 async fn test_hard_delete_preserves_shared_file_until_last_reference_is_removed() {
     let context = setup_service().await;
     let service = &context.service;
@@ -388,8 +692,16 @@ async fn test_hard_delete_preserves_shared_file_until_last_reference_is_removed(
         .expect("second upload should succeed");
 
     assert_eq!(first.filename, second.filename);
+    assert_eq!(first.thumbnail, second.thumbnail);
     let file_path = std::path::Path::new(&service.config.storage.path).join(&first.filename);
+    let thumbnail_path = std::path::Path::new(&service.config.storage.path).join(
+        first
+            .thumbnail
+            .clone()
+            .expect("uploaded image should have thumbnail"),
+    );
     assert!(tokio::fs::try_exists(&file_path).await.unwrap());
+    assert!(tokio::fs::try_exists(&thumbnail_path).await.unwrap());
 
     service
         .delete_images(&[first.id], user_a)
@@ -399,6 +711,10 @@ async fn test_hard_delete_preserves_shared_file_until_last_reference_is_removed(
     assert!(
         tokio::fs::try_exists(&file_path).await.unwrap(),
         "shared file should remain while another record still references it"
+    );
+    assert!(
+        tokio::fs::try_exists(&thumbnail_path).await.unwrap(),
+        "shared thumbnail should remain while another record still references it"
     );
 
     service
@@ -410,4 +726,98 @@ async fn test_hard_delete_preserves_shared_file_until_last_reference_is_removed(
         !tokio::fs::try_exists(&file_path).await.unwrap(),
         "shared file should be removed after last reference is deleted"
     );
+    assert!(
+        !tokio::fs::try_exists(&thumbnail_path).await.unwrap(),
+        "shared thumbnail should be removed after last reference is deleted"
+    );
+}
+
+#[tokio::test]
+async fn test_delete_keeps_storage_when_repository_delete_fails() {
+    let pool = sqlx::PgPool::connect_lazy("postgres://localhost/test").unwrap();
+    let context = setup_service_with_repository(
+        DatabasePool::Postgres(pool),
+        FaultyImageRepository::fail_hard_delete(),
+    )
+    .await;
+    let service = &context.service;
+    let user_id = Uuid::new_v4();
+    let image = build_image(
+        Uuid::new_v4(),
+        user_id,
+        "delete-failure.jpg",
+        &valid_hash(11),
+        Utc::now(),
+    );
+    let file_path = std::path::Path::new(&service.config.storage.path).join(&image.filename);
+
+    service
+        .image_repository
+        .inner
+        .create_image(&image)
+        .await
+        .expect("image should be inserted into mock repository");
+    tokio::fs::create_dir_all(&service.config.storage.path)
+        .await
+        .expect("storage root should be created");
+    tokio::fs::write(&file_path, b"payload")
+        .await
+        .expect("physical object should exist before delete");
+
+    let error = service
+        .delete_images(&[image.id], user_id)
+        .await
+        .expect_err("repository delete failure should stop hard delete");
+
+    assert!(matches!(
+        error,
+        AppError::DatabaseError(sqlx::Error::RowNotFound)
+    ));
+    assert!(
+        tokio::fs::try_exists(&file_path)
+            .await
+            .expect("file existence check should succeed"),
+        "physical object must remain when metadata delete fails"
+    );
+}
+
+#[tokio::test]
+async fn test_delete_enqueues_storage_cleanup_job_when_physical_delete_fails() {
+    let (context, pool) = setup_sqlite_service(MockImageRepository::new()).await;
+    let service = &context.service;
+    let user_id = Uuid::new_v4();
+    let image = build_image(
+        Uuid::new_v4(),
+        user_id,
+        "queued-delete.jpg",
+        &valid_hash(12),
+        Utc::now(),
+    );
+    let file_path = std::path::Path::new(&service.config.storage.path).join(&image.filename);
+
+    service
+        .image_repository
+        .create_image(&image)
+        .await
+        .expect("image should exist before delete");
+    tokio::fs::create_dir_all(&file_path)
+        .await
+        .expect("directory placeholder should force remove_file failure");
+
+    service
+        .delete_images(&[image.id], user_id)
+        .await
+        .expect("metadata delete should succeed and queue cleanup");
+
+    let queued_jobs = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*)
+         FROM storage_cleanup_jobs
+         WHERE file_key = ?1",
+    )
+    .bind(&image.filename)
+    .fetch_one(&pool)
+    .await
+    .expect("cleanup queue should be queryable");
+
+    assert_eq!(queued_jobs, 1);
 }

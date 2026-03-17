@@ -74,11 +74,7 @@ pub async fn update_admin_settings_config(
     let current = state.runtime_settings.get_runtime_settings().await?;
     let updated = state
         .runtime_settings
-        .update_admin_settings_config(req)
-        .await?;
-    state
-        .storage_manager
-        .apply_runtime_settings(updated.clone())
+        .update_admin_settings_config(req, &state.storage_manager)
         .await?;
     let restart_required = state.storage_manager.restart_required(&updated);
     let changed_keys = changed_setting_keys(&current, &updated);
@@ -112,13 +108,9 @@ pub async fn update_setting(
     Json(req): Json<UpdateSettingRequest>,
 ) -> Result<(), AppError> {
     let previous_value = get_setting_value(&state.database, &key).await?;
-    let updated = state
-        .runtime_settings
-        .update_raw_setting(&key, &req.value)
-        .await?;
     state
-        .storage_manager
-        .apply_runtime_settings(updated)
+        .runtime_settings
+        .update_raw_setting(&key, &req.value, &state.storage_manager)
         .await?;
 
     let policy = admin_setting_policy(&key);

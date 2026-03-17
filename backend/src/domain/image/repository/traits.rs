@@ -30,6 +30,16 @@ pub trait ImageRepository: Send + Sync {
         filenames: &[String],
         excluded_ids: &[Uuid],
     ) -> Result<Vec<String>, sqlx::Error>;
+    async fn find_media_keys_still_referenced_excluding_ids(
+        &self,
+        media_keys: &[String],
+        excluded_ids: &[Uuid],
+    ) -> Result<Vec<String>, sqlx::Error>;
+    async fn find_image_by_filename(
+        &self,
+        filename: &str,
+        user_id: Uuid,
+    ) -> Result<Option<Image>, sqlx::Error>;
     async fn hard_delete_images_by_user(
         &self,
         user_id: Uuid,

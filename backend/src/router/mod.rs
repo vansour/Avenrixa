@@ -36,9 +36,12 @@ mod tests {
     use super::*;
     use crate::auth::AuthService;
     use crate::bootstrap::build_app_state;
-    use crate::db::{DatabasePool, mark_app_installed_sqlite_tx};
+    use crate::db::{
+        DatabasePool, has_admin_account, is_app_installed, mark_app_installed_sqlite_tx,
+    };
     use crate::domain::auth::state_repository::AuthStateRepository;
-    use crate::models::{InstallStatusResponse, UserRole};
+    use crate::models::{HealthStatus, InstallStatusResponse, UserRole};
+    use crate::runtime_settings::{RuntimeSettings, StorageBackend};
     use axum::{
         body::{Body, to_bytes},
         http::{Request, StatusCode, header},
@@ -74,6 +77,29 @@ mod tests {
             .write_to(&mut cursor, image::ImageFormat::Png)
             .expect("png encoding should succeed");
         cursor.into_inner()
+    }
+
+    fn sample_s3_runtime_settings() -> RuntimeSettings {
+        RuntimeSettings {
+            site_name: "Vansour Image".to_string(),
+            storage_backend: StorageBackend::S3,
+            local_storage_path: "/tmp/vansour-image".to_string(),
+            mail_enabled: false,
+            mail_smtp_host: String::new(),
+            mail_smtp_port: 587,
+            mail_smtp_user: None,
+            mail_smtp_password: None,
+            mail_from_email: String::new(),
+            mail_from_name: String::new(),
+            mail_link_base_url: String::new(),
+            s3_endpoint: Some("https://example.r2.cloudflarestorage.com".to_string()),
+            s3_region: Some("auto".to_string()),
+            s3_bucket: Some("images".to_string()),
+            s3_prefix: Some("uploads".to_string()),
+            s3_access_key: Some("access".to_string()),
+            s3_secret_key: Some("secret".to_string()),
+            s3_force_path_style: false,
+        }
     }
 
     struct TestApp {
@@ -200,6 +226,19 @@ mod tests {
             .expect("image record should be inserted");
         }
 
+        async fn thumbnail_for_hash(&self, hash: &str) -> Option<String> {
+            sqlx::query_scalar::<_, String>(
+                "SELECT thumbnail
+                 FROM images
+                 WHERE hash = ?1
+                 LIMIT 1",
+            )
+            .bind(hash)
+            .fetch_optional(self.sqlite_pool())
+            .await
+            .expect("thumbnail should be queryable")
+        }
+
         async fn auth_cookie(
             &self,
             user_id: Uuid,
@@ -233,6 +272,42 @@ mod tests {
             axum::http::HeaderValue::from_str(&format!("auth_token={token}"))
                 .expect("cookie header should be valid")
         }
+    }
+
+    fn install_bootstrap_request(selected_path: &std::path::Path) -> Request<Body> {
+        Request::builder()
+            .method("POST")
+            .uri("/api/v1/install/bootstrap")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&json!({
+                    "admin_email": "admin@example.com",
+                    "admin_password": "Password123!",
+                    "favicon_data_url": null,
+                    "config": {
+                        "site_name": "Vansour Image",
+                        "storage_backend": "local",
+                        "local_storage_path": selected_path.to_string_lossy(),
+                        "mail_enabled": false,
+                        "mail_smtp_host": "",
+                        "mail_smtp_port": 587,
+                        "mail_smtp_user": null,
+                        "mail_smtp_password": null,
+                        "mail_from_email": "",
+                        "mail_from_name": "",
+                        "mail_link_base_url": "",
+                        "s3_endpoint": null,
+                        "s3_region": null,
+                        "s3_bucket": null,
+                        "s3_prefix": null,
+                        "s3_access_key": null,
+                        "s3_secret_key": null,
+                        "s3_force_path_style": true
+                    }
+                }))
+                .expect("request body should serialize"),
+            ))
+            .expect("request should build")
     }
 
     #[tokio::test]
@@ -307,6 +382,68 @@ mod tests {
             response.headers().get(header::VARY),
             Some(&axum::http::HeaderValue::from_static(PRIVATE_MEDIA_VARY))
         );
+        assert!(response.headers().contains_key(header::ETAG));
+    }
+
+    #[tokio::test]
+    async fn thumbnail_route_persists_derivative_and_survives_source_removal() {
+        let app = TestApp::new(|_| {}).await;
+        app.mark_installed().await;
+
+        let user_id = Uuid::new_v4();
+        let hash = "c".repeat(64);
+        app.insert_user(user_id, "user@example.com", "user").await;
+        app.insert_active_image(user_id, "thumb-lazy-source.png", &hash)
+            .await;
+
+        let first_response = app
+            .request(
+                Request::builder()
+                    .uri(format!("/thumbnails/{hash}.webp"))
+                    .header(
+                        header::COOKIE,
+                        app.auth_cookie(user_id, "user@example.com", "user").await,
+                    )
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await;
+
+        assert_eq!(first_response.status(), StatusCode::OK);
+        let thumbnail_key = app
+            .thumbnail_for_hash(&hash)
+            .await
+            .expect("thumbnail should be persisted after first request");
+        let thumbnail_path = app._temp_dir.path().join("storage").join(&thumbnail_key);
+        assert!(
+            tokio::fs::try_exists(&thumbnail_path)
+                .await
+                .expect("thumbnail derivative should exist")
+        );
+
+        tokio::fs::remove_file(
+            app._temp_dir
+                .path()
+                .join("storage")
+                .join("thumb-lazy-source.png"),
+        )
+        .await
+        .expect("source image should be removed");
+
+        let second_response = app
+            .request(
+                Request::builder()
+                    .uri(format!("/thumbnails/{hash}.webp"))
+                    .header(
+                        header::COOKIE,
+                        app.auth_cookie(user_id, "user@example.com", "user").await,
+                    )
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await;
+
+        assert_eq!(second_response.status(), StatusCode::OK);
     }
 
     #[tokio::test]
@@ -398,43 +535,7 @@ mod tests {
         let app = TestApp::new(|_| {}).await;
         let selected_path = app._temp_dir.path().join("mounted-images");
 
-        let response = app
-            .request(
-                Request::builder()
-                    .method("POST")
-                    .uri("/api/v1/install/bootstrap")
-                    .header(header::CONTENT_TYPE, "application/json")
-                    .body(Body::from(
-                        serde_json::to_vec(&json!({
-                            "admin_email": "admin@example.com",
-                            "admin_password": "Password123!",
-                            "favicon_data_url": null,
-                            "config": {
-                                "site_name": "Vansour Image",
-                                "storage_backend": "local",
-                                "local_storage_path": selected_path.to_string_lossy(),
-                                "mail_enabled": false,
-                                "mail_smtp_host": "",
-                                "mail_smtp_port": 587,
-                                "mail_smtp_user": null,
-                                "mail_smtp_password": null,
-                                "mail_from_email": "",
-                                "mail_from_name": "",
-                                "mail_link_base_url": "",
-                                "s3_endpoint": null,
-                                "s3_region": null,
-                                "s3_bucket": null,
-                                "s3_prefix": null,
-                                "s3_access_key": null,
-                                "s3_secret_key": null,
-                                "s3_force_path_style": true
-                            }
-                        }))
-                        .expect("request body should serialize"),
-                    ))
-                    .expect("request should build"),
-            )
-            .await;
+        let response = app.request(install_bootstrap_request(&selected_path)).await;
 
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(
@@ -456,6 +557,109 @@ mod tests {
             tokio::fs::try_exists(selected_path.join(proof_file))
                 .await
                 .expect("existence check should succeed")
+        );
+    }
+
+    #[tokio::test]
+    async fn install_bootstrap_rolls_back_database_state_when_runtime_apply_fails() {
+        let app = TestApp::new(|_| {}).await;
+        let original_settings = app.state.storage_manager.active_settings();
+        let selected_path = app._temp_dir.path().join("rollback-images");
+
+        app.state.storage_manager.fail_next_apply_for_tests();
+        let response = app.request(install_bootstrap_request(&selected_path)).await;
+
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(
+            !is_app_installed(&app.state.database)
+                .await
+                .expect("install state should load")
+        );
+        assert!(
+            !has_admin_account(&app.state.database)
+                .await
+                .expect("admin state should load")
+        );
+        assert_eq!(
+            app.state
+                .storage_manager
+                .active_settings()
+                .local_storage_path,
+            original_settings.local_storage_path
+        );
+    }
+
+    #[tokio::test]
+    async fn concurrent_install_bootstrap_only_allows_one_success() {
+        let app = TestApp::new(|_| {}).await;
+        let selected_path = app._temp_dir.path().join("concurrent-install");
+
+        let (first, second) = tokio::join!(
+            app.request(install_bootstrap_request(&selected_path)),
+            app.request(install_bootstrap_request(&selected_path)),
+        );
+
+        let statuses = [first.status(), second.status()];
+        let success_count = statuses
+            .iter()
+            .filter(|status| **status == StatusCode::OK)
+            .count();
+        let conflict_count = statuses
+            .iter()
+            .filter(|status| **status == StatusCode::CONFLICT)
+            .count();
+
+        assert_eq!(success_count, 1);
+        assert_eq!(conflict_count, 1);
+        assert!(
+            is_app_installed(&app.state.database)
+                .await
+                .expect("install state should load")
+        );
+        assert!(
+            has_admin_account(&app.state.database)
+                .await
+                .expect("admin state should load")
+        );
+    }
+
+    #[tokio::test]
+    async fn health_route_reports_s3_probe_failures() {
+        let app = TestApp::new(|_| {}).await;
+        app.state
+            .storage_manager
+            .apply_runtime_settings(sample_s3_runtime_settings())
+            .await
+            .expect("s3 settings should apply");
+        app.state
+            .storage_manager
+            .force_s3_health_probe_failure_for_tests("bucket access denied")
+            .await;
+
+        let response = app
+            .request(
+                Request::builder()
+                    .uri("/api/v1/health")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body should be readable");
+        let status: HealthStatus = serde_json::from_slice(&body).expect("body should decode");
+
+        assert_eq!(status.status, crate::models::HealthState::Unhealthy);
+        assert_eq!(status.storage.status, crate::models::HealthState::Unhealthy);
+        assert!(
+            status
+                .storage
+                .message
+                .as_deref()
+                .is_some_and(|message| message.contains("远端探测=失败: bucket access denied"))
         );
     }
 

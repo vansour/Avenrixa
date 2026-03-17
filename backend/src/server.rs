@@ -4,6 +4,7 @@
 use crate::db::ADMIN_USER_ID;
 use crate::db::AppState;
 use crate::domain::auth::state_repository::AuthStateRepository;
+use crate::storage_backend::process_pending_storage_cleanup_jobs;
 use chrono::Utc;
 use std::net::SocketAddr;
 use tokio::net::TcpListener;
@@ -21,6 +22,9 @@ pub fn spawn_cleanup_tasks(state: &AppState) {
     let installed_state_for_expiry = state.database.clone();
     let auth_state_repository = state.auth_state_repository.clone();
     let installed_state_for_auth_cleanup = state.database.clone();
+    let storage_cleanup_database = state.database.clone();
+    let installed_state_for_storage_cleanup = state.database.clone();
+    let storage_cleanup_interval = expiry_check_interval.clamp(5, 30);
 
     tokio::spawn(async move {
         let mut interval =
@@ -58,6 +62,25 @@ pub fn spawn_cleanup_tasks(state: &AppState) {
                 .await
             {
                 tracing::error!("Revoked token cleanup failed: {}", error);
+            }
+        }
+    });
+
+    tokio::spawn(async move {
+        let mut interval =
+            tokio::time::interval(tokio::time::Duration::from_secs(storage_cleanup_interval));
+        loop {
+            interval.tick().await;
+            if !crate::db::is_app_installed(&installed_state_for_storage_cleanup)
+                .await
+                .unwrap_or(false)
+            {
+                continue;
+            }
+            if let Err(error) =
+                process_pending_storage_cleanup_jobs(&storage_cleanup_database, 64).await
+            {
+                tracing::error!("Storage cleanup retry failed: {}", error);
             }
         }
     });

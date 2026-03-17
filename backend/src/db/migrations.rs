@@ -43,6 +43,11 @@ static MYSQL_MIGRATOR: Lazy<Migrator> = Lazy::new(|| Migrator {
             "remove unused image metadata",
             MYSQL_0004_REMOVE_UNUSED_IMAGE_METADATA_SQL,
         ),
+        migration(
+            5,
+            "add storage cleanup jobs",
+            MYSQL_0005_ADD_STORAGE_CLEANUP_JOBS_SQL,
+        ),
     ]),
     ..Migrator::DEFAULT
 });
@@ -65,6 +70,11 @@ static POSTGRES_MIGRATOR: Lazy<Migrator> = Lazy::new(|| Migrator {
             "remove unused image metadata",
             POSTGRES_0004_REMOVE_UNUSED_IMAGE_METADATA_SQL,
         ),
+        migration(
+            5,
+            "add storage cleanup jobs",
+            POSTGRES_0005_ADD_STORAGE_CLEANUP_JOBS_SQL,
+        ),
     ]),
     ..Migrator::DEFAULT
 });
@@ -86,6 +96,11 @@ static SQLITE_MIGRATOR: Lazy<Migrator> = Lazy::new(|| Migrator {
             4,
             "remove unused image metadata",
             SQLITE_0004_REMOVE_UNUSED_IMAGE_METADATA_SQL,
+        ),
+        migration(
+            5,
+            "add storage cleanup jobs",
+            SQLITE_0005_ADD_STORAGE_CLEANUP_JOBS_SQL,
         ),
     ]),
     ..Migrator::DEFAULT
@@ -256,6 +271,25 @@ ALTER TABLE images
     DROP COLUMN deleted_at;
 "#;
 
+const MYSQL_0005_ADD_STORAGE_CLEANUP_JOBS_SQL: &str = r#"CREATE TABLE IF NOT EXISTS storage_cleanup_jobs (
+    id BINARY(16) PRIMARY KEY,
+    file_key VARCHAR(255) NOT NULL,
+    storage_signature CHAR(64) NOT NULL,
+    storage_snapshot LONGTEXT NOT NULL,
+    attempts BIGINT NOT NULL DEFAULT 0,
+    last_error LONGTEXT NULL,
+    next_attempt_at DATETIME(6) NOT NULL,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
+);
+
+CREATE UNIQUE INDEX uq_storage_cleanup_jobs_signature_file
+    ON storage_cleanup_jobs(storage_signature, file_key);
+
+CREATE INDEX idx_storage_cleanup_jobs_next_attempt_at
+    ON storage_cleanup_jobs(next_attempt_at);
+"#;
+
 const POSTGRES_0001_INITIAL_SCHEMA_SQL: &str = r#"CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY,
     email VARCHAR(255) UNIQUE NOT NULL,
@@ -418,6 +452,25 @@ ALTER TABLE images
     DROP COLUMN IF EXISTS category_id,
     DROP COLUMN IF EXISTS original_filename,
     DROP COLUMN IF EXISTS deleted_at;
+"#;
+
+const POSTGRES_0005_ADD_STORAGE_CLEANUP_JOBS_SQL: &str = r#"CREATE TABLE IF NOT EXISTS storage_cleanup_jobs (
+    id UUID PRIMARY KEY,
+    file_key VARCHAR(255) NOT NULL,
+    storage_signature CHAR(64) NOT NULL,
+    storage_snapshot TEXT NOT NULL,
+    attempts BIGINT NOT NULL DEFAULT 0,
+    last_error TEXT NULL,
+    next_attempt_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_storage_cleanup_jobs_signature_file
+    ON storage_cleanup_jobs(storage_signature, file_key);
+
+CREATE INDEX IF NOT EXISTS idx_storage_cleanup_jobs_next_attempt_at
+    ON storage_cleanup_jobs(next_attempt_at);
 "#;
 
 const SQLITE_0001_INITIAL_SCHEMA_SQL: &str = r#"CREATE TABLE IF NOT EXISTS users (
@@ -626,6 +679,25 @@ CREATE INDEX IF NOT EXISTS idx_images_status_expires ON images(status, expires_a
 CREATE INDEX IF NOT EXISTS idx_images_filename_lookup ON images(filename);
 
 PRAGMA foreign_keys = ON;
+"#;
+
+const SQLITE_0005_ADD_STORAGE_CLEANUP_JOBS_SQL: &str = r#"CREATE TABLE IF NOT EXISTS storage_cleanup_jobs (
+    id TEXT PRIMARY KEY,
+    file_key TEXT NOT NULL,
+    storage_signature TEXT NOT NULL,
+    storage_snapshot TEXT NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    next_attempt_at TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_storage_cleanup_jobs_signature_file
+    ON storage_cleanup_jobs(storage_signature, file_key);
+
+CREATE INDEX IF NOT EXISTS idx_storage_cleanup_jobs_next_attempt_at
+    ON storage_cleanup_jobs(next_attempt_at);
 "#;
 
 #[cfg(test)]
@@ -1148,7 +1220,7 @@ mod tests {
                 .fetch_all(&pool)
                 .await
                 .expect("applied migrations should be listed");
-        assert_eq!(applied_versions, vec![1, 2, 3, 4]);
+        assert_eq!(applied_versions, vec![1, 2, 3, 4, 5]);
     }
 
     #[tokio::test]
@@ -1395,7 +1467,7 @@ mod tests {
                 .fetch_all(&pool)
                 .await
                 .expect("applied migrations should be listed");
-        assert_eq!(applied_versions, vec![1, 2, 3, 4]);
+        assert_eq!(applied_versions, vec![1, 2, 3, 4, 5]);
 
         pool.close().await;
     }
@@ -1635,7 +1707,7 @@ mod tests {
                 .fetch_all(&pool)
                 .await
                 .expect("applied migrations should be listed");
-        assert_eq!(applied_versions, vec![1, 2, 3, 4]);
+        assert_eq!(applied_versions, vec![1, 2, 3, 4, 5]);
 
         pool.close().await;
     }

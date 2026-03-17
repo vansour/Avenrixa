@@ -9,10 +9,11 @@ use shared_types::auth::UserResponse as SharedUserResponse;
 use crate::audit::log_audit_db;
 use crate::config::DatabaseKind;
 use crate::db::{
-    AppState, SITE_FAVICON_DATA_URL_SETTING_KEY, acquire_installation_lock,
-    create_admin_account_mysql_tx, create_admin_account_sqlite_tx, create_admin_account_tx,
-    delete_setting_mysql_tx, delete_setting_sqlite_tx, delete_setting_tx, get_setting_value,
-    has_admin_account, has_admin_account_mysql_tx, has_admin_account_sqlite_tx,
+    AppState, INSTALL_STATE_SETTING_KEY, SITE_FAVICON_DATA_URL_SETTING_KEY,
+    acquire_installation_lock, create_admin_account_mysql_tx, create_admin_account_sqlite_tx,
+    create_admin_account_tx, delete_admin_account_mysql_tx, delete_admin_account_sqlite_tx,
+    delete_admin_account_tx, delete_setting_mysql_tx, delete_setting_sqlite_tx, delete_setting_tx,
+    get_setting_value, has_admin_account, has_admin_account_mysql_tx, has_admin_account_sqlite_tx,
     has_admin_account_tx, is_app_installed, is_app_installed_mysql_tx, is_app_installed_sqlite_tx,
     is_app_installed_tx, mark_app_installed_mysql_tx, mark_app_installed_sqlite_tx,
     mark_app_installed_tx, upsert_setting_mysql_tx, upsert_setting_sqlite_tx, upsert_setting_tx,
@@ -91,6 +92,7 @@ pub async fn bootstrap_installation(
     State(state): State<AppState>,
     Json(req): Json<InstallBootstrapRequest>,
 ) -> Result<(HeaderMap, Json<InstallBootstrapResponse>), AppError> {
+    let _install_guard = state.installation_lock.lock().await;
     let InstallBootstrapRequest {
         admin_email,
         admin_password,
@@ -102,7 +104,15 @@ pub async fn bootstrap_installation(
         .map_err(|error| AppError::ValidationError(error.to_string()))?;
     let favicon_data_url = validate_favicon_data_url(favicon_data_url)?;
     let current_settings = state.runtime_settings.get_runtime_settings().await?;
-    let validated_settings = validate_and_merge(current_settings, config)?;
+    let previous_install_state =
+        get_setting_value(&state.database, INSTALL_STATE_SETTING_KEY).await?;
+    let previous_favicon =
+        get_setting_value(&state.database, SITE_FAVICON_DATA_URL_SETTING_KEY).await?;
+    let validated_settings = validate_and_merge(current_settings.clone(), config)?;
+    state
+        .storage_manager
+        .validate_runtime_settings(&validated_settings)
+        .await?;
 
     let user = match state.database_kind() {
         DatabaseKind::Postgres => {
@@ -190,10 +200,44 @@ pub async fn bootstrap_installation(
         }
     };
 
-    state
+    if let Err(apply_error) = state
         .storage_manager
         .apply_runtime_settings(validated_settings.clone())
-        .await?;
+        .await
+    {
+        let rollback_result = rollback_failed_installation(
+            &state,
+            &current_settings,
+            previous_install_state.as_deref(),
+            previous_favicon.as_deref(),
+        )
+        .await;
+        state.runtime_settings.invalidate_cache().await;
+
+        return match rollback_result {
+            Ok(()) => {
+                if let Err(runtime_rollback_error) = state
+                    .storage_manager
+                    .apply_runtime_settings(current_settings.clone())
+                    .await
+                {
+                    Err(AppError::Internal(anyhow::anyhow!(
+                        "安装配置应用失败，数据库已回滚，但运行态回滚失败: apply={}, runtime_rollback={}",
+                        apply_error,
+                        runtime_rollback_error
+                    )))
+                } else {
+                    Err(apply_error)
+                }
+            }
+            Err(rollback_error) => Err(AppError::Internal(anyhow::anyhow!(
+                "安装配置应用失败，且数据库回滚失败: apply={}, rollback={}",
+                apply_error,
+                rollback_error
+            ))),
+        };
+    }
+
     state.runtime_settings.invalidate_cache().await;
     let settings = validated_settings;
     let user_response = crate::models::UserResponse::from(user);
@@ -245,6 +289,118 @@ pub async fn bootstrap_installation(
             config: settings.to_admin_config(state.storage_manager.restart_required(&settings)),
         }),
     ))
+}
+
+async fn rollback_failed_installation(
+    state: &AppState,
+    previous_settings: &RuntimeSettings,
+    previous_install_state: Option<&str>,
+    previous_favicon: Option<&str>,
+) -> Result<(), AppError> {
+    match state.database_kind() {
+        DatabaseKind::Postgres => {
+            let pool = state.postgres_pool()?;
+            let mut tx = pool.begin().await?;
+            acquire_installation_lock(&mut tx).await?;
+            persist_settings_tx(&mut tx, previous_settings).await?;
+            restore_optional_setting_tx(
+                &mut tx,
+                SITE_FAVICON_DATA_URL_SETTING_KEY,
+                previous_favicon,
+            )
+            .await?;
+            restore_optional_setting_tx(&mut tx, INSTALL_STATE_SETTING_KEY, previous_install_state)
+                .await?;
+            delete_admin_account_tx(&mut tx).await?;
+            tx.commit().await?;
+        }
+        DatabaseKind::MySql => {
+            let pool = match &state.database {
+                crate::db::DatabasePool::MySql(pool) => pool,
+                crate::db::DatabasePool::Postgres(_) | crate::db::DatabasePool::Sqlite(_) => {
+                    unreachable!()
+                }
+            };
+            let mut tx = pool.begin().await?;
+            persist_settings_mysql_tx(&mut tx, previous_settings).await?;
+            restore_optional_setting_mysql_tx(
+                &mut tx,
+                SITE_FAVICON_DATA_URL_SETTING_KEY,
+                previous_favicon,
+            )
+            .await?;
+            restore_optional_setting_mysql_tx(
+                &mut tx,
+                INSTALL_STATE_SETTING_KEY,
+                previous_install_state,
+            )
+            .await?;
+            delete_admin_account_mysql_tx(&mut tx).await?;
+            tx.commit().await?;
+        }
+        DatabaseKind::Sqlite => {
+            let pool = match &state.database {
+                crate::db::DatabasePool::Sqlite(pool) => pool,
+                crate::db::DatabasePool::Postgres(_) | crate::db::DatabasePool::MySql(_) => {
+                    unreachable!()
+                }
+            };
+            let mut tx = pool.begin().await?;
+            persist_settings_sqlite_tx(&mut tx, previous_settings).await?;
+            restore_optional_setting_sqlite_tx(
+                &mut tx,
+                SITE_FAVICON_DATA_URL_SETTING_KEY,
+                previous_favicon,
+            )
+            .await?;
+            restore_optional_setting_sqlite_tx(
+                &mut tx,
+                INSTALL_STATE_SETTING_KEY,
+                previous_install_state,
+            )
+            .await?;
+            delete_admin_account_sqlite_tx(&mut tx).await?;
+            tx.commit().await?;
+        }
+    }
+
+    Ok(())
+}
+
+async fn restore_optional_setting_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    key: &str,
+    value: Option<&str>,
+) -> Result<(), AppError> {
+    match value {
+        Some(value) => upsert_setting_tx(tx, key, value).await?,
+        None => delete_setting_tx(tx, key).await?,
+    }
+    Ok(())
+}
+
+async fn restore_optional_setting_mysql_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::MySql>,
+    key: &str,
+    value: Option<&str>,
+) -> Result<(), AppError> {
+    match value {
+        Some(value) => upsert_setting_mysql_tx(tx, key, value).await?,
+        None => delete_setting_mysql_tx(tx, key).await?,
+    }
+    Ok(())
+}
+
+async fn restore_optional_setting_sqlite_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    key: &str,
+    value: Option<&str>,
+) -> Result<(), AppError> {
+    match value {
+        Some(value) => upsert_setting_sqlite_tx(tx, key, value).await?,
+        None => delete_setting_sqlite_tx(tx, key).await?,
+    }
+    Ok(())
 }
 
 fn validate_favicon_data_url(value: Option<String>) -> Result<Option<String>, AppError> {

@@ -11,6 +11,7 @@ use crate::runtime_settings::RuntimeSettingsService;
 use crate::storage_backend::StorageManager;
 use std::sync::Arc;
 use std::time::Instant;
+use tokio::sync::Mutex;
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -25,6 +26,7 @@ pub struct AppState {
     pub admin_domain_service: Arc<AdminDomainService>,
     pub runtime_settings: Arc<RuntimeSettingsService>,
     pub storage_manager: Arc<StorageManager>,
+    pub installation_lock: Arc<Mutex<()>>,
     pub started_at: Instant,
 }
 

@@ -32,9 +32,14 @@ jobs:
         run: |
           release_version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)"
           image_repository="${INPUT_IMAGE_REPOSITORY:-ghcr.io/${GITHUB_REPOSITORY_OWNER}/vansour-image}"
+          preview_image_ref=""
+          if [[ "${release_version}" == *-* ]]; then
+            preview_image_ref="${image_repository}:dev"
+          fi
           echo "release_version=${release_version}" >> "${GITHUB_OUTPUT}"
           echo "image_repository=${image_repository}" >> "${GITHUB_OUTPUT}"
           echo "release_image_ref=${image_repository}:${release_version}" >> "${GITHUB_OUTPUT}"
+          echo "preview_image_ref=${preview_image_ref}" >> "${GITHUB_OUTPUT}"
 
       - name: Install system dependencies
         run: |
@@ -66,12 +71,14 @@ jobs:
           echo "Release version: ${{ steps.release-meta.outputs.release_version }}"
           echo "Image repository: ${{ steps.release-meta.outputs.image_repository }}"
           echo "Image ref: ${{ steps.release-meta.outputs.release_image_ref }}"
+          echo "Preview ref: ${{ steps.release-meta.outputs.preview_image_ref }}"
 
       - name: Run 0.1 RC preflight
         env:
           RELEASE_VERSION: ${{ steps.release-meta.outputs.release_version }}
           RELEASE_BUILD_REVISION: ${{ github.sha }}
           RELEASE_IMAGE_REF: ${{ steps.release-meta.outputs.release_image_ref }}
+          RELEASE_IMAGE_ADDITIONAL_TAGS: ${{ steps.release-meta.outputs.preview_image_ref }}
           RELEASE_IMAGE_PUSH: "1"
           DOCKER_BUILDKIT: "1"
           COMPOSE_DOCKER_CLI_BUILD: "1"

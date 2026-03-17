@@ -19,7 +19,11 @@ RELEASE_BUILD_REVISION="${RELEASE_BUILD_REVISION:-$(git rev-parse --short=12 HEA
 RELEASE_BUILD_DATE="${RELEASE_BUILD_DATE:-$(date -u +"%Y-%m-%dT%H:%M:%SZ")}"
 RELEASE_IMAGE_REF="${RELEASE_IMAGE_REF:-ghcr.io/vansour/vansour-image:${RELEASE_VERSION}}"
 RELEASE_IMAGE_PUSH="${RELEASE_IMAGE_PUSH:-0}"
-RELEASE_IMAGE_ADDITIONAL_TAGS="${RELEASE_IMAGE_ADDITIONAL_TAGS:-}"
+RELEASE_IMAGE_ADDITIONAL_TAGS_WAS_SET=0
+if [[ -n "${RELEASE_IMAGE_ADDITIONAL_TAGS+x}" ]]; then
+  RELEASE_IMAGE_ADDITIONAL_TAGS_WAS_SET=1
+fi
+RELEASE_IMAGE_ADDITIONAL_TAGS="${RELEASE_IMAGE_ADDITIONAL_TAGS-}"
 RELEASE_RC_INCLUDE_GA_GATE="${RELEASE_RC_INCLUDE_GA_GATE:-1}"
 RELEASE_RC_INCLUDE_CHANGELOG="${RELEASE_RC_INCLUDE_CHANGELOG:-1}"
 RELEASE_RC_INCLUDE_VERSION_SMOKE="${RELEASE_RC_INCLUDE_VERSION_SMOKE:-1}"
@@ -28,6 +32,19 @@ PRESERVE_STACK_ON_FAILURE="${PRESERVE_STACK_ON_FAILURE:-0}"
 log_step() {
   echo
   echo "==> $1"
+}
+
+preview_image_ref_from_release_ref() {
+  local image_ref="$1"
+  local image_ref_without_digest="${image_ref%%@*}"
+
+  printf '%s:dev' "${image_ref_without_digest%:*}"
+}
+
+apply_default_preview_image_tag() {
+  if [[ "${RELEASE_IMAGE_ADDITIONAL_TAGS_WAS_SET}" == "0" && "${RELEASE_VERSION}" == *-* ]]; then
+    RELEASE_IMAGE_ADDITIONAL_TAGS="$(preview_image_ref_from_release_ref "${RELEASE_IMAGE_REF}")"
+  fi
 }
 
 expect_toggle() {
@@ -154,11 +171,15 @@ main() {
 
   require_commands
   assert_release_version_matches_workspace
+  apply_default_preview_image_tag
 
   log_step "Starting 0.1 RC preflight"
   echo "Release version: ${RELEASE_VERSION}"
   echo "Release revision: ${RELEASE_BUILD_REVISION}"
   echo "Release image: ${RELEASE_IMAGE_REF}"
+  if [[ -n "${RELEASE_IMAGE_ADDITIONAL_TAGS}" ]]; then
+    echo "Additional image tags: ${RELEASE_IMAGE_ADDITIONAL_TAGS}"
+  fi
   echo "Release build date: ${RELEASE_BUILD_DATE}"
 
   if [[ "${RELEASE_RC_INCLUDE_CHANGELOG}" == "1" ]]; then

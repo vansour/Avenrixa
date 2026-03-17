@@ -67,6 +67,15 @@ impl ImageRepository for PostgresImageRepository {
             .await
     }
 
+    async fn find_media_keys_still_referenced_excluding_ids(
+        &self,
+        media_keys: &[String],
+        excluded_ids: &[Uuid],
+    ) -> Result<Vec<String>, sqlx::Error> {
+        self.find_media_keys_still_referenced_excluding_ids_impl(media_keys, excluded_ids)
+            .await
+    }
+
     async fn find_image_by_hash(
         &self,
         hash: &str,
@@ -77,6 +86,14 @@ impl ImageRepository for PostgresImageRepository {
 
     async fn find_image_by_hash_global(&self, hash: &str) -> Result<Option<Image>, sqlx::Error> {
         self.find_image_by_hash_global_impl(hash).await
+    }
+
+    async fn find_image_by_filename(
+        &self,
+        filename: &str,
+        user_id: Uuid,
+    ) -> Result<Option<Image>, sqlx::Error> {
+        self.find_image_by_filename_impl(filename, user_id).await
     }
 }
 
@@ -140,6 +157,15 @@ impl ImageRepository for MySqlImageRepository {
             .await
     }
 
+    async fn find_media_keys_still_referenced_excluding_ids(
+        &self,
+        media_keys: &[String],
+        excluded_ids: &[Uuid],
+    ) -> Result<Vec<String>, sqlx::Error> {
+        self.find_media_keys_still_referenced_excluding_ids_impl(media_keys, excluded_ids)
+            .await
+    }
+
     async fn find_image_by_hash(
         &self,
         hash: &str,
@@ -150,6 +176,14 @@ impl ImageRepository for MySqlImageRepository {
 
     async fn find_image_by_hash_global(&self, hash: &str) -> Result<Option<Image>, sqlx::Error> {
         self.find_image_by_hash_global_impl(hash).await
+    }
+
+    async fn find_image_by_filename(
+        &self,
+        filename: &str,
+        user_id: Uuid,
+    ) -> Result<Option<Image>, sqlx::Error> {
+        self.find_image_by_filename_impl(filename, user_id).await
     }
 }
 
@@ -213,6 +247,15 @@ impl ImageRepository for SqliteImageRepository {
             .await
     }
 
+    async fn find_media_keys_still_referenced_excluding_ids(
+        &self,
+        media_keys: &[String],
+        excluded_ids: &[Uuid],
+    ) -> Result<Vec<String>, sqlx::Error> {
+        self.find_media_keys_still_referenced_excluding_ids_impl(media_keys, excluded_ids)
+            .await
+    }
+
     async fn find_image_by_hash(
         &self,
         hash: &str,
@@ -223,6 +266,14 @@ impl ImageRepository for SqliteImageRepository {
 
     async fn find_image_by_hash_global(&self, hash: &str) -> Result<Option<Image>, sqlx::Error> {
         self.find_image_by_hash_global_impl(hash).await
+    }
+
+    async fn find_image_by_filename(
+        &self,
+        filename: &str,
+        user_id: Uuid,
+    ) -> Result<Option<Image>, sqlx::Error> {
+        self.find_image_by_filename_impl(filename, user_id).await
     }
 }
 
@@ -328,6 +379,27 @@ impl ImageRepository for DatabaseImageRepository {
         }
     }
 
+    async fn find_media_keys_still_referenced_excluding_ids(
+        &self,
+        media_keys: &[String],
+        excluded_ids: &[Uuid],
+    ) -> Result<Vec<String>, sqlx::Error> {
+        match self {
+            Self::Postgres(repo) => {
+                repo.find_media_keys_still_referenced_excluding_ids(media_keys, excluded_ids)
+                    .await
+            }
+            Self::MySql(repo) => {
+                repo.find_media_keys_still_referenced_excluding_ids(media_keys, excluded_ids)
+                    .await
+            }
+            Self::Sqlite(repo) => {
+                repo.find_media_keys_still_referenced_excluding_ids(media_keys, excluded_ids)
+                    .await
+            }
+        }
+    }
+
     async fn hard_delete_images_by_user(
         &self,
         user_id: Uuid,
@@ -357,6 +429,18 @@ impl ImageRepository for DatabaseImageRepository {
             Self::Postgres(repo) => repo.find_image_by_hash_global(hash).await,
             Self::MySql(repo) => repo.find_image_by_hash_global(hash).await,
             Self::Sqlite(repo) => repo.find_image_by_hash_global(hash).await,
+        }
+    }
+
+    async fn find_image_by_filename(
+        &self,
+        filename: &str,
+        user_id: Uuid,
+    ) -> Result<Option<Image>, sqlx::Error> {
+        match self {
+            Self::Postgres(repo) => repo.find_image_by_filename(filename, user_id).await,
+            Self::MySql(repo) => repo.find_image_by_filename(filename, user_id).await,
+            Self::Sqlite(repo) => repo.find_image_by_filename(filename, user_id).await,
         }
     }
 }

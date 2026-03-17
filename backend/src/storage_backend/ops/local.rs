@@ -27,7 +27,14 @@ pub(super) async fn write(
 }
 
 pub(super) async fn delete(settings: &RuntimeSettings, file_key: &str) -> Result<(), AppError> {
-    let path = join_local_path(&settings.local_storage_path, file_key)?;
+    delete_with_base_path(&settings.local_storage_path, file_key).await
+}
+
+pub(super) async fn delete_with_base_path(
+    local_storage_path: &str,
+    file_key: &str,
+) -> Result<(), AppError> {
+    let path = join_local_path(local_storage_path, file_key)?;
     match fs::remove_file(path).await {
         Ok(_) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),

@@ -323,7 +323,7 @@ cargo test --workspace
 - `CHANGELOG.md` 是否有对应版本条目
 - Docker 镜像 labels 是否写入 version / revision / created
 - `/health` 返回的运行版本是否和候选版一致
-- GitHub Actions 工作流会默认发布到 `ghcr.io/<repository_owner>/vansour-image:<version>`
+- GitHub Actions 工作流会默认发布到 `ghcr.io/<repository_owner>/vansour-image:<version>`，并为预发布镜像追加 `:dev`
 
 当前 RC runbook 见 [`docs/release-0.1-rc-runbook.md`](docs/release-0.1-rc-runbook.md)。
 

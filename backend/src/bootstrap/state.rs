@@ -21,6 +21,7 @@ pub async fn build_app_state(config: Config) -> anyhow::Result<AppState> {
         admin_domain_service: services.admin_domain_service,
         runtime_settings: services.runtime_settings,
         storage_manager: services.storage_manager,
+        installation_lock: std::sync::Arc::new(tokio::sync::Mutex::new(())),
         started_at: std::time::Instant::now(),
     })
 }

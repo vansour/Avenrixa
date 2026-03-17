@@ -4,6 +4,7 @@
 
 mod common;
 mod delete_restore;
+mod media;
 mod queries;
 mod update;
 mod upload;
@@ -34,6 +35,12 @@ pub struct ImageInfo {
     pub id: Uuid,
     pub filename: String,
     pub user_id: Uuid,
+}
+
+pub struct MediaAsset {
+    pub content_type: String,
+    pub data: Vec<u8>,
+    pub etag: String,
 }
 
 pub struct ImageDomainServiceDependencies {

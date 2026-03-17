@@ -100,16 +100,25 @@ impl AdminDomainService {
         };
 
         let storage_settings = self.storage_manager.active_settings();
-        let storage_status = match self.storage_manager.check_health().await {
-            Ok(_) => ComponentStatus {
-                status: HealthState::Healthy,
-                message: Some(describe_storage_backend(&storage_settings)),
-            },
-            Err(e) => {
-                overall_status = HealthState::Unhealthy;
-                ComponentStatus::unhealthy(e.to_string())
-            }
+        let storage_probe_status = self.storage_manager.health_component_status().await;
+        let storage_status = ComponentStatus {
+            status: storage_probe_status.status,
+            message: Some(storage_status_message(
+                &storage_settings,
+                storage_probe_status.message.as_deref(),
+            )),
         };
+        match storage_status.status {
+            HealthState::Healthy | HealthState::Disabled => {}
+            HealthState::Degraded => {
+                if overall_status == HealthState::Healthy {
+                    overall_status = HealthState::Degraded;
+                }
+            }
+            _ => {
+                overall_status = HealthState::Unhealthy;
+            }
+        }
 
         let metrics = self.collect_health_metrics().await.ok();
 
@@ -219,9 +228,23 @@ impl AdminDomainService {
     }
 }
 
+fn storage_status_message(
+    settings: &crate::runtime_settings::RuntimeSettings,
+    probe_message: Option<&str>,
+) -> String {
+    match probe_message {
+        Some(probe_message) if !probe_message.trim().is_empty() => {
+            format!("{} | {}", describe_storage_backend(settings), probe_message)
+        }
+        _ => describe_storage_backend(settings),
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{build_version_label, describe_storage_backend, infer_s3_provider};
+    use super::{
+        build_version_label, describe_storage_backend, infer_s3_provider, storage_status_message,
+    };
     use crate::runtime_settings::{RuntimeSettings, StorageBackend};
 
     const PACKAGE_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -245,8 +268,8 @@ mod tests {
     #[test]
     fn build_version_label_ignores_revision_when_present() {
         assert_eq!(
-            build_version_label(Some("0.1.1-rc.1"), "ignored", Some("abc123def456")),
-            "0.1.1-rc.1"
+            build_version_label(Some("0.1.2-rc.1"), "ignored", Some("abc123def456")),
+            "0.1.2-rc.1"
         );
     }
 
@@ -256,6 +279,40 @@ mod tests {
             build_version_label(Some(PACKAGE_VERSION), "ignored", Some("dev")),
             PACKAGE_VERSION
         );
+    }
+
+    fn sample_runtime_settings() -> RuntimeSettings {
+        RuntimeSettings {
+            site_name: "Vansour Image".to_string(),
+            storage_backend: StorageBackend::S3,
+            local_storage_path: "/data/images".to_string(),
+            mail_enabled: false,
+            mail_smtp_host: String::new(),
+            mail_smtp_port: 587,
+            mail_smtp_user: None,
+            mail_smtp_password: None,
+            mail_from_email: String::new(),
+            mail_from_name: String::new(),
+            mail_link_base_url: String::new(),
+            s3_endpoint: Some("https://example.r2.cloudflarestorage.com".to_string()),
+            s3_region: Some("auto".to_string()),
+            s3_bucket: Some("bucket".to_string()),
+            s3_prefix: Some("images".to_string()),
+            s3_access_key: Some("access".to_string()),
+            s3_secret_key: Some("secret".to_string()),
+            s3_force_path_style: false,
+        }
+    }
+
+    #[test]
+    fn storage_status_message_appends_probe_layers() {
+        let message = storage_status_message(
+            &sample_runtime_settings(),
+            Some("配置=正常 | 远端探测=正常 | 读写=未执行写探测"),
+        );
+
+        assert!(message.contains("Cloudflare R2"));
+        assert!(message.contains("配置=正常"));
     }
 
     #[test]

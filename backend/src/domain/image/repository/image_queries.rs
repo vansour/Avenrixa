@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use sqlx::{MySql, Postgres, QueryBuilder, Sqlite};
 use uuid::Uuid;
 
@@ -133,6 +135,64 @@ impl PostgresImageRepository {
         .bind(active_status())
         .fetch_optional(&self.pool)
         .await
+    }
+
+    pub(super) async fn find_image_by_filename_impl(
+        &self,
+        filename: &str,
+        user_id: Uuid,
+    ) -> Result<Option<Image>, sqlx::Error> {
+        sqlx::query_as::<_, Image>(&format!(
+            "SELECT {} FROM images WHERE filename = $1 AND user_id = $2 AND status = $3 LIMIT 1",
+            IMAGE_SELECT_COLUMNS
+        ))
+        .bind(filename)
+        .bind(user_id)
+        .bind(active_status())
+        .fetch_optional(&self.pool)
+        .await
+    }
+
+    pub(super) async fn find_media_keys_still_referenced_excluding_ids_impl(
+        &self,
+        media_keys: &[String],
+        excluded_ids: &[Uuid],
+    ) -> Result<Vec<String>, sqlx::Error> {
+        if media_keys.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut referenced = BTreeSet::new();
+        let filename_refs = sqlx::query_scalar::<_, String>(
+            "SELECT DISTINCT filename
+             FROM images
+             WHERE filename = ANY($1)
+               AND status = $2
+               AND NOT (id = ANY($3))",
+        )
+        .bind(media_keys)
+        .bind(active_status())
+        .bind(excluded_ids)
+        .fetch_all(&self.pool)
+        .await?;
+        referenced.extend(filename_refs);
+
+        let thumbnail_refs = sqlx::query_scalar::<_, String>(
+            "SELECT DISTINCT thumbnail
+             FROM images
+             WHERE thumbnail = ANY($1)
+               AND status = $2
+               AND thumbnail IS NOT NULL
+               AND NOT (id = ANY($3))",
+        )
+        .bind(media_keys)
+        .bind(active_status())
+        .bind(excluded_ids)
+        .fetch_all(&self.pool)
+        .await?;
+        referenced.extend(thumbnail_refs);
+
+        Ok(referenced.into_iter().collect())
     }
 }
 
@@ -299,6 +359,48 @@ impl MySqlImageRepository {
         .fetch_optional(&self.pool)
         .await
     }
+
+    pub(super) async fn find_image_by_filename_impl(
+        &self,
+        filename: &str,
+        user_id: Uuid,
+    ) -> Result<Option<Image>, sqlx::Error> {
+        sqlx::query_as::<_, Image>(&format!(
+            "SELECT {} FROM images WHERE filename = ? AND user_id = ? AND status = ? LIMIT 1",
+            IMAGE_SELECT_COLUMNS
+        ))
+        .bind(filename)
+        .bind(user_id)
+        .bind(active_status())
+        .fetch_optional(&self.pool)
+        .await
+    }
+
+    pub(super) async fn find_media_keys_still_referenced_excluding_ids_impl(
+        &self,
+        media_keys: &[String],
+        excluded_ids: &[Uuid],
+    ) -> Result<Vec<String>, sqlx::Error> {
+        if media_keys.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut referenced = BTreeSet::new();
+        referenced.extend(
+            mysql_media_refs_query(media_keys, excluded_ids, "filename")
+                .build_query_scalar::<String>()
+                .fetch_all(&self.pool)
+                .await?,
+        );
+        referenced.extend(
+            mysql_media_refs_query(media_keys, excluded_ids, "thumbnail")
+                .build_query_scalar::<String>()
+                .fetch_all(&self.pool)
+                .await?,
+        );
+
+        Ok(referenced.into_iter().collect())
+    }
 }
 
 impl SqliteImageRepository {
@@ -464,4 +566,112 @@ impl SqliteImageRepository {
         .fetch_optional(&self.pool)
         .await
     }
+
+    pub(super) async fn find_image_by_filename_impl(
+        &self,
+        filename: &str,
+        user_id: Uuid,
+    ) -> Result<Option<Image>, sqlx::Error> {
+        sqlx::query_as::<_, Image>(&format!(
+            "SELECT {} FROM images WHERE filename = ?1 AND user_id = ?2 AND status = ?3 LIMIT 1",
+            IMAGE_SELECT_COLUMNS
+        ))
+        .bind(filename)
+        .bind(user_id)
+        .bind(active_status())
+        .fetch_optional(&self.pool)
+        .await
+    }
+
+    pub(super) async fn find_media_keys_still_referenced_excluding_ids_impl(
+        &self,
+        media_keys: &[String],
+        excluded_ids: &[Uuid],
+    ) -> Result<Vec<String>, sqlx::Error> {
+        if media_keys.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut referenced = BTreeSet::new();
+        referenced.extend(
+            sqlite_media_refs_query(media_keys, excluded_ids, "filename")
+                .build_query_scalar::<String>()
+                .fetch_all(&self.pool)
+                .await?,
+        );
+        referenced.extend(
+            sqlite_media_refs_query(media_keys, excluded_ids, "thumbnail")
+                .build_query_scalar::<String>()
+                .fetch_all(&self.pool)
+                .await?,
+        );
+
+        Ok(referenced.into_iter().collect())
+    }
+}
+
+fn mysql_media_refs_query<'a>(
+    media_keys: &'a [String],
+    excluded_ids: &'a [Uuid],
+    column: &'a str,
+) -> QueryBuilder<'a, MySql> {
+    let mut builder = QueryBuilder::<MySql>::new(format!(
+        "SELECT DISTINCT {column} FROM images WHERE {column} IN ("
+    ));
+    {
+        let mut separated = builder.separated(", ");
+        for media_key in media_keys {
+            separated.push_bind(media_key);
+        }
+    }
+    builder.push(")");
+    builder.push(format!(" AND {column} IS NOT NULL"));
+    builder.push(" AND status = ");
+    builder.push_bind(active_status());
+
+    if !excluded_ids.is_empty() {
+        builder.push(" AND id NOT IN (");
+        {
+            let mut separated = builder.separated(", ");
+            for image_id in excluded_ids {
+                separated.push_bind(image_id);
+            }
+        }
+        builder.push(")");
+    }
+
+    builder
+}
+
+fn sqlite_media_refs_query<'a>(
+    media_keys: &'a [String],
+    excluded_ids: &'a [Uuid],
+    column: &'a str,
+) -> QueryBuilder<'a, Sqlite> {
+    let mut builder = QueryBuilder::<Sqlite>::new(format!(
+        "SELECT DISTINCT {column} FROM images WHERE {column} IN ("
+    ));
+    {
+        let mut separated = builder.separated(", ");
+        for media_key in media_keys {
+            separated.push_bind(media_key);
+        }
+    }
+    builder.push(")");
+    builder.push(format!(" AND {column} IS NOT NULL"));
+    builder.push(" AND status = ");
+    builder.push_bind(active_status());
+
+    if !excluded_ids.is_empty() {
+        builder.push(" AND id NOT IN (");
+        {
+            let mut separated = builder.separated(", ");
+            for image_id in excluded_ids {
+                separated.push_bind(image_id);
+            }
+        }
+        builder.push(")");
+    }
+
+    builder
 }

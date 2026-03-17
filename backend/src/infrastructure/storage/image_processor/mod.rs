@@ -33,6 +33,12 @@ impl ImageProcessor {
     }
 
     #[tracing::instrument(skip(self, data))]
+    pub fn generate_thumbnail(&self, data: &[u8], thumbnail_size: u32) -> Result<Vec<u8>> {
+        let img = image::load_from_memory(data)?;
+        self.generate_thumbnail_from_image(&img, thumbnail_size)
+    }
+
+    #[tracing::instrument(skip(self, data))]
     #[cfg(test)]
     pub fn process(&self, data: &[u8], ext: &str) -> Result<Vec<u8>> {
         if data.starts_with(&[0x00, 0x00, 0x01, 0x00]) {

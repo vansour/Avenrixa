@@ -137,6 +137,29 @@ impl ImageRepository for MockImageRepository {
         Ok(referenced.into_iter().collect())
     }
 
+    async fn find_media_keys_still_referenced_excluding_ids(
+        &self,
+        media_keys: &[String],
+        excluded_ids: &[Uuid],
+    ) -> Result<Vec<String>, sqlx::Error> {
+        let images = self.images.lock().unwrap();
+        let mut referenced = std::collections::BTreeSet::new();
+        for image in images.iter() {
+            if excluded_ids.contains(&image.id) || !image.status.is_active() {
+                continue;
+            }
+            if media_keys.contains(&image.filename) {
+                referenced.insert(image.filename.clone());
+            }
+            if let Some(thumbnail) = &image.thumbnail
+                && media_keys.contains(thumbnail)
+            {
+                referenced.insert(thumbnail.clone());
+            }
+        }
+        Ok(referenced.into_iter().collect())
+    }
+
     async fn find_image_by_hash(
         &self,
         hash: &str,
@@ -156,6 +179,20 @@ impl ImageRepository for MockImageRepository {
         Ok(images
             .iter()
             .find(|image| image.hash == hash && image.status.is_active())
+            .cloned())
+    }
+
+    async fn find_image_by_filename(
+        &self,
+        filename: &str,
+        user_id: Uuid,
+    ) -> Result<Option<Image>, sqlx::Error> {
+        let images = self.images.lock().unwrap();
+        Ok(images
+            .iter()
+            .find(|image| {
+                image.filename == filename && image.user_id == user_id && image.status.is_active()
+            })
             .cloned())
     }
 }
