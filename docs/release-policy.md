@@ -76,6 +76,8 @@
 - 本地脚本若未显式传 `RELEASE_IMAGE_REF`，会优先读取 `GITHUB_REPOSITORY`，否则退回解析 `origin` remote。
 - `:dev` 只属于开发预览，不再由 RC workflow 复用。
 
+历史 tag、旧 GHCR 仓库和改名前 Release 的对应关系见 [`tag-history.md`](tag-history.md)。
+
 ## PR 保护规则
 
 建议在 GitHub Branch Protection / Rulesets 中启用以下规则：
