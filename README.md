@@ -462,8 +462,8 @@ GitHub Actions 当前同时承担两类职责：
 
 另外，仓库现在提供一个专门的手动发布门禁 workflow：
 
-- `Release 0.1 GA Gate`：串行执行 Rust checks、默认 PostgreSQL smoke、PostgreSQL ops drill 和两种 PITR drill
-- `Release 0.1 RC Preflight`：在 GA gate 之上继续校验 changelog、镜像 labels 和运行时版本元数据
+- `Avenrixa Release 0.1 GA Gate`：串行执行 Rust checks、默认 PostgreSQL smoke、PostgreSQL ops drill 和两种 PITR drill
+- `Avenrixa Release 0.1 RC Preflight`：在 GA gate 之上继续校验 changelog、镜像 labels 和运行时版本元数据
 
 ## SQLite E2E 冒烟
 
@@ -502,5 +502,5 @@ CACHE_MODE=dragonfly ./scripts/sqlite-e2e-smoke.sh
 
 仓库还提供了一个独立的 GitHub Actions workflow 来跑这套 SQLite E2E：
 
-- 手动触发：`SQLite E2E (Supplemental)`
+- 手动触发：`Avenrixa SQLite E2E (Supplemental)`
 - 定时触发：每天 UTC `02:00`

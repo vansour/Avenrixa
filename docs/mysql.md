@@ -409,7 +409,7 @@ MYSQL_RESTORE_MANIFEST_PATH=./data-mariadb/backup/mysql_last_backup_manifest.jso
 6. 调用 `mysql-ops-restore.sh` 按 physical manifest 恢复
 7. 校验数据库、文件和 `/health` 是否都回到基线
 
-同时新增了 GitHub Actions workflow `MySQL Family Ops Drill (Supplemental)`，支持：
+同时新增了 GitHub Actions workflow `Avenrixa MySQL Family Ops Drill (Supplemental)`，支持：
 
 - 手动触发
 - 每周定时跑一次演练

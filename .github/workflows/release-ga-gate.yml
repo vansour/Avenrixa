@@ -1,4 +1,4 @@
-name: Release 0.1 GA Gate
+name: Avenrixa Release 0.1 GA Gate
 
 on:
   workflow_dispatch:
@@ -11,7 +11,7 @@ env:
 
 jobs:
   release-ga-gate:
-    name: Release 0.1 GA Gate
+    name: Avenrixa Release 0.1 GA Gate
     runs-on: ubuntu-latest
     timeout-minutes: 180
 
@@ -39,7 +39,7 @@ jobs:
 
       - name: Run 0.1 GA release gate
         env:
-          RELEASE_GATE_COMPOSE_PROJECT_PREFIX: vansour-image-release-ga-gate-ci
+          RELEASE_GATE_COMPOSE_PROJECT_PREFIX: avenrixa-release-ga-gate-ci
           DOCKER_BUILDKIT: "1"
           COMPOSE_DOCKER_CLI_BUILD: "1"
         run: ./scripts/release-ga-gate.sh
