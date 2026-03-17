@@ -8,6 +8,40 @@ workspace_package_version() {
   sed -n 's/^version = "\(.*\)"/\1/p' "${ROOT_DIR}/Cargo.toml" | head -n 1
 }
 
+default_image_repository() {
+  local remote_url path owner repo
+
+  if [[ -n "${GITHUB_REPOSITORY:-}" ]]; then
+    owner="${GITHUB_REPOSITORY%%/*}"
+    repo="${GITHUB_REPOSITORY#*/}"
+  else
+    remote_url="$(git remote get-url origin 2>/dev/null || true)"
+    case "${remote_url}" in
+      git@github.com:*)
+        path="${remote_url#git@github.com:}"
+        path="${path%.git}"
+        ;;
+      https://github.com/*)
+        path="${remote_url#https://github.com/}"
+        path="${path%.git}"
+        ;;
+      *)
+        path=""
+        ;;
+    esac
+    if [[ -n "${path}" ]]; then
+      owner="${path%%/*}"
+      repo="${path#*/}"
+    else
+      owner="vansour"
+      repo="avenrixa"
+    fi
+  fi
+
+  repo="$(printf '%s' "${repo}" | tr '[:upper:]' '[:lower:]')"
+  printf 'ghcr.io/%s/%s' "${owner}" "${repo}"
+}
+
 sha256_file() {
   local path="$1"
   sha256sum "${path}" | awk '{print $1}'
@@ -35,7 +69,7 @@ WORKSPACE_VERSION="$(workspace_package_version)"
 RELEASE_VERSION="${RELEASE_VERSION:-${WORKSPACE_VERSION}}"
 RELEASE_BUILD_REVISION="${RELEASE_BUILD_REVISION:-$(git rev-parse --short=12 HEAD 2>/dev/null || printf 'dev')}"
 RELEASE_BUILD_DATE="${RELEASE_BUILD_DATE:-$(date -u +"%Y-%m-%dT%H:%M:%SZ")}"
-RELEASE_IMAGE_REF="${RELEASE_IMAGE_REF:-ghcr.io/vansour/vansour-image:${RELEASE_VERSION}}"
+RELEASE_IMAGE_REF="${RELEASE_IMAGE_REF:-$(default_image_repository):${RELEASE_VERSION}}"
 RELEASE_IMAGE_PUSH="${RELEASE_IMAGE_PUSH:-0}"
 RELEASE_IMAGE_ADDITIONAL_TAGS="${RELEASE_IMAGE_ADDITIONAL_TAGS:-}"
 RELEASE_GA_INCLUDE_RC_PREFLIGHT="${RELEASE_GA_INCLUDE_RC_PREFLIGHT:-1}"
@@ -130,7 +164,7 @@ write_release_notes() {
   local generated_at="$2"
 
   {
-    echo "# Vansour Image ${RELEASE_VERSION}"
+    echo "# Avenrixa ${RELEASE_VERSION}"
     echo
     echo "- Release version: \`${RELEASE_VERSION}\`"
     echo "- Release revision: \`${RELEASE_BUILD_REVISION}\`"
@@ -167,7 +201,7 @@ create_release_bundle() {
   mkdir -p "${RELEASE_ASSET_DIR}"
   release_notes_path="${RELEASE_ASSET_DIR}/release-notes.md"
   image_metadata_path="${RELEASE_ASSET_DIR}/image-metadata.json"
-  release_bundle_path="${RELEASE_ASSET_DIR}/vansour-image-${RELEASE_VERSION}-release-bundle.tar.gz"
+  release_bundle_path="${RELEASE_ASSET_DIR}/avenrixa-${RELEASE_VERSION}-release-bundle.tar.gz"
   release_manifest_path="${RELEASE_ASSET_DIR}/release-manifest.json"
   checksums_path="${RELEASE_ASSET_DIR}/SHA256SUMS"
 
@@ -175,7 +209,7 @@ create_release_bundle() {
   write_image_metadata "${image_metadata_path}"
 
   tmp_dir="$(mktemp -d)"
-  bundle_root="${tmp_dir}/vansour-image-${RELEASE_VERSION}"
+  bundle_root="${tmp_dir}/avenrixa-${RELEASE_VERSION}"
   mkdir -p "${bundle_root}/docs"
   cp "${ROOT_DIR}/compose.yml" "${bundle_root}/compose.yml"
   cp "${ROOT_DIR}/README.md" "${bundle_root}/README.md"
@@ -183,7 +217,7 @@ create_release_bundle() {
   cp "${ROOT_DIR}/docs/release-0.1-ga-runbook.md" "${bundle_root}/docs/release-0.1-ga-runbook.md"
   cp "${release_notes_path}" "${bundle_root}/release-notes.md"
   cp "${image_metadata_path}" "${bundle_root}/image-metadata.json"
-  tar -czf "${release_bundle_path}" -C "${tmp_dir}" "vansour-image-${RELEASE_VERSION}"
+  tar -czf "${release_bundle_path}" -C "${tmp_dir}" "avenrixa-${RELEASE_VERSION}"
   rm -rf "${tmp_dir}"
 
   release_notes_sha256="$(sha256_file "${release_notes_path}")"

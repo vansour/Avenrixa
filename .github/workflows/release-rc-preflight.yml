@@ -1,10 +1,13 @@
 name: Release 0.1 RC Preflight
 
 on:
+  push:
+    tags:
+      - "v*-rc.*"
   workflow_dispatch:
     inputs:
       image_repository:
-        description: Target GHCR image repository, for example ghcr.io/<owner>/vansour-image
+        description: Target GHCR image repository, for example ghcr.io/<owner>/avenrixa
         required: false
         default: ""
 
@@ -15,6 +18,10 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
 
+concurrency:
+  group: release-rc-${{ github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
   release-rc-preflight:
     name: Release 0.1 RC Preflight
@@ -24,6 +31,42 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate RC source
+        run: |
+          git fetch origin "+refs/heads/*:refs/remotes/origin/*" --tags --prune
+
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            release_version="${GITHUB_REF_NAME#v}"
+            if [[ "${release_version}" != *-rc.* ]]; then
+              echo "RC workflow only accepts prerelease tags like v1.2.3-rc.1" >&2
+              exit 1
+            fi
+
+            base_version="${release_version%%-rc.*}"
+            expected_branch="origin/release/${base_version}"
+            if ! git show-ref --verify --quiet "refs/remotes/${expected_branch}"; then
+              echo "Expected release branch ${expected_branch} to exist." >&2
+              exit 1
+            fi
+            if ! git branch -r --contains "${GITHUB_SHA}" | sed 's/^ *//' | grep -Fx "${expected_branch}" >/dev/null; then
+              echo "Tag ${GITHUB_REF_NAME} must point to a commit contained in ${expected_branch}." >&2
+              exit 1
+            fi
+          else
+            if [[ "${GITHUB_REF_NAME}" != release/* ]]; then
+              echo "Manual RC preflight must run from a release/* branch." >&2
+              exit 1
+            fi
+
+            workspace_version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)"
+            if [[ "${workspace_version}" != *-rc.* ]]; then
+              echo "Release branch workspace version must already be an RC version." >&2
+              exit 1
+            fi
+          fi
 
       - name: Resolve release metadata
         id: release-meta
@@ -31,10 +74,16 @@ jobs:
           INPUT_IMAGE_REPOSITORY: ${{ inputs.image_repository }}
         run: |
           release_version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)"
-          image_repository="${INPUT_IMAGE_REPOSITORY:-ghcr.io/${GITHUB_REPOSITORY_OWNER}/vansour-image}"
+          repo_name="$(printf '%s' "${GITHUB_REPOSITORY#*/}" | tr '[:upper:]' '[:lower:]')"
+          image_repository="${INPUT_IMAGE_REPOSITORY:-ghcr.io/${GITHUB_REPOSITORY_OWNER}/${repo_name}}"
+          rolling_rc_image_ref=""
+          if [[ "${release_version}" == *-* ]]; then
+            rolling_rc_image_ref="${image_repository}:rc"
+          fi
           echo "release_version=${release_version}" >> "${GITHUB_OUTPUT}"
           echo "image_repository=${image_repository}" >> "${GITHUB_OUTPUT}"
           echo "release_image_ref=${image_repository}:${release_version}" >> "${GITHUB_OUTPUT}"
+          echo "rolling_rc_image_ref=${rolling_rc_image_ref}" >> "${GITHUB_OUTPUT}"
 
       - name: Install system dependencies
         run: |
@@ -66,12 +115,14 @@ jobs:
           echo "Release version: ${{ steps.release-meta.outputs.release_version }}"
           echo "Image repository: ${{ steps.release-meta.outputs.image_repository }}"
           echo "Image ref: ${{ steps.release-meta.outputs.release_image_ref }}"
+          echo "Rolling RC ref: ${{ steps.release-meta.outputs.rolling_rc_image_ref }}"
 
       - name: Run 0.1 RC preflight
         env:
           RELEASE_VERSION: ${{ steps.release-meta.outputs.release_version }}
           RELEASE_BUILD_REVISION: ${{ github.sha }}
           RELEASE_IMAGE_REF: ${{ steps.release-meta.outputs.release_image_ref }}
+          RELEASE_IMAGE_ADDITIONAL_TAGS: ${{ steps.release-meta.outputs.rolling_rc_image_ref }}
           RELEASE_IMAGE_PUSH: "1"
           DOCKER_BUILDKIT: "1"
           COMPOSE_DOCKER_CLI_BUILD: "1"

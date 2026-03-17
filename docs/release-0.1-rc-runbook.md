@@ -1,6 +1,6 @@
 # 0.1 RC Runbook
 
-本文档对应 `0.1.0-rc.1` 候选版的收口阶段。阶段 1 已经把默认 GA 主链路收进统一门禁；阶段 2 的目标不是再扩大功能范围，而是把候选版资产做成可追溯、可复跑、可发布。
+本文档对应 `0.1.x` 候选版的收口阶段。阶段 1 已经把默认 GA 主链路收进统一门禁；阶段 2 的目标不是再扩大功能范围，而是把候选版资产做成可追溯、可复跑、可发布。
 
 ## 统一入口
 
@@ -10,10 +10,12 @@
 ./scripts/release-rc-preflight.sh
 ```
 
-GitHub Actions 手动触发：
+GitHub Actions 触发方式：
 
 - `.github/workflows/release-rc-preflight.yml`
-- 默认发布到 `ghcr.io/<repository_owner>/vansour-image:<version>`
+- 推送 RC tag 时会自动触发，例如 `v0.1.2-rc.1`
+- 手动触发时必须位于 `release/*` 分支
+- 默认发布到 `ghcr.io/<repository_owner>/avenrixa:<version>`，并追加 `ghcr.io/<repository_owner>/avenrixa:rc`
 - 可通过 workflow input `image_repository` 覆盖目标仓库
 
 ## 阶段 2 关注点
@@ -27,9 +29,10 @@ GitHub Actions 手动触发：
 
 ## 当前候选版
 
-- 版本：`0.1.0-rc.1`
-- 本地默认镜像引用：`ghcr.io/vansour/vansour-image:0.1.0-rc.1`
-- GitHub Actions 默认发布引用：`ghcr.io/<repository_owner>/vansour-image:0.1.0-rc.1`
+- 版本示例：`0.1.2-rc.1`
+- 本地默认镜像引用：`ghcr.io/vansour/avenrixa:0.1.2-rc.1`
+- GitHub Actions 默认发布引用：`ghcr.io/<repository_owner>/avenrixa:0.1.2-rc.1`
+- GitHub Actions 默认滚动 RC 标签：`ghcr.io/<repository_owner>/avenrixa:rc`
 
 ## 常用参数
 
@@ -38,7 +41,7 @@ GitHub Actions 手动触发：
 - `RELEASE_BUILD_DATE`：默认取当前 UTC 时间
 - `RELEASE_IMAGE_REF`：覆盖本次候选版预检构建出的镜像引用
 - `RELEASE_IMAGE_PUSH=0|1`：是否在门禁通过后推送主镜像标签；本地推送前需要先 `docker login ghcr.io`
-- `RELEASE_IMAGE_ADDITIONAL_TAGS`：为同一镜像额外推送的空格分隔标签列表
+- `RELEASE_IMAGE_ADDITIONAL_TAGS`：为同一镜像额外推送的空格分隔标签列表；GitHub Actions 默认会为候选版补一个 `:rc`
 - `RELEASE_RC_INCLUDE_GA_GATE=0|1`：是否先跑完整 GA 门禁
 - `RELEASE_RC_INCLUDE_CHANGELOG=0|1`：是否检查 changelog 条目
 - `RELEASE_RC_INCLUDE_VERSION_SMOKE=0|1`：是否检查镜像 labels 与 `/health.version`
@@ -53,3 +56,5 @@ GitHub Actions 手动触发：
 - `CHANGELOG.md`、镜像元数据和运行时版本展示没有互相冲突
 
 进入正式版 cutover 后，应继续执行 [`release-0.1-ga-runbook.md`](release-0.1-ga-runbook.md) 里的 `release-ga-ship`。
+
+分支、标签和镜像规则见 [`release-policy.md`](release-policy.md)。
