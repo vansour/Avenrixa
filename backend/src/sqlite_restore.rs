@@ -1554,7 +1554,7 @@ mod tests {
 
             // Tests serialize environment mutation through TEST_ENV_LOCK.
             unsafe {
-                std::env::set_var("VANSOUR_IMAGE_BACKUP_DIR", &backup_dir);
+                std::env::set_var("AVENRIXA_BACKUP_DIR", &backup_dir);
                 std::env::set_var("SQLITE_PENDING_RESTORE_PATH", &pending_path);
                 std::env::set_var("SQLITE_LAST_RESTORE_RESULT_PATH", &last_result_path);
             }
@@ -1598,7 +1598,7 @@ mod tests {
         fn drop(&mut self) {
             // Tests serialize environment mutation through TEST_ENV_LOCK.
             unsafe {
-                std::env::remove_var("VANSOUR_IMAGE_BACKUP_DIR");
+                std::env::remove_var("AVENRIXA_BACKUP_DIR");
                 std::env::remove_var("SQLITE_PENDING_RESTORE_PATH");
                 std::env::remove_var("SQLITE_LAST_RESTORE_RESULT_PATH");
             }

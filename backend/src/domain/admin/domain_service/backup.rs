@@ -633,7 +633,7 @@ async fn persist_backup_manifest(
 }
 
 fn backup_command_timeout() -> Duration {
-    std::env::var("VANSOUR_IMAGE_BACKUP_COMMAND_TIMEOUT_SECS")
+    std::env::var("AVENRIXA_BACKUP_COMMAND_TIMEOUT_SECS")
         .ok()
         .and_then(|value| value.trim().parse::<u64>().ok())
         .filter(|value| *value > 0)
@@ -783,13 +783,13 @@ async fn cleanup_backup_file(path: &Path) {
 }
 
 fn pg_dump_binary() -> anyhow::Result<String> {
-    override_or_binary("VANSOUR_IMAGE_PG_DUMP_BIN", &["pg_dump"])
+    override_or_binary("AVENRIXA_PG_DUMP_BIN", &["pg_dump"])
         .ok_or_else(|| anyhow::anyhow!("未找到 pg_dump"))
 }
 
 fn mysql_dump_binary() -> anyhow::Result<String> {
     override_or_binary(
-        "VANSOUR_IMAGE_MYSQL_DUMP_BIN",
+        "AVENRIXA_MYSQL_DUMP_BIN",
         &["mysqldump", "mariadb-dump"],
     )
     .ok_or_else(|| anyhow::anyhow!("未找到 mysqldump 或 mariadb-dump"))
@@ -1021,8 +1021,8 @@ mod tests {
             &script_path,
             "#!/bin/sh\nprintf 'CREATE TABLE demo(id int);\\n'\n",
         );
-        let _env = ScopedEnv::set("VANSOUR_IMAGE_BACKUP_DIR", backup_dir.as_os_str())
-            .and_set("VANSOUR_IMAGE_PG_DUMP_BIN", script_path.as_os_str());
+        let _env = ScopedEnv::set("AVENRIXA_BACKUP_DIR", backup_dir.as_os_str())
+            .and_set("AVENRIXA_PG_DUMP_BIN", script_path.as_os_str());
 
         let service = build_postgres_backup_service(&temp_dir);
         let response = service
@@ -1054,9 +1054,9 @@ mod tests {
             &script_path,
             "#!/bin/sh\nprintf 'partial dump'; sleep 2; printf 'late tail'\n",
         );
-        let _env = ScopedEnv::set("VANSOUR_IMAGE_BACKUP_DIR", backup_dir.as_os_str())
-            .and_set("VANSOUR_IMAGE_PG_DUMP_BIN", script_path.as_os_str())
-            .and_set("VANSOUR_IMAGE_BACKUP_COMMAND_TIMEOUT_SECS", "1");
+        let _env = ScopedEnv::set("AVENRIXA_BACKUP_DIR", backup_dir.as_os_str())
+            .and_set("AVENRIXA_PG_DUMP_BIN", script_path.as_os_str())
+            .and_set("AVENRIXA_BACKUP_COMMAND_TIMEOUT_SECS", "1");
 
         let service = build_postgres_backup_service(&temp_dir);
         let error = service
