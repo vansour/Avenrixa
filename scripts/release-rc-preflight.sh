@@ -8,6 +8,40 @@ workspace_package_version() {
   sed -n 's/^version = "\(.*\)"/\1/p' "${ROOT_DIR}/Cargo.toml" | head -n 1
 }
 
+default_image_repository() {
+  local remote_url path owner repo
+
+  if [[ -n "${GITHUB_REPOSITORY:-}" ]]; then
+    owner="${GITHUB_REPOSITORY%%/*}"
+    repo="${GITHUB_REPOSITORY#*/}"
+  else
+    remote_url="$(git remote get-url origin 2>/dev/null || true)"
+    case "${remote_url}" in
+      git@github.com:*)
+        path="${remote_url#git@github.com:}"
+        path="${path%.git}"
+        ;;
+      https://github.com/*)
+        path="${remote_url#https://github.com/}"
+        path="${path%.git}"
+        ;;
+      *)
+        path=""
+        ;;
+    esac
+    if [[ -n "${path}" ]]; then
+      owner="${path%%/*}"
+      repo="${path#*/}"
+    else
+      owner="vansour"
+      repo="avenrixa"
+    fi
+  fi
+
+  repo="$(printf '%s' "${repo}" | tr '[:upper:]' '[:lower:]')"
+  printf 'ghcr.io/%s/%s' "${owner}" "${repo}"
+}
+
 build_version_label() {
   local version="$1"
   printf '%s' "${version}"
@@ -17,7 +51,7 @@ WORKSPACE_VERSION="$(workspace_package_version)"
 RELEASE_VERSION="${RELEASE_VERSION:-${WORKSPACE_VERSION}}"
 RELEASE_BUILD_REVISION="${RELEASE_BUILD_REVISION:-$(git rev-parse --short=12 HEAD 2>/dev/null || printf 'dev')}"
 RELEASE_BUILD_DATE="${RELEASE_BUILD_DATE:-$(date -u +"%Y-%m-%dT%H:%M:%SZ")}"
-RELEASE_IMAGE_REF="${RELEASE_IMAGE_REF:-ghcr.io/vansour/vansour-image:${RELEASE_VERSION}}"
+RELEASE_IMAGE_REF="${RELEASE_IMAGE_REF:-$(default_image_repository):${RELEASE_VERSION}}"
 RELEASE_IMAGE_PUSH="${RELEASE_IMAGE_PUSH:-0}"
 RELEASE_IMAGE_ADDITIONAL_TAGS_WAS_SET=0
 if [[ -n "${RELEASE_IMAGE_ADDITIONAL_TAGS+x}" ]]; then
@@ -34,16 +68,16 @@ log_step() {
   echo "==> $1"
 }
 
-preview_image_ref_from_release_ref() {
+rolling_rc_image_ref_from_release_ref() {
   local image_ref="$1"
   local image_ref_without_digest="${image_ref%%@*}"
 
-  printf '%s:dev' "${image_ref_without_digest%:*}"
+  printf '%s:rc' "${image_ref_without_digest%:*}"
 }
 
-apply_default_preview_image_tag() {
+apply_default_rolling_rc_tag() {
   if [[ "${RELEASE_IMAGE_ADDITIONAL_TAGS_WAS_SET}" == "0" && "${RELEASE_VERSION}" == *-* ]]; then
-    RELEASE_IMAGE_ADDITIONAL_TAGS="$(preview_image_ref_from_release_ref "${RELEASE_IMAGE_REF}")"
+    RELEASE_IMAGE_ADDITIONAL_TAGS="$(rolling_rc_image_ref_from_release_ref "${RELEASE_IMAGE_REF}")"
   fi
 }
 
@@ -153,7 +187,7 @@ run_version_smoke() {
     APP_REVISION="${RELEASE_BUILD_REVISION}" \
     BUILD_DATE="${RELEASE_BUILD_DATE}" \
     APP_IMAGE_REF="${RELEASE_IMAGE_REF}" \
-    COMPOSE_PROJECT_NAME="vansour-image-release-rc-preflight-smoke" \
+    COMPOSE_PROJECT_NAME="avenrixa-release-rc-preflight-smoke" \
     COMPOSE_VARIANT=postgres \
     SMOKE_FLOW=health \
     CACHE_MODE=redis8 \
@@ -171,7 +205,7 @@ main() {
 
   require_commands
   assert_release_version_matches_workspace
-  apply_default_preview_image_tag
+  apply_default_rolling_rc_tag
 
   log_step "Starting 0.1 RC preflight"
   echo "Release version: ${RELEASE_VERSION}"

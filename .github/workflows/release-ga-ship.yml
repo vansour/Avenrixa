@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       image_repository:
-        description: Target GHCR image repository, for example ghcr.io/<owner>/vansour-image
+        description: Target GHCR image repository, for example ghcr.io/<owner>/avenrixa
         required: false
         default: ""
 
@@ -17,6 +17,10 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+
+concurrency:
+  group: release-ga-${{ github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
   skip-prerelease-tag:
@@ -39,6 +43,35 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate GA source
+        run: |
+          git fetch origin "+refs/heads/*:refs/remotes/origin/*" --tags --prune
+
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            release_version="${GITHUB_REF_NAME#v}"
+            if [[ "${release_version}" == *-* ]]; then
+              echo "GA workflow does not accept prerelease tags." >&2
+              exit 1
+            fi
+            if ! git branch -r --contains "${GITHUB_SHA}" | sed 's/^ *//' | grep -Fx "origin/main" >/dev/null; then
+              echo "Stable tag ${GITHUB_REF_NAME} must point to a commit contained in origin/main." >&2
+              exit 1
+            fi
+          else
+            if [[ "${GITHUB_REF_NAME}" != "main" ]]; then
+              echo "Manual GA ship must run from main." >&2
+              exit 1
+            fi
+
+            workspace_version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)"
+            if [[ "${workspace_version}" == *-* ]]; then
+              echo "Main branch workspace version must be a stable version before GA ship." >&2
+              exit 1
+            fi
+          fi
 
       - name: Resolve release metadata
         id: release-meta
@@ -54,7 +87,8 @@ jobs:
             echo "Tag version (${release_version}) must match workspace version (${workspace_version})" >&2
             exit 1
           fi
-          image_repository="${INPUT_IMAGE_REPOSITORY:-ghcr.io/${GITHUB_REPOSITORY_OWNER}/vansour-image}"
+          repo_name="$(printf '%s' "${GITHUB_REPOSITORY#*/}" | tr '[:upper:]' '[:lower:]')"
+          image_repository="${INPUT_IMAGE_REPOSITORY:-ghcr.io/${GITHUB_REPOSITORY_OWNER}/${repo_name}}"
           echo "release_version=${release_version}" >> "${GITHUB_OUTPUT}"
           echo "image_repository=${image_repository}" >> "${GITHUB_OUTPUT}"
           echo "release_image_ref=${image_repository}:${release_version}" >> "${GITHUB_OUTPUT}"

@@ -4,12 +4,12 @@ if [[ -z "${ROOT_DIR:-}" ]]; then
   ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 fi
 
-: "${COMPOSE_PROJECT_NAME:=vansour-image}"
+: "${COMPOSE_PROJECT_NAME:=avenrixa}"
 : "${COMPOSE_VARIANT:=postgres}"
 : "${CACHE_MODE:=redis8}"
 : "${COMPOSE_ENABLE_MAILPIT:=0}"
 : "${APP_HOST_PORT:=8080}"
-: "${APP_IMAGE_REF:=ghcr.io/vansour/vansour-image:latest}"
+: "${APP_IMAGE_REF:=ghcr.io/vansour/avenrixa:latest}"
 : "${POSTGRES_IMAGE:=postgres:18}"
 : "${MAILPIT_HTTP_PORT:=18025}"
 : "${MAILPIT_SMTP_PORT:=11025}"

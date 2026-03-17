@@ -28,7 +28,7 @@ services:
         APP_VERSION: ${APP_VERSION:-0.1.2-rc.1}
         APP_REVISION: ${APP_REVISION:-dev}
         BUILD_DATE: ${BUILD_DATE:-unknown}
-    image: ${APP_IMAGE_REF:-ghcr.io/vansour/vansour-image:latest}
+    image: ${APP_IMAGE_REF:-ghcr.io/vansour/avenrixa:latest}
     ports:
       - "8080:8080"
     depends_on:

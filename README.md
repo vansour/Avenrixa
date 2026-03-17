@@ -1,4 +1,4 @@
-# Vansour Image
+# Avenrixa
 
 一个基于 Rust Workspace 的图片管理项目，包含：
 
@@ -20,6 +20,11 @@
 - `Experimental`：Dragonfly、无外部缓存、SQLite 页面恢复、子路径部署
 
 正式版边界、非目标和后续阶段的统一口径见 [`docs/release-0.1-scope.md`](docs/release-0.1-scope.md)。
+
+协作和发布治理文档见：
+
+- [`CONTRIBUTING.md`](CONTRIBUTING.md)
+- [`docs/release-policy.md`](docs/release-policy.md)
 
 ## 快速启动
 
@@ -323,9 +328,11 @@ cargo test --workspace
 - `CHANGELOG.md` 是否有对应版本条目
 - Docker 镜像 labels 是否写入 version / revision / created
 - `/health` 返回的运行版本是否和候选版一致
-- GitHub Actions 工作流会默认发布到 `ghcr.io/<repository_owner>/vansour-image:<version>`，并为预发布镜像追加 `:dev`
+- `dev` 分支推送会触发 `preview-dev`，默认发布到 `ghcr.io/<repository_owner>/avenrixa:dev`
+- 同一构建还会追加提交级标签 `ghcr.io/<repository_owner>/avenrixa:sha-<shortsha>`
+- `release/*` 分支上的 RC tag 会触发 `release-rc-preflight`，默认发布到 `ghcr.io/<repository_owner>/avenrixa:<version>` 并追加 `:rc`
 
-当前 RC runbook 见 [`docs/release-0.1-rc-runbook.md`](docs/release-0.1-rc-runbook.md)。
+当前 RC runbook 见 [`docs/release-0.1-rc-runbook.md`](docs/release-0.1-rc-runbook.md)，完整规则见 [`docs/release-policy.md`](docs/release-policy.md)。
 
 ## 0.1 正式版发布演练
 
@@ -340,7 +347,8 @@ cargo test --workspace
 - 校验当前工作区版本已经是稳定正式版号
 - 校验 `CHANGELOG.md` 已存在正式版条目
 - 推送 `v*` tag 时会自动触发对应的 GitHub Actions 正式发布 workflow
-- GitHub Actions 工作流会默认发布到 `ghcr.io/<repository_owner>/vansour-image:<version>` 并追加 `:latest`
+- `main` 分支上的稳定 tag 会触发对应的 GitHub Actions 正式发布 workflow
+- GitHub Actions 工作流会默认发布到 `ghcr.io/<repository_owner>/avenrixa:<version>` 并追加 `:latest`
 - 生成正式版 `release-notes.md`
 - 导出镜像元数据、发布 bundle、`release-manifest.json` 与 `SHA256SUMS`
 
