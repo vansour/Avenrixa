@@ -3,7 +3,7 @@
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT_DIR}"
 
-COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-vansour-image-mysql-ops}"
+COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-avenrixa-mysql-ops}"
 COMPOSE_VARIANT="${COMPOSE_VARIANT:-mysql-ops}"
 MYSQL_SERVICE="${MYSQL_SERVICE:-mysql}"
 APP_SERVICE="${APP_SERVICE:-app}"

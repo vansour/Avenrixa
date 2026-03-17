@@ -77,13 +77,13 @@ mariadb://user:pass@mysql:3306/image
 如果你使用 MySQL 8.4 长期运维模板，对应写法应改为：
 
 ```text
-mysql://vansour_image:replace-with-strong-app-password@mysql:3306/image
+mysql://avenrixa:replace-with-strong-app-password@mysql:3306/image
 ```
 
 如果你使用 MariaDB 12 长期运维模板，对应写法应改为：
 
 ```text
-mariadb://vansour_image:replace-with-strong-app-password@mysql:3306/image
+mariadb://avenrixa:replace-with-strong-app-password@mysql:3306/image
 ```
 
 因此使用这些 Compose 入口时，首次打开网页会直接进入安装向导，而不是数据库引导页。然后继续完成：

@@ -363,7 +363,7 @@ async function clickSettingsNav(page, label) {
 async function reopenFirstRunGuide(page) {
   await page.evaluate((email) => {
     window.localStorage.removeItem(
-      `vansour-image:first-run-guide:v1:${email.trim().toLowerCase()}`
+      `avenrixa:first-run-guide:v1:${email.trim().toLowerCase()}`
     );
   }, config.adminEmail);
   await page.reload({ waitUntil: "domcontentloaded" });

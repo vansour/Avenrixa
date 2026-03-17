@@ -915,7 +915,7 @@ mod tests {
 
     async fn start_postgres_test_pool() -> (DockerContainer, sqlx::PgPool) {
         let (container, host_port) = DockerContainer::start(
-            "vansour-image-pg-upgrade",
+            "avenrixa-pg-upgrade",
             "postgres:18",
             5432,
             &[
@@ -931,7 +931,7 @@ mod tests {
 
     async fn start_mysql_test_pool() -> (DockerContainer, sqlx::MySqlPool) {
         let (container, host_port) = DockerContainer::start(
-            "vansour-image-mysql-upgrade",
+            "avenrixa-mysql-upgrade",
             "mysql:8.4",
             3306,
             &[

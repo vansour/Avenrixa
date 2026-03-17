@@ -299,7 +299,7 @@ mod tests {
 
     fn base_runtime_settings() -> RuntimeSettings {
         RuntimeSettings {
-            site_name: "Vansour Image".to_string(),
+            site_name: "Avenrixa".to_string(),
             storage_backend: StorageBackend::Local,
             local_storage_path: "/data/images".to_string(),
             mail_enabled: false,
@@ -308,7 +308,7 @@ mod tests {
             mail_smtp_user: None,
             mail_smtp_password: None,
             mail_from_email: "noreply@example.com".to_string(),
-            mail_from_name: "Vansour Image".to_string(),
+            mail_from_name: "Avenrixa".to_string(),
             mail_link_base_url: "https://img.example.com".to_string(),
             s3_endpoint: None,
             s3_region: None,
@@ -331,7 +331,7 @@ mod tests {
             mail_smtp_user: None,
             mail_smtp_password: None,
             mail_from_email: "noreply@example.com".to_string(),
-            mail_from_name: "Vansour Image".to_string(),
+            mail_from_name: "Avenrixa".to_string(),
             mail_link_base_url: "https://img.example.com".to_string(),
             s3_endpoint: None,
             s3_region: None,

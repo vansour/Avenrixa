@@ -58,7 +58,7 @@ pub(super) fn render_mail_section(
                         span { "发件人名称" }
                         input {
                             r#type: "text",
-                            placeholder: "Vansour Image",
+                            placeholder: "Avenrixa",
                             value: "{mail_from_name()}",
                             oninput: move |event| mail_from_name.set(event.value()),
                             disabled,

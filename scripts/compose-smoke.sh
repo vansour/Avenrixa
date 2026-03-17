@@ -7,7 +7,7 @@ cd "${ROOT_DIR}"
 APP_HOST_PORT="${APP_HOST_PORT:-8080}"
 SMOKE_TIMEOUT_SECONDS="${SMOKE_TIMEOUT_SECONDS:-180}"
 SMOKE_POLL_INTERVAL_SECONDS="${SMOKE_POLL_INTERVAL_SECONDS:-2}"
-COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-vansour-image-smoke}"
+COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-avenrixa-smoke}"
 COMPOSE_VARIANT="${COMPOSE_VARIANT:-postgres}"
 PRESERVE_STACK_ON_FAILURE="${PRESERVE_STACK_ON_FAILURE:-0}"
 SMOKE_FLOW="${SMOKE_FLOW:-auto}"
@@ -417,7 +417,7 @@ install_postgres_app() {
           mail_smtp_user: null,
           mail_smtp_password: null,
           mail_from_email: "noreply@example.com",
-          mail_from_name: "Vansour Image",
+          mail_from_name: "Avenrixa",
           mail_link_base_url: $link_base_url,
           s3_endpoint: null,
           s3_region: null,
@@ -901,7 +901,7 @@ install_mysql_app() {
           mail_smtp_user: null,
           mail_smtp_password: null,
           mail_from_email: "noreply@example.com",
-          mail_from_name: "Vansour Image",
+          mail_from_name: "Avenrixa",
           mail_link_base_url: $link_base_url,
           s3_endpoint: null,
           s3_region: null,

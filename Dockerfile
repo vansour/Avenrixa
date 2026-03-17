@@ -43,7 +43,7 @@ RUN mkdir -p backend/src frontend/src \
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/app/target \
-    cargo build --release --bin vansour-image
+    cargo build --release --bin avenrixa
 
 # 预编译前端依赖
 # 注意: 如果你 frontend/Cargo.toml 里的 package name 不是 "frontend"，请将下面的 -p frontend 替换为实际名称
@@ -68,8 +68,8 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo clean -p shared-types -p backend -p frontend \
     && \
     touch backend/src/main.rs \
-    && cargo build --release --bin vansour-image \
-    && cp /app/target/release/vansour-image /app/vansour-image
+    && cargo build --release --bin avenrixa \
+    && cp /app/target/release/avenrixa /app/avenrixa
 
 # 6. 编译前端 (Dioxus WASM)
 ENV API_BASE_URL=/
@@ -93,7 +93,7 @@ FROM debian:trixie-slim AS runtime
 ARG APP_VERSION=0.1.2-rc.1
 ARG APP_REVISION=dev
 ARG BUILD_DATE=unknown
-LABEL org.opencontainers.image.title="vansour-image" \
+LABEL org.opencontainers.image.title="Avenrixa" \
       org.opencontainers.image.version=${APP_VERSION} \
       org.opencontainers.image.revision=${APP_REVISION} \
       org.opencontainers.image.created=${BUILD_DATE}
@@ -120,7 +120,7 @@ RUN set -eux; \
 WORKDIR /app
 
 # 将构建阶段的产物复制过来
-COPY --from=builder /app/vansour-image /usr/local/bin/vansour-image
+COPY --from=builder /app/avenrixa /usr/local/bin/avenrixa
 RUN mkdir -p /app/frontend/dist
 COPY --from=builder /app/dist /app/frontend/dist/
 
@@ -133,4 +133,4 @@ ENV RUST_LOG=info
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 --start-period=40s \
     CMD curl -f http://localhost:8080/health || exit 1
 
-CMD ["vansour-image"]
+CMD ["avenrixa"]

@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT_DIR}"
 
-COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-vansour-image-sqlite-ops}"
+COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-avenrixa-sqlite-ops}"
 COMPOSE_VARIANT="${COMPOSE_VARIANT:-sqlite}"
 APP_SERVICE="${APP_SERVICE:-app}"
 APP_HOST_PORT="${APP_HOST_PORT:-8080}"
