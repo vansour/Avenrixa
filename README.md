@@ -25,6 +25,7 @@
 
 - [`CONTRIBUTING.md`](CONTRIBUTING.md)
 - [`docs/release-policy.md`](docs/release-policy.md)
+- [`docs/tag-history.md`](docs/tag-history.md)
 
 ## 快速启动
 
