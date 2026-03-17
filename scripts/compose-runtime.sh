@@ -163,7 +163,7 @@ compose_host_path_relative_to_dir() {
 
   case "${resolved_target}" in
     "${resolved_base_dir}"/*)
-      printf '%s' "${resolved_target#${resolved_base_dir}/}"
+      printf '%s' "${resolved_target#"${resolved_base_dir}"/}"
       ;;
     *)
       echo "Path ${resolved_target} is not within base dir ${resolved_base_dir}" >&2
@@ -307,6 +307,10 @@ yaml_double_quote() {
 
 compose_runtime_file="${COMPOSE_RUNTIME_FILE:-$(compose_runtime_file_path)}"
 compose_files=("compose.yml")
+
+compose_files_json() {
+  printf '%s\n' "${compose_files[@]}" | jq -R . | jq -s .
+}
 
 compose_runtime_generate() {
   local app_container_name

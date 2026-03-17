@@ -112,7 +112,7 @@ case "${backup_mode}" in
         --arg backup_method "logical" \
         --arg backup_kind "mysql-logical-dump" \
         --arg compose_project_name "${COMPOSE_PROJECT_NAME}" \
-        --argjson compose_files "$(printf '%s\n' "${compose_files[@]}" | jq -R . | jq -s .)" \
+        --argjson compose_files "$(compose_files_json)" \
         --arg dump_path "${dump_path}" \
         --arg dump_sha256 "${dump_sha256}" \
         --arg data_archive_path "${data_archive_path}" \
@@ -210,7 +210,7 @@ case "${backup_mode}" in
         --arg helper_image "${helper_image}" \
         --arg compose_project_name "${COMPOSE_PROJECT_NAME}" \
         --arg compose_variant "${COMPOSE_VARIANT}" \
-        --argjson compose_files "$(printf '%s\n' "${compose_files[@]}" | jq -R . | jq -s .)" \
+        --argjson compose_files "$(compose_files_json)" \
         --arg physical_target_dir "${physical_target_dir}" \
         --arg physical_backup_log_path "${physical_backup_log_path}" \
         --arg physical_prepare_log_path "${physical_prepare_log_path}" \

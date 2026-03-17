@@ -48,6 +48,10 @@ impl RuntimeSettingsService {
             return Ok(settings.clone());
         }
 
+        self.load_runtime_settings_uncached().await
+    }
+
+    async fn load_runtime_settings_uncached(&self) -> Result<RuntimeSettings, AppError> {
         let fetched = load_from_db(&self.pool, &self.defaults).await?;
         let mut guard = self.cache.write().await;
         *guard = Some((Instant::now(), fetched.clone()));
@@ -60,12 +64,13 @@ impl RuntimeSettingsService {
         storage_manager: &StorageManager,
     ) -> Result<RuntimeSettings, AppError> {
         let _guard = self.update_lock.lock().await;
-        let current = self.get_runtime_settings().await?;
-        self.ensure_expected_settings_version(req.expected_settings_version.as_deref(), &current)?;
-        let validated = validate_and_merge(current, req)?;
+        let previous = self.load_runtime_settings_uncached().await?;
+        self.ensure_expected_settings_version(req.expected_settings_version.as_deref(), &previous)?;
+        let validated = validate_and_merge(previous.clone(), req)?;
         persist_and_apply(
             self,
             &PersistAndApplyInput {
+                previous: &previous,
                 validated: &validated,
                 storage_manager,
             },
@@ -86,11 +91,12 @@ impl RuntimeSettingsService {
             ));
         }
 
-        let current = self.get_runtime_settings().await?;
-        let validated = validate_raw_setting_update(current, key, value)?;
+        let previous = self.load_runtime_settings_uncached().await?;
+        let validated = validate_raw_setting_update(previous.clone(), key, value)?;
         persist_and_apply(
             self,
             &PersistAndApplyInput {
+                previous: &previous,
                 validated: &validated,
                 storage_manager,
             },
@@ -290,5 +296,76 @@ mod tests {
             .expect("current settings should load");
         assert_eq!(current.site_name, "First Update");
         assert_eq!(current.local_storage_path, original.local_storage_path);
+    }
+
+    #[tokio::test]
+    async fn update_admin_settings_config_checks_expected_version_against_fresh_db_state() {
+        let context = setup_service().await;
+        let original = context
+            .service
+            .get_runtime_settings()
+            .await
+            .expect("initial settings should load");
+        let original_version = original.settings_version();
+
+        let mut externally_persisted = original.clone();
+        externally_persisted.site_name = "External Update".to_string();
+        super::super::store::persist_settings(
+            &DatabasePool::Sqlite(context.pool.clone()),
+            &externally_persisted,
+        )
+        .await
+        .expect("external write should succeed");
+
+        let stale_request = UpdateAdminSettingsConfigRequest {
+            site_name: "Local Draft".to_string(),
+            ..request_from_settings(&original, Some(original_version))
+        };
+        let error = context
+            .service
+            .update_admin_settings_config(stale_request, &context.storage_manager)
+            .await
+            .expect_err("stale request should be rejected after external write");
+
+        assert!(matches!(error, AppError::Conflict(message) if message.contains("刷新后重新确认")));
+
+        let current = context
+            .service
+            .get_runtime_settings()
+            .await
+            .expect("current settings should load");
+        assert_eq!(current.site_name, "External Update");
+    }
+
+    #[tokio::test]
+    async fn update_raw_setting_merges_against_fresh_db_state() {
+        let context = setup_service().await;
+        let original = context
+            .service
+            .get_runtime_settings()
+            .await
+            .expect("initial settings should load");
+
+        let mut externally_persisted = original.clone();
+        externally_persisted.site_name = "External Update".to_string();
+        super::super::store::persist_settings(
+            &DatabasePool::Sqlite(context.pool.clone()),
+            &externally_persisted,
+        )
+        .await
+        .expect("external write should succeed");
+
+        let updated = context
+            .service
+            .update_raw_setting(
+                super::super::model::SETTING_MAIL_FROM_NAME,
+                "Updated Sender",
+                &context.storage_manager,
+            )
+            .await
+            .expect("raw update should succeed");
+
+        assert_eq!(updated.site_name, "External Update");
+        assert_eq!(updated.mail_from_name, "Updated Sender");
     }
 }

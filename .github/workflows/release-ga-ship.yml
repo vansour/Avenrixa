@@ -89,10 +89,12 @@ jobs:
           fi
           repo_name="$(printf '%s' "${GITHUB_REPOSITORY#*/}" | tr '[:upper:]' '[:lower:]')"
           image_repository="${INPUT_IMAGE_REPOSITORY:-ghcr.io/${GITHUB_REPOSITORY_OWNER}/${repo_name}}"
-          echo "release_version=${release_version}" >> "${GITHUB_OUTPUT}"
-          echo "image_repository=${image_repository}" >> "${GITHUB_OUTPUT}"
-          echo "release_image_ref=${image_repository}:${release_version}" >> "${GITHUB_OUTPUT}"
-          echo "latest_image_ref=${image_repository}:latest" >> "${GITHUB_OUTPUT}"
+          {
+            echo "release_version=${release_version}"
+            echo "image_repository=${image_repository}"
+            echo "release_image_ref=${image_repository}:${release_version}"
+            echo "latest_image_ref=${image_repository}:latest"
+          } >> "${GITHUB_OUTPUT}"
 
       - name: Install system dependencies
         run: |

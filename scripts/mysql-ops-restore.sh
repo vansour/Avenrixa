@@ -184,7 +184,7 @@ write_restore_result() {
       --arg rollback_data_archive_path "${rollback_data_archive_path}" \
       --arg physical_copy_back_log_path "${physical_copy_back_log_path}" \
       --arg compose_project_name "${COMPOSE_PROJECT_NAME}" \
-      --argjson compose_files "$(printf '%s\n' "${compose_files[@]}" | jq -R . | jq -s .)" \
+      --argjson compose_files "$(compose_files_json)" \
       --arg app_health_url "${APP_HEALTH_URL}" \
       '{
         status: $status,

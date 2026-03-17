@@ -168,7 +168,7 @@ manifest_payload="$(
     --arg archive_path "${archive_path}" \
     --arg archive_sha256 "${archive_sha256}" \
     --arg checksum_path "${checksum_path}" \
-    --argjson compose_files "$(printf '%s\n' "${compose_files[@]}" | jq -R . | jq -s .)" \
+    --argjson compose_files "$(compose_files_json)" \
     --argjson included_standard_entries "$(printf '%s\n' "${included_standard_entries[@]}" | jq -R . | jq -s .)" \
     --argjson app_was_running "$([[ "${app_was_running}" == "1" ]] && echo true || echo false)" \
     --argjson app_stopped_for_backup "$([[ "${STOP_APP_DURING_BACKUP}" == "1" && "${app_was_running}" == "1" ]] && echo true || echo false)" \

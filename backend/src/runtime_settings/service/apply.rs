@@ -8,6 +8,7 @@ use super::super::store::persist_settings;
 use super::RuntimeSettingsService;
 
 pub(super) struct PersistAndApplyInput<'a> {
+    pub(super) previous: &'a RuntimeSettings,
     pub(super) validated: &'a RuntimeSettings,
     pub(super) storage_manager: &'a StorageManager,
 }
@@ -16,7 +17,6 @@ pub(super) async fn persist_and_apply(
     service: &RuntimeSettingsService,
     input: &PersistAndApplyInput<'_>,
 ) -> Result<RuntimeSettings, AppError> {
-    let previous = service.get_runtime_settings().await?;
     input
         .storage_manager
         .validate_runtime_settings(input.validated)
@@ -29,7 +29,7 @@ pub(super) async fn persist_and_apply(
         .await
     {
         let rollback_result =
-            rollback_after_apply_failure(service, &previous, input.storage_manager).await;
+            rollback_after_apply_failure(service, input.previous, input.storage_manager).await;
         return match rollback_result {
             Ok(()) => Err(apply_error),
             Err(rollback_error) => {

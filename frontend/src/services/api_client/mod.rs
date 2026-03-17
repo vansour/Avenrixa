@@ -6,7 +6,8 @@ use crate::types::errors::{AppError, Result};
 use futures::future::{LocalBoxFuture, Shared};
 use reqwest::header;
 use reqwest::{Client, Response};
-use std::sync::{Arc, Mutex};
+use std::rc::Rc;
+use std::sync::Mutex;
 
 fn serialize_json<T: serde::Serialize>(value: &T) -> Result<String> {
     serde_json::to_string(value)
@@ -42,7 +43,7 @@ fn extract_error_message(body: &str) -> Option<String> {
 pub struct ApiClient {
     client: Client,
     base_url: String,
-    refresh_coordinator: Arc<RefreshCoordinator>,
+    refresh_coordinator: Rc<RefreshCoordinator>,
 }
 
 impl ApiClient {
@@ -51,7 +52,7 @@ impl ApiClient {
         Self {
             client,
             base_url,
-            refresh_coordinator: Arc::new(RefreshCoordinator::default()),
+            refresh_coordinator: Rc::new(RefreshCoordinator::default()),
         }
     }
 
@@ -183,6 +184,7 @@ impl RefreshCoordinator {
 mod tests {
     use super::*;
     use futures::FutureExt;
+    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
 
@@ -216,8 +218,8 @@ mod tests {
 
         let (first_result, second_result) = tokio::join!(first, second);
 
-        assert_eq!(first_result.expect("first refresh should succeed"), true);
-        assert_eq!(second_result.expect("second refresh should succeed"), true);
+        assert!(first_result.expect("first refresh should succeed"));
+        assert!(second_result.expect("second refresh should succeed"));
         assert_eq!(executions.load(Ordering::SeqCst), 1);
     }
 

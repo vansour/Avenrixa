@@ -290,6 +290,7 @@ fn public_install_status_config(
     config.s3_bucket = None;
     config.s3_prefix = None;
     config.s3_force_path_style = false;
+    config.settings_version.clear();
 
     config
 }
@@ -338,6 +339,7 @@ mod tests {
         assert_eq!(config.s3_bucket, None);
         assert_eq!(config.s3_access_key, None);
         assert!(!config.s3_secret_key_set);
+        assert!(config.settings_version.is_empty());
     }
 
     #[test]
@@ -355,5 +357,6 @@ mod tests {
         assert_eq!(config.s3_bucket, None);
         assert_eq!(config.s3_access_key, None);
         assert!(!config.restart_required);
+        assert!(config.settings_version.is_empty());
     }
 }

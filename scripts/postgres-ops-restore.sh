@@ -97,8 +97,8 @@ if [[ -n "${pitr_target_kind}" ]]; then
     POSTGRES_WAL_REMOTE_URI="$(postgres_wal_remote_resolved_uri "${POSTGRES_WAL_REMOTE_URI}")"
   fi
 
-  POSTGRES_ENABLE_WAL_ARCHIVE=1
-  POSTGRES_WAL_ARCHIVE_HOST_DIR="${POSTGRES_RESTORE_WAL_ARCHIVE_DIR}"
+  export POSTGRES_ENABLE_WAL_ARCHIVE=1
+  export POSTGRES_WAL_ARCHIVE_HOST_DIR="${POSTGRES_RESTORE_WAL_ARCHIVE_DIR}"
   if [[ -n "${restore_data_archive_path}" ]]; then
     echo "PITR restore will not replay the manifest data snapshot; only PostgreSQL timeline recovery is applied." >&2
     data_restore_mode="skipped_for_pitr"
@@ -215,7 +215,7 @@ write_restore_result() {
       --arg physical_copy_back_log_path "${physical_copy_back_log_path}" \
       --arg pitr_recovery_config_log_path "${pitr_recovery_config_log_path}" \
       --arg compose_project_name "${COMPOSE_PROJECT_NAME}" \
-      --argjson compose_files "$(printf '%s\n' "${compose_files[@]}" | jq -R . | jq -s .)" \
+      --argjson compose_files "$(compose_files_json)" \
       --arg app_health_url "${APP_HEALTH_URL}" \
       --arg pgdata_path "$(postgres_service_pgdata)" \
       '{

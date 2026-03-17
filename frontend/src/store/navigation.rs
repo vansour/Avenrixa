@@ -1,6 +1,8 @@
 use dioxus::prelude::*;
 use std::cell::RefCell;
 use std::rc::Rc;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::{JsCast, closure::Closure};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DashboardPage {
@@ -29,6 +31,7 @@ impl DashboardPage {
         }
     }
 
+    #[cfg(any(target_arch = "wasm32", test))]
     fn from_slug(slug: &str) -> Option<Self> {
         match slug.trim().trim_matches('/') {
             "" | "upload" => Some(Self::Upload),
@@ -64,6 +67,7 @@ impl SettingsAnchor {
         }
     }
 
+    #[cfg(any(target_arch = "wasm32", test))]
     fn from_slug(slug: &str) -> Option<Self> {
         match slug.trim().to_ascii_lowercase().as_str() {
             "account" => Some(Self::Account),
@@ -90,15 +94,30 @@ pub struct NavigationStore {
     current_page: Rc<RefCell<Signal<DashboardPage>>>,
     settings_anchor: Rc<RefCell<Signal<Option<SettingsAnchor>>>>,
     base_path: String,
+    #[cfg(target_arch = "wasm32")]
+    _browser_binding: Rc<BrowserNavigationBinding>,
 }
 
 impl NavigationStore {
     pub fn new() -> Self {
         let snapshot = current_navigation_snapshot();
+        let current_page = Rc::new(RefCell::new(Signal::new(snapshot.page)));
+        let settings_anchor = Rc::new(RefCell::new(Signal::new(snapshot.settings_anchor)));
+        let base_path = snapshot.base_path;
+
+        #[cfg(target_arch = "wasm32")]
+        let browser_binding = bind_browser_navigation(
+            current_page.clone(),
+            settings_anchor.clone(),
+            base_path.clone(),
+        );
+
         Self {
-            current_page: Rc::new(RefCell::new(Signal::new(snapshot.page))),
-            settings_anchor: Rc::new(RefCell::new(Signal::new(snapshot.settings_anchor))),
-            base_path: snapshot.base_path,
+            current_page,
+            settings_anchor,
+            base_path,
+            #[cfg(target_arch = "wasm32")]
+            _browser_binding: browser_binding,
         }
     }
 
@@ -133,6 +152,23 @@ impl Default for NavigationStore {
     }
 }
 
+#[cfg(target_arch = "wasm32")]
+struct BrowserNavigationBinding {
+    callback: Closure<dyn FnMut(web_sys::Event)>,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl Drop for BrowserNavigationBinding {
+    fn drop(&mut self) {
+        if let Some(window) = web_sys::window() {
+            let _ = window.remove_event_listener_with_callback(
+                "popstate",
+                self.callback.as_ref().unchecked_ref(),
+            );
+        }
+    }
+}
+
 fn current_navigation_snapshot() -> NavigationSnapshot {
     #[cfg(target_arch = "wasm32")]
     {
@@ -151,6 +187,33 @@ fn current_navigation_snapshot() -> NavigationSnapshot {
     }
 }
 
+#[cfg(target_arch = "wasm32")]
+fn bind_browser_navigation(
+    current_page: Rc<RefCell<Signal<DashboardPage>>>,
+    settings_anchor: Rc<RefCell<Signal<Option<SettingsAnchor>>>>,
+    base_path: String,
+) -> Rc<BrowserNavigationBinding> {
+    let callback = Closure::wrap(Box::new(move |_event: web_sys::Event| {
+        let snapshot = current_navigation_snapshot();
+        if snapshot.base_path != base_path {
+            return;
+        }
+
+        current_page.borrow_mut().set(snapshot.page);
+        settings_anchor.borrow_mut().set(snapshot.settings_anchor);
+    }) as Box<dyn FnMut(web_sys::Event)>);
+
+    if let Some(window) = web_sys::window() {
+        let _ = window.add_event_listener_with_callback(
+            "popstate",
+            callback.as_ref().unchecked_ref(),
+        );
+    }
+
+    Rc::new(BrowserNavigationBinding { callback })
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
 fn parse_navigation_snapshot(pathname: &str, search: &str) -> NavigationSnapshot {
     let trimmed_path = pathname.trim().trim_end_matches('/');
     let mut segments = trimmed_path
@@ -188,10 +251,12 @@ fn parse_navigation_snapshot(pathname: &str, search: &str) -> NavigationSnapshot
     }
 }
 
+#[cfg(any(target_arch = "wasm32", test))]
 fn parse_settings_anchor(search: &str) -> Option<SettingsAnchor> {
     parse_search_param(search, "section").and_then(|value| SettingsAnchor::from_slug(&value))
 }
 
+#[cfg(any(target_arch = "wasm32", test))]
 fn parse_search_param(search: &str, key: &str) -> Option<String> {
     search
         .trim_start_matches('?')
@@ -209,6 +274,7 @@ fn parse_search_param(search: &str, key: &str) -> Option<String> {
         })
 }
 
+#[cfg(any(target_arch = "wasm32", test))]
 fn normalize_base_path(base_path: String) -> String {
     let trimmed = base_path.trim().trim_end_matches('/');
     if trimmed.is_empty() || trimmed == "/" {
@@ -220,6 +286,7 @@ fn normalize_base_path(base_path: String) -> String {
     }
 }
 
+#[cfg(any(target_arch = "wasm32", test))]
 fn build_navigation_url(
     base_path: &str,
     page: DashboardPage,
@@ -237,10 +304,10 @@ fn build_navigation_url(
         _ => format!("{}/{}", base_path, page.slug()),
     };
 
-    if page == DashboardPage::Settings {
-        if let Some(anchor) = settings_anchor {
-            return format!("{path}?section={}", anchor.slug());
-        }
+    if page == DashboardPage::Settings
+        && let Some(anchor) = settings_anchor
+    {
+        return format!("{path}?section={}", anchor.slug());
     }
 
     path

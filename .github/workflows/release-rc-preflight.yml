@@ -80,10 +80,12 @@ jobs:
           if [[ "${release_version}" == *-* ]]; then
             rolling_rc_image_ref="${image_repository}:rc"
           fi
-          echo "release_version=${release_version}" >> "${GITHUB_OUTPUT}"
-          echo "image_repository=${image_repository}" >> "${GITHUB_OUTPUT}"
-          echo "release_image_ref=${image_repository}:${release_version}" >> "${GITHUB_OUTPUT}"
-          echo "rolling_rc_image_ref=${rolling_rc_image_ref}" >> "${GITHUB_OUTPUT}"
+          {
+            echo "release_version=${release_version}"
+            echo "image_repository=${image_repository}"
+            echo "release_image_ref=${image_repository}:${release_version}"
+            echo "rolling_rc_image_ref=${rolling_rc_image_ref}"
+          } >> "${GITHUB_OUTPUT}"
 
       - name: Install system dependencies
         run: |
