@@ -794,7 +794,7 @@ dependencies = [
 
 [[package]]
 name = "backend"
-version = "0.1.2-rc.1"
+version = "0.1.3-dev.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2371,7 +2371,7 @@ dependencies = [
 
 [[package]]
 name = "frontend"
-version = "0.1.2-rc.1"
+version = "0.1.3-dev.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -5122,7 +5122,7 @@ dependencies = [
 
 [[package]]
 name = "shared-types"
-version = "0.1.2-rc.1"
+version = "0.1.3-dev.0"
 dependencies = [
  "chrono",
  "serde",
