@@ -11,7 +11,7 @@ pub(super) fn is_valid_backup_filename(filename: &str) -> bool {
     !filename.is_empty()
         && filename.len() <= 255
         && filename.starts_with("backup_")
-        && (filename.ends_with(".sql") || filename.ends_with(".mysql.sql"))
+        && filename.ends_with(".sql")
         && filename.bytes().all(|byte| {
             matches!(
                 byte,
