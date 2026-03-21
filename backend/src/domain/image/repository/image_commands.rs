@@ -2,7 +2,6 @@ use sqlx::QueryBuilder;
 use uuid::Uuid;
 
 use super::PostgresImageRepository;
-
 use crate::models::Image;
 
 impl PostgresImageRepository {
@@ -65,13 +64,30 @@ impl PostgresImageRepository {
         user_id: Uuid,
         image_ids: &[Uuid],
     ) -> Result<u64, sqlx::Error> {
-        let mut builder = QueryBuilder::new("DELETE FROM images WHERE user_id = $1");
-        builder.push_bind(user_id);
-        for image_id in image_ids {
-            builder.push("AND id = ");
-            builder.push_bind(image_id);
+        if image_ids.is_empty() {
+            return Ok(0);
         }
-        let result = builder.build().execute(&self.pool).await?;
-        Ok(result.rows_affected())
+
+        let placeholders: String = image_ids.iter().map(|_| "?").collect::<Vec<_>>();
+        let placeholders_str = placeholders.join(",");
+
+        sqlx::query(&format!(
+            "DELETE FROM images WHERE user_id = $1 AND id = ANY({})",
+            placeholders_str
+        ))
+        .bind(user_id)
+        .execute(&self.pool)
+        .await?;
+
+        let count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM images WHERE user_id = $1 AND id = ANY({})",
+            user_id,
+            image_ids.len() as i64
+        )
+        .fetch_one(&self.pool)
+        .await?
+        .unwrap_or(0);
+
+        Ok(count)
     }
 }
