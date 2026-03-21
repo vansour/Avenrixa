@@ -22,7 +22,7 @@ pub fn BootstrapDatabasePage(
     let mut error_message = use_signal(String::new);
     let mut success_message = use_signal(String::new);
     let database_target_label = "数据库连接 URL";
-    let database_target_placeholder = "postgresql://user:pass@host:5432/dbname";
+    let database_target_placeholder = "postgresql://user:pass@host:5432/dbname".to_string();
     let page_title = "当前实例启动时未检测到预设的 PostgreSQL 数据库连接。这个页面只是兜底引导：写入连接信息并重启服务后，再继续管理员安装。";
     let save_button_label = "保存数据库配置";
 
