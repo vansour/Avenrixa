@@ -2,8 +2,7 @@ pub use shared_types::admin::{
     AdminSettingsConfig, AdminUserSummary, AuditLog, AuditLogResponse, ComponentStatus,
     HealthMetrics, HealthStatus, InstallBootstrapRequest, InstallBootstrapResponse,
     InstallStatusResponse, Setting, StorageDirectoryBrowseResponse, StorageDirectoryEntry,
-    SystemStats, TestS3StorageConfigRequest, TestS3StorageConfigResponse,
-    UpdateAdminSettingsConfigRequest, UpdateSettingRequest,
+    SystemStats, UpdateAdminSettingsConfigRequest, UpdateSettingRequest,
 };
 pub use shared_types::auth::{
     EmailVerificationConfirmRequest, LoginRequest, PasswordResetConfirmRequest,
@@ -22,7 +21,7 @@ pub use shared_types::bootstrap::{
 };
 pub use shared_types::common::{HealthState, StorageBackendKind, UserRole};
 pub use shared_types::image::{DeleteRequest, ImageResponse, SetExpiryRequest};
-pub use shared_types::pagination::{Paginated, PaginationParams};
+pub use shared_types::pagination::{CursorPaginated, CursorPaginationParams, PaginationParams};
 
 #[cfg(test)]
 mod tests {
@@ -31,27 +30,26 @@ mod tests {
     #[test]
     fn backup_semantics_deserializes_legacy_string_payloads() {
         let semantics: BackupSemantics = serde_json::from_value(serde_json::json!({
-            "database_family": "sqlite",
-            "backup_kind": "sqlite-database-snapshot",
+            "database_family": "mysql",
+            "backup_kind": "mysql-logical-dump",
             "backup_scope": "database-only",
-            "restore_mode": "ui-restart-file-swap",
+            "restore_mode": "ops-tooling-only",
             "artifact_layout": "single-file-plus-manifest",
-            "ui_restore_supported": true
+            "ui_restore_supported": false
         }))
         .expect("legacy string payload should deserialize");
 
-        assert_eq!(semantics.database_family, BackupDatabaseFamily::Sqlite);
-        assert_eq!(semantics.backup_kind, BackupKind::SqliteDatabaseSnapshot);
+        assert_eq!(semantics.database_family, BackupDatabaseFamily::MySql);
+        assert_eq!(semantics.backup_kind, BackupKind::MySqlLogicalDump);
         assert_eq!(semantics.backup_scope, BackupScope::DatabaseOnly);
-        assert_eq!(semantics.restore_mode, RestoreMode::UiRestartFileSwap);
+        assert_eq!(semantics.restore_mode, RestoreMode::OpsToolingOnly);
         assert_eq!(
             semantics.artifact_layout,
             ArtifactLayout::SingleFilePlusManifest
         );
-        assert!(semantics.supports_restore());
-        assert!(semantics.is_sqlite_database_snapshot());
-        assert_eq!(semantics.kind_label(), "SQLite 数据库快照");
-        assert_eq!(semantics.restore_mode_label(), "重启前文件替换恢复");
+        assert!(!semantics.supports_restore());
+        assert_eq!(semantics.kind_label(), "MySQL / MariaDB 逻辑导出");
+        assert_eq!(semantics.restore_mode_label(), "仅运维脚本恢复");
     }
 
     #[test]
@@ -72,7 +70,6 @@ mod tests {
         assert_eq!(semantics.restore_mode, RestoreMode::Unknown);
         assert_eq!(semantics.artifact_layout, ArtifactLayout::Unknown);
         assert!(!semantics.supports_restore());
-        assert!(!semantics.is_sqlite_database_snapshot());
         assert_eq!(semantics.kind_label(), "数据库");
         assert_eq!(semantics.restore_mode_label(), "恢复方式未知");
     }
@@ -81,15 +78,15 @@ mod tests {
     fn restore_result_deserializes_legacy_string_enums() {
         let result: BackupRestoreResult = serde_json::from_value(serde_json::json!({
             "status": "started",
-            "filename": "backup_demo.sqlite3",
-            "database_kind": "sqlite",
+            "filename": "backup_demo.mysql.sql",
+            "database_kind": "mysql",
             "semantics": {
-                "database_family": "sqlite",
-                "backup_kind": "sqlite-database-snapshot",
+                "database_family": "mysql",
+                "backup_kind": "mysql-logical-dump",
                 "backup_scope": "database-only",
-                "restore_mode": "ui-restart-file-swap",
+                "restore_mode": "ops-tooling-only",
                 "artifact_layout": "single-file-plus-manifest",
-                "ui_restore_supported": true
+                "ui_restore_supported": false
             },
             "message": "running",
             "scheduled_at": "2026-03-15T00:00:00Z",
@@ -102,8 +99,8 @@ mod tests {
         assert_eq!(result.status, BackupRestoreStatus::Started);
         assert_eq!(result.status.label(), "执行中");
         assert_eq!(result.status.surface_class(), "is-warning");
-        assert_eq!(result.database_kind, BackupDatabaseFamily::Sqlite);
-        assert_eq!(result.database_kind.label(), "SQLite");
+        assert_eq!(result.database_kind, BackupDatabaseFamily::MySql);
+        assert_eq!(result.database_kind.label(), "MySQL / MariaDB");
     }
 
     #[test]
@@ -153,7 +150,6 @@ mod tests {
 
         assert_eq!(strategy, BackupObjectRollbackStrategy::Unknown);
         assert!(!strategy.is_local_directory_snapshot());
-        assert!(!strategy.is_s3_versioned_rollback_anchor());
     }
 
     #[test]
@@ -215,7 +211,7 @@ mod tests {
     fn admin_settings_deserializes_storage_backend_enum() {
         let config: AdminSettingsConfig = serde_json::from_value(serde_json::json!({
             "site_name": "Avenrixa",
-            "storage_backend": "s3",
+            "storage_backend": "local",
             "local_storage_path": "/data/images",
             "mail_enabled": false,
             "mail_smtp_host": "",
@@ -225,20 +221,12 @@ mod tests {
             "mail_from_email": "",
             "mail_from_name": "",
             "mail_link_base_url": "",
-            "s3_endpoint": null,
-            "s3_region": null,
-            "s3_bucket": null,
-            "s3_prefix": null,
-            "s3_access_key": null,
-            "s3_secret_key_set": false,
-            "s3_force_path_style": true,
             "restart_required": false
         }))
-        .expect("legacy storage backend should deserialize");
+        .expect("local storage backend should deserialize");
 
-        assert_eq!(config.storage_backend, StorageBackendKind::S3);
-        assert!(config.storage_backend.is_s3());
-        assert_eq!(config.storage_backend.label(), "对象存储");
+        assert_eq!(config.storage_backend, StorageBackendKind::Local);
+        assert_eq!(config.storage_backend.label(), "本地目录");
     }
 
     #[test]
@@ -246,7 +234,6 @@ mod tests {
         let backend = StorageBackendKind::parse("ftp");
 
         assert_eq!(backend, StorageBackendKind::Unknown);
-        assert!(!backend.is_s3());
         assert_eq!(backend.label(), "未知后端");
     }
 }

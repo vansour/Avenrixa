@@ -178,7 +178,7 @@ manifest_payload="$(
     --arg restore_point_name "${restore_point_name}" \
     --arg restore_point_lsn "${restore_point_lsn}" \
     --arg restore_point_created_at "${restore_point_created_at}" \
-    --argjson compose_files "$(printf '%s\n' "${compose_files[@]}" | jq -R . | jq -s .)" \
+    --argjson compose_files "$(compose_files_json)" \
     --argjson backup_size_bytes "${backup_size_bytes}" \
     --argjson wal_archive_file_count "${wal_archive_file_count}" \
     --argjson backup_manifest_exists "$([[ -f "${backup_manifest_path}" ]] && echo true || echo false)" \

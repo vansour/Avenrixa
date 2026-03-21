@@ -52,6 +52,8 @@ pub enum AppError {
     InvalidPagination,
     #[error("{0}")]
     ValidationError(String),
+    #[error("{0}")]
+    Conflict(String),
     #[error("存储后端配置无效: {0}")]
     StorageBackendMisconfigured(String),
     #[error("数据库操作失败")]
@@ -91,6 +93,7 @@ impl AppError {
             Self::RateLimitExceeded(_) => "RATE_LIMIT_EXCEEDED",
             Self::InvalidPagination => "INVALID_PAGINATION",
             Self::ValidationError(_) => "VALIDATION_ERROR",
+            Self::Conflict(_) => "CONFLICT",
             Self::StorageBackendMisconfigured(_) => "STORAGE_BACKEND_MISCONFIGURED",
             Self::DatabaseError(_) => "DATABASE_ERROR",
             Self::CacheError(_) => "CACHE_ERROR",
@@ -125,6 +128,7 @@ impl AppError {
                 | Self::RateLimitExceeded(_)
                 | Self::InvalidPagination
                 | Self::ValidationError(_)
+                | Self::Conflict(_)
         )
     }
 
@@ -140,7 +144,7 @@ impl From<StatusCode> for AppError {
             StatusCode::FORBIDDEN => AppError::Forbidden,
             StatusCode::NOT_FOUND => AppError::ImageNotFound,
             StatusCode::BAD_REQUEST => AppError::ValidationError("请求参数错误".to_string()),
-            StatusCode::CONFLICT => AppError::EmailExists,
+            StatusCode::CONFLICT => AppError::Conflict("请求冲突".to_string()),
             StatusCode::SERVICE_UNAVAILABLE => AppError::AppNotInstalled,
             _ => AppError::Internal(anyhow::anyhow!("HTTP error: {}", status)),
         }

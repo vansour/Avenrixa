@@ -46,8 +46,8 @@ compose_variant_uses_mariadb() {
 
 compose_variant_default_data_dir() {
   case "${COMPOSE_VARIANT}" in
-    sqlite)
-      printf '%s/data-sqlite' "${ROOT_DIR}"
+    postgres)
+      printf '%s/data' "${ROOT_DIR}"
       ;;
     mariadb|mariadb-ops)
       printf '%s/data-mariadb' "${ROOT_DIR}"
@@ -56,7 +56,8 @@ compose_variant_default_data_dir() {
       printf '%s/data-mysql' "${ROOT_DIR}"
       ;;
     *)
-      printf '%s/data' "${ROOT_DIR}"
+      echo "Unsupported COMPOSE_VARIANT: ${COMPOSE_VARIANT}" >&2
+      return 1
       ;;
   esac
 }
@@ -65,9 +66,6 @@ compose_variant_default_database_url() {
   case "${COMPOSE_VARIANT}" in
     postgres)
       printf 'postgresql://user:pass@postgres:5432/image'
-      ;;
-    sqlite)
-      printf 'sqlite:///data/sqlite/app.db'
       ;;
     mysql)
       printf 'mysql://user:pass@mysql:3306/image'
@@ -163,7 +161,7 @@ compose_host_path_relative_to_dir() {
 
   case "${resolved_target}" in
     "${resolved_base_dir}"/*)
-      printf '%s' "${resolved_target#${resolved_base_dir}/}"
+      printf '%s' "${resolved_target#"${resolved_base_dir}"/}"
       ;;
     *)
       echo "Path ${resolved_target} is not within base dir ${resolved_base_dir}" >&2
@@ -308,6 +306,10 @@ yaml_double_quote() {
 compose_runtime_file="${COMPOSE_RUNTIME_FILE:-$(compose_runtime_file_path)}"
 compose_files=("compose.yml")
 
+compose_files_json() {
+  printf '%s\n' "${compose_files[@]}" | jq -R . | jq -s .
+}
+
 compose_runtime_generate() {
   local app_container_name
   local app_data_dir
@@ -406,12 +408,6 @@ EOF
 )
       database_service_block+=$'\n'
       ;;
-    sqlite)
-      app_container_name="avenrixa-sqlite-app"
-      database_kind="sqlite"
-      app_depends_on=""
-      volumes_block=""
-      ;;
     mysql)
       app_container_name="avenrixa-mysql-app"
       database_kind="mysql"
@@ -501,7 +497,7 @@ EOF
   if [[ "${COMPOSE_ENABLE_MAILPIT}" == "1" ]]; then
     mailpit_service_block=$(cat <<EOF
   mailpit:
-    container_name: avenrixa-sqlite-mailpit
+    container_name: avenrixa-mailpit
     image: axllent/mailpit:latest
     ports:
       - "${MAILPIT_HTTP_PORT}:8025"

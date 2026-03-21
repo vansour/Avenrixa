@@ -92,10 +92,7 @@ pub fn ApiPage() -> Element {
     let api_base = api_base_label();
     let login_endpoint = format!("{}/api/v1/auth/login", api_base.trim_end_matches('/'));
     let upload_endpoint = format!("{}/api/v1/upload", api_base.trim_end_matches('/'));
-    let images_endpoint = format!(
-        "{}/api/v1/images?page=1&page_size=20",
-        api_base.trim_end_matches('/')
-    );
+    let images_endpoint = format!("{}/api/v1/images?limit=20", api_base.trim_end_matches('/'));
     let media_endpoint = format!("{}/images/{{filename}}", api_base.trim_end_matches('/'));
 
     let login_curl = format!(
@@ -231,8 +228,8 @@ pub fn ApiPage() -> Element {
                         div { class: "api-endpoint-list",
                             ApiEndpointRow {
                                 method: "GET",
-                                path: "/api/v1/images?page=1&page_size=20",
-                                detail: "按时间倒序返回列表。"
+                                path: "/api/v1/images?limit=20&cursor={{opaque_cursor}}",
+                                detail: "按时间倒序返回游标分页列表。"
                             }
                             ApiEndpointRow {
                                 method: "GET",

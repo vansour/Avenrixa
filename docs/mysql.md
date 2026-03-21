@@ -432,7 +432,7 @@ MYSQL_RESTORE_MANIFEST_PATH=./data-mariadb/backup/mysql_last_backup_manifest.jso
 
 原因很直接：
 
-- SQLite 恢复是单文件替换模型
+- 当前产品不再为任何数据库家族承诺页面内“一键恢复”
 - MySQL 是服务型数据库，恢复需要停机窗口、导入策略和失败回滚策略
 - 物理备份和物理恢复需要成对设计，所以页面内“一键恢复”不适合作为默认入口
 

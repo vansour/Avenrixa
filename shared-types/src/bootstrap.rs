@@ -4,8 +4,6 @@ use serde::{Deserialize, Serialize};
 #[serde(from = "String", into = "String")]
 pub enum BootstrapDatabaseKind {
     Postgres,
-    MySql,
-    Sqlite,
     Unknown,
 }
 
@@ -13,8 +11,6 @@ impl BootstrapDatabaseKind {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Postgres => "postgresql",
-            Self::MySql => "mysql",
-            Self::Sqlite => "sqlite",
             Self::Unknown => "unknown",
         }
     }
@@ -22,8 +18,6 @@ impl BootstrapDatabaseKind {
     pub fn parse(value: &str) -> Self {
         match value.trim().to_ascii_lowercase().as_str() {
             "postgresql" | "postgres" => Self::Postgres,
-            "mysql" | "mariadb" => Self::MySql,
-            "sqlite" => Self::Sqlite,
             _ => Self::Unknown,
         }
     }
@@ -31,8 +25,6 @@ impl BootstrapDatabaseKind {
     pub fn label(self) -> &'static str {
         match self {
             Self::Postgres => "PostgreSQL",
-            Self::MySql => "MySQL / MariaDB",
-            Self::Sqlite => "SQLite",
             Self::Unknown => "未识别数据库",
         }
     }
@@ -63,7 +55,7 @@ pub struct BootstrapStatusResponse {
     pub runtime_error: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct UpdateBootstrapDatabaseConfigRequest {
     pub database_kind: BootstrapDatabaseKind,
     pub database_url: String,

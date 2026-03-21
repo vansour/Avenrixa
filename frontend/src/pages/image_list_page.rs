@@ -2,7 +2,7 @@ use crate::app_context::{use_auth_store, use_image_service, use_image_store, use
 use crate::auth_session::{auth_session_expired_message, handle_auth_session_error};
 use crate::components::{ImageGrid, Loading};
 use crate::store::ImageCollectionKind;
-use crate::types::api::PaginationParams;
+use crate::types::api::CursorPaginationParams;
 use crate::types::models::ImageItem;
 use dioxus::prelude::*;
 
@@ -40,11 +40,11 @@ pub fn ImageListPage() -> Element {
     let kind = ImageCollectionKind::Active;
     let state = image_store.collection(kind);
     let request_key = (
-        state.current_page.max(1),
+        state.current_cursor.clone(),
         state.page_size.clamp(1, 100),
         state.reload_token,
     );
-    let mut last_request_key = use_signal(|| None::<(u32, u32, u64)>);
+    let mut last_request_key = use_signal(|| None::<(Option<String>, u32, u64)>);
 
     use_effect({
         let auth_store = auth_store.clone();
@@ -52,31 +52,32 @@ pub fn ImageListPage() -> Element {
         let image_store = image_store.clone();
         let toast_store = toast_store.clone();
         move || {
-            if last_request_key() == Some(request_key) {
+            if last_request_key() == Some(request_key.clone()) {
                 return;
             }
 
-            last_request_key.set(Some(request_key));
+            last_request_key.set(Some(request_key.clone()));
 
             let auth_store = auth_store.clone();
             let image_service = image_service.clone();
             let image_store = image_store.clone();
             let toast_store = toast_store.clone();
-            let page = request_key.0 as i32;
+            let cursor = request_key.0.clone();
             let size = request_key.1 as i32;
+            let page = image_store.collection(kind).current_page;
             spawn(async move {
                 image_store.set_loading(kind, true);
                 image_store.clear_error(kind);
 
-                let params = PaginationParams {
-                    page: Some(page),
-                    page_size: Some(size),
+                let params = CursorPaginationParams {
+                    cursor,
+                    limit: Some(size),
                 };
 
                 match image_service.get_images(params).await {
                     Ok(result) => {
-                        if result.data.is_empty() && page > 1 && result.total > 0 {
-                            image_store.set_page(kind, (page - 1) as u32);
+                        if result.data.is_empty() && page > 1 {
+                            image_store.go_to_previous_page(kind);
                             image_store.set_loading(kind, false);
                             return;
                         }
@@ -108,7 +109,7 @@ pub fn ImageListPage() -> Element {
         if state.is_loading || state.is_processing || state.current_page <= 1 {
             return;
         }
-        image_store_for_prev_page.set_page(kind, state.current_page - 1);
+        image_store_for_prev_page.go_to_previous_page(kind);
     };
 
     let image_store_for_next_page = image_store.clone();
@@ -117,7 +118,7 @@ pub fn ImageListPage() -> Element {
         if state.is_loading || state.is_processing || !state.has_more {
             return;
         }
-        image_store_for_next_page.set_page(kind, state.current_page + 1);
+        image_store_for_next_page.go_to_next_page(kind);
     };
 
     let image_store_for_toggle_select = image_store.clone();
@@ -191,7 +192,7 @@ pub fn ImageListPage() -> Element {
             let state = image_store_for_page_size.collection(kind);
             if normalized_size != state.page_size {
                 image_store_for_page_size.set_page_size(kind, normalized_size);
-                image_store_for_page_size.set_page(kind, 1);
+                image_store_for_page_size.reset_pagination(kind);
                 image_store_for_page_size.clear_selection(kind);
             }
         }
@@ -278,8 +279,8 @@ pub fn ImageListPage() -> Element {
                 }
 
                 div { class: "image-hero-stats",
-                    span { class: "stat-pill", "总计 {state.total_items} 张" }
                     span { class: "stat-pill", "当前第 {state.current_page} 页" }
+                    span { class: "stat-pill", "本页 {state.images.len()} 张" }
                     span { class: "stat-pill", "每页 {state.page_size} 张" }
                     if selected_count > 0 {
                         span { class: "stat-pill stat-pill-active", "已选 {selected_count} 张" }

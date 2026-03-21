@@ -1,13 +1,12 @@
 use super::*;
 use crate::config::Config;
-use crate::db::{DatabasePool, run_migrations};
+use crate::db::DatabasePool;
 use crate::domain::image::mock_repository::MockImageRepository;
 use crate::image_processor::ImageProcessor;
-use crate::models::ImageStatus;
+use crate::models::{ImageStatus, MediaBlob};
 use crate::runtime_settings::{RuntimeSettings, StorageBackend};
 use crate::storage_backend::StorageManager;
 use async_trait::async_trait;
-use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use std::sync::Arc;
 use tempfile::TempDir;
 
@@ -29,13 +28,6 @@ fn sample_runtime_settings(local_storage_path: String) -> RuntimeSettings {
         mail_from_email: "noreply@example.com".to_string(),
         mail_from_name: "Avenrixa".to_string(),
         mail_link_base_url: "https://img.example.com".to_string(),
-        s3_endpoint: None,
-        s3_region: None,
-        s3_bucket: None,
-        s3_prefix: None,
-        s3_access_key: None,
-        s3_secret_key: None,
-        s3_force_path_style: true,
     }
 }
 
@@ -72,52 +64,6 @@ async fn setup_service_with_repository<I: ImageRepository>(
 async fn setup_service() -> TestServiceContext<MockImageRepository> {
     let pool = sqlx::PgPool::connect_lazy("postgres://localhost/test").unwrap();
     setup_service_with_repository(DatabasePool::Postgres(pool), MockImageRepository::new()).await
-}
-
-async fn setup_sqlite_service<I: ImageRepository>(
-    image_repository: I,
-) -> (TestServiceContext<I>, sqlx::SqlitePool) {
-    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
-    let database_path = temp_dir.path().join("image-domain-service.db");
-    let pool = SqlitePoolOptions::new()
-        .max_connections(1)
-        .connect_with(
-            SqliteConnectOptions::new()
-                .filename(&database_path)
-                .create_if_missing(true)
-                .foreign_keys(true),
-        )
-        .await
-        .expect("sqlite pool should be created");
-    let database = DatabasePool::Sqlite(pool.clone());
-    run_migrations(&database)
-        .await
-        .expect("sqlite migrations should succeed");
-
-    let mut config = Config::default();
-    config.storage.enable_file_check = false;
-    let image_processor = ImageProcessor::new(1920, 1080, 80);
-    let cache = None;
-    let local_storage_path = temp_dir.path().join("images");
-    config.storage.path = local_storage_path.to_string_lossy().into_owned();
-    let storage_manager = Arc::new(StorageManager::new(sample_runtime_settings(
-        config.storage.path.clone(),
-    )));
-    let dependencies = ImageDomainServiceDependencies::new(
-        database,
-        cache,
-        config,
-        image_processor,
-        storage_manager,
-    );
-
-    (
-        TestServiceContext {
-            service: ImageDomainService::new(dependencies, image_repository),
-            _temp_dir: temp_dir,
-        },
-        pool,
-    )
 }
 
 async fn storage_entry_count<I: ImageRepository>(service: &ImageDomainService<I>) -> usize {
@@ -174,14 +120,15 @@ impl ImageRepository for FaultyImageRepository {
         self.inner.find_image_by_id(id).await
     }
 
-    async fn find_images_by_user_paginated(
+    async fn find_images_by_user_after_cursor(
         &self,
         user_id: Uuid,
         limit: i32,
-        offset: i32,
+        cursor_created_at: Option<chrono::DateTime<Utc>>,
+        cursor_id: Option<Uuid>,
     ) -> Result<Vec<Image>, sqlx::Error> {
         self.inner
-            .find_images_by_user_paginated(user_id, limit, offset)
+            .find_images_by_user_after_cursor(user_id, limit, cursor_created_at, cursor_id)
             .await
     }
 
@@ -216,26 +163,6 @@ impl ImageRepository for FaultyImageRepository {
             .await
     }
 
-    async fn find_filenames_still_referenced_excluding_ids(
-        &self,
-        filenames: &[String],
-        excluded_ids: &[Uuid],
-    ) -> Result<Vec<String>, sqlx::Error> {
-        self.inner
-            .find_filenames_still_referenced_excluding_ids(filenames, excluded_ids)
-            .await
-    }
-
-    async fn find_media_keys_still_referenced_excluding_ids(
-        &self,
-        media_keys: &[String],
-        excluded_ids: &[Uuid],
-    ) -> Result<Vec<String>, sqlx::Error> {
-        self.inner
-            .find_media_keys_still_referenced_excluding_ids(media_keys, excluded_ids)
-            .await
-    }
-
     async fn hard_delete_images_by_user(
         &self,
         user_id: Uuid,
@@ -259,6 +186,39 @@ impl ImageRepository for FaultyImageRepository {
 
     async fn find_image_by_hash_global(&self, hash: &str) -> Result<Option<Image>, sqlx::Error> {
         self.inner.find_image_by_hash_global(hash).await
+    }
+
+    async fn upsert_media_blob(
+        &self,
+        storage_key: &str,
+        media_kind: &str,
+        content_hash: Option<&str>,
+    ) -> Result<MediaBlob, sqlx::Error> {
+        self.inner
+            .upsert_media_blob(storage_key, media_kind, content_hash)
+            .await
+    }
+
+    async fn find_media_blobs_by_keys(
+        &self,
+        storage_keys: &[String],
+    ) -> Result<Vec<MediaBlob>, sqlx::Error> {
+        self.inner.find_media_blobs_by_keys(storage_keys).await
+    }
+
+    async fn adjust_media_blob_ref_counts(
+        &self,
+        adjustments: &[(String, i64)],
+    ) -> Result<(), sqlx::Error> {
+        self.inner.adjust_media_blob_ref_counts(adjustments).await
+    }
+
+    async fn set_media_blob_status(
+        &self,
+        storage_keys: &[String],
+        status: &str,
+    ) -> Result<(), sqlx::Error> {
+        self.inner.set_media_blob_status(storage_keys, status).await
     }
 
     async fn find_image_by_filename(
@@ -437,7 +397,7 @@ async fn test_list_images_ordered_by_created_at_desc() {
     service.image_repository.create_image(&older).await.unwrap();
     service.image_repository.create_image(&newer).await.unwrap();
 
-    let page = service.get_images(user_id, 1, 20).await.unwrap();
+    let page = service.get_images(user_id, None, 20).await.unwrap();
 
     assert_eq!(page.data.len(), 2);
     assert_eq!(page.data[0].id, newer.id);
@@ -475,10 +435,67 @@ async fn test_list_images_ignores_non_active_status() {
         .await
         .unwrap();
 
-    let page = service.get_images(user_id, 1, 20).await.unwrap();
+    let page = service.get_images(user_id, None, 20).await.unwrap();
 
     assert_eq!(page.data.len(), 1);
     assert_eq!(page.data[0].id, visible.id);
+}
+
+#[tokio::test]
+async fn test_list_images_uses_cursor_pagination() {
+    let service = setup_service().await.service;
+    let user_id = Uuid::new_v4();
+    let newest = build_image(
+        Uuid::new_v4(),
+        user_id,
+        "newest.jpg",
+        &valid_hash(80),
+        Utc::now(),
+    );
+    let middle = build_image(
+        Uuid::new_v4(),
+        user_id,
+        "middle.jpg",
+        &valid_hash(81),
+        Utc::now() - chrono::Duration::minutes(1),
+    );
+    let oldest = build_image(
+        Uuid::new_v4(),
+        user_id,
+        "oldest.jpg",
+        &valid_hash(82),
+        Utc::now() - chrono::Duration::minutes(2),
+    );
+
+    service
+        .image_repository
+        .create_image(&oldest)
+        .await
+        .unwrap();
+    service
+        .image_repository
+        .create_image(&middle)
+        .await
+        .unwrap();
+    service
+        .image_repository
+        .create_image(&newest)
+        .await
+        .unwrap();
+
+    let first_page = service.get_images(user_id, None, 2).await.unwrap();
+    assert_eq!(first_page.data.len(), 2);
+    assert_eq!(first_page.data[0].id, newest.id);
+    assert_eq!(first_page.data[1].id, middle.id);
+    assert!(first_page.has_next);
+
+    let second_page = service
+        .get_images(user_id, first_page.next_cursor.as_deref(), 2)
+        .await
+        .unwrap();
+    assert_eq!(second_page.data.len(), 1);
+    assert_eq!(second_page.data[0].id, oldest.id);
+    assert!(!second_page.has_next);
 }
 
 #[tokio::test]
@@ -510,8 +527,9 @@ async fn test_bulk_delete_removes_images_from_active_list() {
         .await
         .unwrap();
 
-    let active_images = service.get_images(user_id, 1, 20).await.unwrap();
-    assert_eq!(active_images.total, 0);
+    let active_images = service.get_images(user_id, None, 20).await.unwrap();
+    assert!(active_images.data.is_empty());
+    assert!(!active_images.has_next);
 }
 
 #[tokio::test]
@@ -779,45 +797,4 @@ async fn test_delete_keeps_storage_when_repository_delete_fails() {
             .expect("file existence check should succeed"),
         "physical object must remain when metadata delete fails"
     );
-}
-
-#[tokio::test]
-async fn test_delete_enqueues_storage_cleanup_job_when_physical_delete_fails() {
-    let (context, pool) = setup_sqlite_service(MockImageRepository::new()).await;
-    let service = &context.service;
-    let user_id = Uuid::new_v4();
-    let image = build_image(
-        Uuid::new_v4(),
-        user_id,
-        "queued-delete.jpg",
-        &valid_hash(12),
-        Utc::now(),
-    );
-    let file_path = std::path::Path::new(&service.config.storage.path).join(&image.filename);
-
-    service
-        .image_repository
-        .create_image(&image)
-        .await
-        .expect("image should exist before delete");
-    tokio::fs::create_dir_all(&file_path)
-        .await
-        .expect("directory placeholder should force remove_file failure");
-
-    service
-        .delete_images(&[image.id], user_id)
-        .await
-        .expect("metadata delete should succeed and queue cleanup");
-
-    let queued_jobs = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*)
-         FROM storage_cleanup_jobs
-         WHERE file_key = ?1",
-    )
-    .bind(&image.filename)
-    .fetch_one(&pool)
-    .await
-    .expect("cleanup queue should be queryable");
-
-    assert_eq!(queued_jobs, 1);
 }

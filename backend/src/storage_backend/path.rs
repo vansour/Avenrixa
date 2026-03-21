@@ -23,13 +23,6 @@ pub(super) fn join_local_path(base: &str, file_key: &str) -> Result<PathBuf, App
     Ok(path)
 }
 
-pub(super) fn build_s3_object_key(prefix: Option<&str>, file_key: &str) -> String {
-    match prefix {
-        Some(prefix) if !prefix.is_empty() => format!("{}/{}", prefix.trim_matches('/'), file_key),
-        _ => file_key.to_string(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -46,14 +39,5 @@ mod tests {
             Err(AppError::ValidationError(message))
                 if message.contains("文件键无效")
         ));
-    }
-
-    #[test]
-    fn build_s3_object_key_normalizes_prefix() {
-        assert_eq!(
-            build_s3_object_key(Some("/images/2026/"), "demo.png"),
-            "images/2026/demo.png"
-        );
-        assert_eq!(build_s3_object_key(None, "demo.png"), "demo.png");
     }
 }

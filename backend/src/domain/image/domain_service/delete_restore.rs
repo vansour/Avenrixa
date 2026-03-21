@@ -1,6 +1,4 @@
 use super::*;
-use crate::storage_backend::enqueue_storage_cleanup_jobs;
-use tracing::warn;
 
 impl<I: ImageRepository> ImageDomainService<I> {
     /// 永久删除图片
@@ -55,61 +53,15 @@ impl<I: ImageRepository> ImageDomainService<I> {
             .cloned()
             .chain(unique_thumbnail_keys.iter().cloned())
             .collect();
-        let referenced_media_keys: HashSet<String> = self
-            .image_repository
-            .find_media_keys_still_referenced_excluding_ids(&all_media_keys, &[])
-            .await?
-            .into_iter()
+        let media_ref_decrements: Vec<(String, i64)> = delete_targets
+            .iter()
+            .flat_map(|(_, filename, thumbnail, _)| {
+                std::iter::once((filename.clone(), -1))
+                    .chain(thumbnail.iter().cloned().map(|file_key| (file_key, -1)))
+            })
             .collect();
-        let physical_delete_targets: Vec<String> = all_media_keys
-            .into_iter()
-            .filter(|file_key| !referenced_media_keys.contains(file_key))
-            .collect();
-
-        if !physical_delete_targets.is_empty() {
-            let delete_concurrency = self.config.storage.file_check_concurrent_threshold.max(1);
-            let storage_manager = self.storage_manager.clone();
-            let storage_snapshot = storage_manager.active_settings().storage_settings();
-            let failed_targets = if physical_delete_targets.len() <= delete_concurrency {
-                let mut failed_targets = Vec::new();
-                for filename in &physical_delete_targets {
-                    if let Err(error) = storage_manager.delete(filename).await {
-                        warn!(
-                            "physical image delete failed for {}: {}. queueing retry",
-                            filename, error
-                        );
-                        failed_targets.push(filename.clone());
-                    }
-                }
-                failed_targets
-            } else {
-                stream::iter(physical_delete_targets.iter().cloned())
-                    .map(|filename| {
-                        let storage_manager = storage_manager.clone();
-                        async move {
-                            match storage_manager.delete(&filename).await {
-                                Ok(()) => None,
-                                Err(error) => {
-                                    warn!(
-                                        "physical image delete failed for {}: {}. queueing retry",
-                                        filename, error
-                                    );
-                                    Some(filename)
-                                }
-                            }
-                        }
-                    })
-                    .buffer_unordered(delete_concurrency)
-                    .filter_map(|item| async move { item })
-                    .collect::<Vec<_>>()
-                    .await
-            };
-
-            if !failed_targets.is_empty() {
-                enqueue_storage_cleanup_jobs(&self.database, &storage_snapshot, &failed_targets)
-                    .await?;
-            }
-        }
+        self.adjust_media_blob_refs(&media_ref_decrements).await?;
+        self.cleanup_zero_ref_media_blobs(&all_media_keys).await?;
 
         self.invalidate_hash_cache_for_user(user_id, &affected_hashes)
             .await?;

@@ -16,17 +16,12 @@ mod router;
 mod routes;
 mod runtime_settings;
 mod server;
-mod sqlite_restore;
 mod storage_backend;
 
 use bootstrap::{BootstrapAppState, BootstrapConfigStore, build_app_state, init_logging};
 use config::Config;
 use router::{create_app_with_middleware, create_bootstrap_app};
 use server::{bind_listener, spawn_cleanup_tasks, start_server};
-use sqlite_restore::{
-    StartupRestoreOutcome, apply_pending_restore_if_any, finalize_restore_rollback,
-    finalize_restore_success, record_startup_restore_failure, rollback_failed_restore,
-};
 use tower_http::trace::TraceLayer;
 use tracing::{error, info};
 
@@ -56,20 +51,8 @@ async fn build_application(
         error!("Configuration validation failed: {}", validation_error);
         return Err(validation_error.into());
     }
-
-    let startup_restore = apply_pending_restore_if_any(&runtime_config).await?;
-
     match build_app_state(runtime_config.clone()).await {
         Ok(state) => {
-            match &startup_restore {
-                StartupRestoreOutcome::None => {}
-                StartupRestoreOutcome::StartupFailure(result) => {
-                    let _ = record_startup_restore_failure(&state, result).await;
-                }
-                StartupRestoreOutcome::Applied(context) => {
-                    let _ = finalize_restore_success(&state, context).await;
-                }
-            }
             spawn_cleanup_tasks(&state);
             Ok(create_app_with_middleware(
                 state.clone(),
@@ -79,42 +62,6 @@ async fn build_application(
             .layer(TraceLayer::new_for_http()))
         }
         Err(runtime_error) => {
-            if let StartupRestoreOutcome::Applied(context) = &startup_restore {
-                match rollback_failed_restore(&runtime_config, context, &runtime_error).await {
-                    Ok(rollback_result) => match build_app_state(runtime_config.clone()).await {
-                        Ok(state) => {
-                            let _ = finalize_restore_rollback(&state, &rollback_result).await;
-                            spawn_cleanup_tasks(&state);
-                            return Ok(create_app_with_middleware(
-                                state.clone(),
-                                &runtime_config,
-                                runtime_config.server.max_upload_size,
-                            )
-                            .layer(TraceLayer::new_for_http()));
-                        }
-                        Err(rollback_start_error) => {
-                            error!(
-                                "Database restore rollback succeeded but application startup still failed: {}",
-                                rollback_start_error
-                            );
-                            return Err(anyhow::anyhow!(
-                                "数据库恢复失败后已自动回滚，但应用仍无法启动。原始错误: {}; 回滚后错误: {}",
-                                runtime_error,
-                                rollback_start_error
-                            ));
-                        }
-                    },
-                    Err(rollback_error) => {
-                        error!("Database restore rollback failed: {}", rollback_error);
-                        return Err(anyhow::anyhow!(
-                            "数据库恢复失败，且自动回滚也失败。原始错误: {}; 回滚错误: {}",
-                            runtime_error,
-                            rollback_error
-                        ));
-                    }
-                }
-            }
-
             error!(
                 "Runtime initialization failed; refusing to expose bootstrap mode because runtime database is already configured: {}",
                 runtime_error
@@ -165,12 +112,8 @@ mod tests {
         let temp_dir = tempfile::tempdir().expect("temp dir should be created");
         let bootstrap_path = temp_dir.path().join("bootstrap.json");
         let fallback = BootstrapConfigFile {
-            database_kind: DatabaseKind::Sqlite,
-            database_url: temp_dir
-                .path()
-                .join("fallback.db")
-                .to_string_lossy()
-                .into_owned(),
+            database_kind: DatabaseKind::MySql,
+            database_url: "mysql://user:pass@127.0.0.1:3307/bootstrap_fallback".to_string(),
         };
         std::fs::write(
             &bootstrap_path,

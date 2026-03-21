@@ -1,8 +1,8 @@
-use super::common::{image_service, map_paginated_images};
+use super::common::{image_service, map_cursor_images};
 use crate::db::AppState;
 use crate::error::AppError;
 use crate::middleware::AuthUser;
-use crate::models::{ImageResponse, Paginated, PaginationParams};
+use crate::models::{CursorPaginated, CursorPaginationParams, ImageResponse};
 use axum::{
     Json,
     extract::{Path, Query, State},
@@ -11,15 +11,16 @@ use axum::{
 pub async fn get_images(
     State(state): State<AppState>,
     auth_user: AuthUser,
-    Query(params): Query<PaginationParams>,
-) -> Result<Json<Paginated<ImageResponse>>, AppError> {
+    Query(params): Query<CursorPaginationParams>,
+) -> Result<Json<CursorPaginated<ImageResponse>>, AppError> {
     let service = image_service(&state)?;
-    let page = params.page.unwrap_or(1).max(1);
-    let page_size = params.page_size.unwrap_or(20).clamp(1, 100);
+    let limit = params.limit.unwrap_or(20).clamp(1, 100);
 
-    let result = service.get_images(auth_user.id, page, page_size).await?;
+    let result = service
+        .get_images(auth_user.id, params.cursor.as_deref(), limit)
+        .await?;
 
-    Ok(Json(map_paginated_images(result)))
+    Ok(Json(map_cursor_images(result)))
 }
 
 pub async fn get_image(

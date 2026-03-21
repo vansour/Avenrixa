@@ -1,5 +1,4 @@
 use chrono::Utc;
-use sqlx::{MySql, QueryBuilder, Sqlite};
 use std::collections::{HashMap, HashSet};
 use tracing::{error, info};
 use uuid::Uuid;
@@ -50,28 +49,6 @@ impl AdminDomainService {
                 .fetch_all(pool)
                 .await
             }
-            DatabasePool::MySql(pool) => {
-                sqlx::query_as::<_, (Uuid, String)>(
-                    "SELECT id, filename
-                     FROM images
-                     WHERE expires_at < ?
-                       AND status = 'active'",
-                )
-                .bind(now)
-                .fetch_all(pool)
-                .await
-            }
-            DatabasePool::Sqlite(pool) => {
-                sqlx::query_as::<_, (Uuid, String)>(
-                    "SELECT id, filename
-                     FROM images
-                     WHERE expires_at < ?1
-                       AND status = 'active'",
-                )
-                .bind(now)
-                .fetch_all(pool)
-                .await
-            }
         }
         .map_err(|e: sqlx::Error| {
             error!("Failed to expire images: {}", e);
@@ -110,62 +87,6 @@ impl AdminDomainService {
                 .fetch_all(pool)
                 .await?
             }
-            DatabasePool::MySql(pool) => {
-                if candidate_filenames.is_empty() {
-                    Vec::new()
-                } else {
-                    let mut builder = QueryBuilder::<MySql>::new(
-                        "SELECT DISTINCT filename FROM images WHERE filename IN (",
-                    );
-                    {
-                        let mut separated = builder.separated(", ");
-                        for filename in &candidate_filenames {
-                            separated.push_bind(filename);
-                        }
-                    }
-                    builder.push(")");
-                    builder.push(" AND status = 'active'");
-                    if !delete_ids.is_empty() {
-                        builder.push(" AND id NOT IN (");
-                        {
-                            let mut separated = builder.separated(", ");
-                            for image_id in &delete_ids {
-                                separated.push_bind(image_id);
-                            }
-                        }
-                        builder.push(")");
-                    }
-                    builder.build_query_scalar().fetch_all(pool).await?
-                }
-            }
-            DatabasePool::Sqlite(pool) => {
-                if candidate_filenames.is_empty() {
-                    Vec::new()
-                } else {
-                    let mut builder = QueryBuilder::<Sqlite>::new(
-                        "SELECT DISTINCT filename FROM images WHERE filename IN (",
-                    );
-                    {
-                        let mut separated = builder.separated(", ");
-                        for filename in &candidate_filenames {
-                            separated.push_bind(filename);
-                        }
-                    }
-                    builder.push(")");
-                    builder.push(" AND status = 'active'");
-                    if !delete_ids.is_empty() {
-                        builder.push(" AND id NOT IN (");
-                        {
-                            let mut separated = builder.separated(", ");
-                            for image_id in &delete_ids {
-                                separated.push_bind(image_id);
-                            }
-                        }
-                        builder.push(")");
-                    }
-                    builder.build_query_scalar().fetch_all(pool).await?
-                }
-            }
         }
         .into_iter()
         .collect();
@@ -194,18 +115,6 @@ impl AdminDomainService {
                 match &self.database {
                     DatabasePool::Postgres(pool) => {
                         let _ = sqlx::query("DELETE FROM images WHERE id = $1")
-                            .bind(id)
-                            .execute(pool)
-                            .await;
-                    }
-                    DatabasePool::MySql(pool) => {
-                        let _ = sqlx::query("DELETE FROM images WHERE id = ?")
-                            .bind(id)
-                            .execute(pool)
-                            .await;
-                    }
-                    DatabasePool::Sqlite(pool) => {
-                        let _ = sqlx::query("DELETE FROM images WHERE id = ?1")
                             .bind(id)
                             .execute(pool)
                             .await;

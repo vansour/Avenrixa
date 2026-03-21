@@ -1,7 +1,7 @@
 use crate::components::ConfirmationTone;
 use crate::types::api::{
-    BackupDatabaseFamily, BackupObjectRollbackAnchor, BackupObjectRollbackStrategy,
-    BackupRestorePrecheckResponse, BackupRestoreStorageSummary, BackupSemantics,
+    BackupDatabaseFamily, BackupObjectRollbackAnchor, BackupRestorePrecheckResponse,
+    BackupRestoreStorageSummary, BackupSemantics,
 };
 
 use super::models::ConfirmationPlan;
@@ -88,19 +88,7 @@ fn format_restore_timestamp(timestamp: chrono::DateTime<chrono::Utc>) -> String 
 }
 
 fn summarize_restore_storage(storage: &BackupRestoreStorageSummary) -> String {
-    if storage.storage_backend.is_s3() {
-        let bucket = storage
-            .s3_bucket
-            .clone()
-            .unwrap_or_else(|| "未配置 bucket".to_string());
-        let endpoint = storage
-            .s3_endpoint
-            .clone()
-            .unwrap_or_else(|| "未配置 endpoint".to_string());
-        format!("对象存储 · {} · {}", bucket, endpoint)
-    } else {
-        format!("本地目录 · {}", storage.local_storage_path)
-    }
+    format!("本地目录 · {}", storage.local_storage_path)
 }
 
 fn database_kind_label(kind: BackupDatabaseFamily) -> &'static str {
@@ -116,41 +104,13 @@ fn restore_mode_label(semantics: &BackupSemantics) -> &'static str {
 }
 
 fn summarize_object_rollback_anchor(anchor: &BackupObjectRollbackAnchor) -> String {
-    match anchor.strategy {
-        BackupObjectRollbackStrategy::LocalDirectorySnapshot => {
-            let path = anchor
-                .local_storage_path
-                .clone()
-                .unwrap_or_else(|| "未记录目录".to_string());
-            format!(
-                "文件回滚锚点：{} @ {}",
-                path,
-                format_restore_timestamp(anchor.checkpoint_at)
-            )
-        }
-        BackupObjectRollbackStrategy::S3VersionedRollbackAnchor => {
-            let bucket = anchor
-                .s3_bucket
-                .clone()
-                .unwrap_or_else(|| "未配置 bucket".to_string());
-            let prefix = anchor.s3_prefix.clone().unwrap_or_else(|| "/".to_string());
-            let status = anchor
-                .s3_bucket_versioning_status
-                .clone()
-                .unwrap_or_else(|| "unknown".to_string());
-            format!(
-                "对象回滚锚点：bucket {} · prefix {} · {} · versioning {}",
-                bucket,
-                prefix,
-                format_restore_timestamp(anchor.checkpoint_at),
-                status
-            )
-        }
-        BackupObjectRollbackStrategy::Unknown => {
-            format!(
-                "回滚锚点：未知策略 @ {}",
-                format_restore_timestamp(anchor.checkpoint_at)
-            )
-        }
-    }
+    let path = anchor
+        .local_storage_path
+        .clone()
+        .unwrap_or_else(|| "未记录目录".to_string());
+    format!(
+        "文件回滚锚点：{} @ {}",
+        path,
+        format_restore_timestamp(anchor.checkpoint_at)
+    )
 }

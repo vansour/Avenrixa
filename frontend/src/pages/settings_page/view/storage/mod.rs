@@ -5,7 +5,6 @@ use dioxus::prelude::*;
 
 use self::browser::LocalStoragePathPicker;
 use super::super::state::SettingsFormState;
-use super::forms::render_s3_fields;
 
 pub fn render_storage_fields(form: SettingsFormState, disabled: bool) -> Element {
     let mut storage_backend = form.storage_backend;
@@ -26,7 +25,6 @@ pub fn render_storage_fields(form: SettingsFormState, disabled: bool) -> Element
                             disabled,
                             option { value: StorageBackendKind::Unknown.as_str(), "请选择存储后端" }
                             option { value: StorageBackendKind::Local.as_str(), "本地存储" }
-                            option { value: StorageBackendKind::S3.as_str(), "对象存储（兼容 S3）" }
                         }
                     }
                 }
@@ -37,13 +35,6 @@ pub fn render_storage_fields(form: SettingsFormState, disabled: bool) -> Element
                     h3 { "本地存储" }
                     div { class: "settings-grid settings-grid-single",
                         LocalStoragePathPicker { form, disabled }
-                    }
-                }
-            } else if selected_backend == StorageBackendKind::S3 {
-                div { class: "settings-subcard",
-                    h3 { "对象存储（兼容 S3）" }
-                    div { class: "settings-grid",
-                        {render_s3_fields(form, disabled)}
                     }
                 }
             }
@@ -70,7 +61,6 @@ pub fn render_storage_fields_compact(form: SettingsFormState, disabled: bool) ->
                             disabled,
                             option { value: StorageBackendKind::Unknown.as_str(), "请选择存储后端" }
                             option { value: StorageBackendKind::Local.as_str(), "本地存储" }
-                            option { value: StorageBackendKind::S3.as_str(), "对象存储（兼容 S3）" }
                         }
                     }
                 }
@@ -81,13 +71,6 @@ pub fn render_storage_fields_compact(form: SettingsFormState, disabled: bool) ->
                     h3 { "本地存储" }
                     div { class: "settings-grid settings-grid-single",
                         LocalStoragePathPicker { form, disabled }
-                    }
-                }
-            } else if selected_backend == StorageBackendKind::S3 {
-                div { class: "settings-subcard install-compact-subcard",
-                    h3 { "对象存储（兼容 S3）" }
-                    div { class: "settings-grid",
-                        {render_s3_fields(form, disabled)}
                     }
                 }
             }

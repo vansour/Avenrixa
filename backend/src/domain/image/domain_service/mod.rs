@@ -25,7 +25,7 @@ use crate::config::Config;
 use crate::db::DatabasePool;
 use crate::error::AppError;
 use crate::image_processor::ImageProcessor;
-use crate::models::{Image, Paginated};
+use crate::models::{CursorPaginated, Image};
 use crate::storage_backend::StorageManager;
 use tracing::{info, warn};
 

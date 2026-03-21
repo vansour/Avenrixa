@@ -1,1 +1,1 @@
-pub use shared_types::pagination::{Paginated, PaginationParams};
+pub use shared_types::pagination::{CursorPaginated, CursorPaginationParams, PaginationParams};

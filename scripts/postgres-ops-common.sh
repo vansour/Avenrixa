@@ -457,7 +457,6 @@ copy_missing_files_between_dirs() {
   local target_dir="$2"
   local resolved_source_dir=""
   local resolved_target_dir=""
-  local copied=0
   local source_file=""
   local target_file=""
   local file_name=""
@@ -479,7 +478,6 @@ copy_missing_files_between_dirs() {
           "${helper_image}" \
           -lc 'set -eu; if [ ! -f "/target/${FILE_NAME}" ]; then cp -p "/source/${FILE_NAME}" "/target/${FILE_NAME}"; fi'
       fi
-      copied=1
     fi
   done < <(find "${resolved_source_dir}" -maxdepth 1 -type f -print0)
 

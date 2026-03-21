@@ -1,36 +1,6 @@
-use crate::config::DatabaseKind;
-use sqlx::{MySqlPool, PgPool, SqlitePool};
+use sqlx::PgPool;
 
 #[derive(Clone)]
 pub enum DatabasePool {
     Postgres(PgPool),
-    MySql(MySqlPool),
-    #[allow(dead_code)]
-    Sqlite(SqlitePool),
-}
-
-impl DatabasePool {
-    pub fn kind(&self) -> DatabaseKind {
-        match self {
-            Self::Postgres(_) => DatabaseKind::Postgres,
-            Self::MySql(_) => DatabaseKind::MySql,
-            Self::Sqlite(_) => DatabaseKind::Sqlite,
-        }
-    }
-
-    pub fn as_postgres(&self) -> Option<&PgPool> {
-        match self {
-            Self::Postgres(pool) => Some(pool),
-            Self::MySql(_) | Self::Sqlite(_) => None,
-        }
-    }
-
-    pub fn postgres(&self) -> anyhow::Result<&PgPool> {
-        self.as_postgres().ok_or_else(|| {
-            anyhow::anyhow!(
-                "当前数据库后端为 {}，尚未接入 PostgreSQL 专用运行时",
-                self.kind().as_str()
-            )
-        })
-    }
 }

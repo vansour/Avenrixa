@@ -61,19 +61,34 @@ impl<I: ImageRepository> ImageDomainService<I> {
         let stored_filename = format!("{}.{}", hash, ext);
         let thumbnail_key = self.thumbnail_file_key(&hash);
         let thumbnail_bytes = self.generate_thumbnail_bytes(compressed.clone()).await?;
+        let media_ref_adjustments = vec![(stored_filename.clone(), 1), (thumbnail_key.clone(), 1)];
+        let media_ref_revert_adjustments =
+            vec![(stored_filename.clone(), -1), (thumbnail_key.clone(), -1)];
         let mut wrote_storage_object = false;
         let mut wrote_thumbnail_object = false;
+        let mut bumped_media_refs = false;
         if let Err(error) = async {
+            self.ensure_media_blob_ready(&stored_filename, "original", Some(&hash))
+                .await?;
+            self.ensure_media_blob_ready(&thumbnail_key, "thumbnail", Some(&hash))
+                .await?;
             wrote_storage_object = self
                 .write_storage_object_if_missing(&stored_filename, &compressed)
                 .await?;
             wrote_thumbnail_object = self
                 .write_storage_object_if_missing(&thumbnail_key, &thumbnail_bytes)
                 .await?;
+            self.adjust_media_blob_refs(&media_ref_adjustments).await?;
+            bumped_media_refs = true;
             Ok::<(), AppError>(())
         }
         .await
         {
+            if bumped_media_refs {
+                let _ = self
+                    .adjust_media_blob_refs(&media_ref_revert_adjustments)
+                    .await;
+            }
             if wrote_storage_object {
                 self.compensate_failed_storage_write(&stored_filename).await;
             }
@@ -99,6 +114,11 @@ impl<I: ImageRepository> ImageDomainService<I> {
         };
 
         if let Err(error) = self.image_repository.create_image(&image).await {
+            if bumped_media_refs {
+                let _ = self
+                    .adjust_media_blob_refs(&media_ref_revert_adjustments)
+                    .await;
+            }
             if wrote_storage_object {
                 self.compensate_failed_storage_write(&stored_filename).await;
             }
@@ -141,33 +161,7 @@ impl<I: ImageRepository> ImageDomainService<I> {
     }
 
     async fn compensate_failed_storage_write(&self, stored_filename: &str) {
-        let filenames = vec![stored_filename.to_string()];
-        let still_referenced = match self
-            .image_repository
-            .find_filenames_still_referenced_excluding_ids(&filenames, &[])
-            .await
-        {
-            Ok(referenced) => referenced
-                .into_iter()
-                .any(|filename| filename == stored_filename),
-            Err(error) => {
-                warn!(
-                    "Failed to verify image references before compensating upload storage write for {}: {}",
-                    stored_filename, error
-                );
-                false
-            }
-        };
-        if still_referenced {
-            return;
-        }
-
-        if let Err(error) = self.storage_manager.delete(stored_filename).await {
-            warn!(
-                "Failed to compensate upload storage write for {}: {}",
-                stored_filename, error
-            );
-        }
+        self.compensate_orphaned_media(stored_filename).await;
     }
 
     async fn cleanup_temp_file(temp_path: &std::path::Path) {

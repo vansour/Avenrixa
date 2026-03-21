@@ -22,8 +22,6 @@ pub struct BackupFileSummary {
 #[serde(from = "String", into = "String")]
 pub enum BackupDatabaseFamily {
     Postgres,
-    MySql,
-    Sqlite,
     Unknown,
 }
 
@@ -31,8 +29,6 @@ impl BackupDatabaseFamily {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Postgres => "postgresql",
-            Self::MySql => "mysql",
-            Self::Sqlite => "sqlite",
             Self::Unknown => "unknown",
         }
     }
@@ -40,16 +36,12 @@ impl BackupDatabaseFamily {
     pub fn parse(value: &str) -> Self {
         match value.trim().to_ascii_lowercase().as_str() {
             "postgresql" | "postgres" => Self::Postgres,
-            "mysql" | "mariadb" => Self::MySql,
-            "sqlite" => Self::Sqlite,
             _ => Self::Unknown,
         }
     }
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Sqlite => "SQLite",
-            Self::MySql => "MySQL / MariaDB",
             Self::Postgres => "PostgreSQL",
             Self::Unknown => "数据库",
         }
@@ -71,8 +63,6 @@ impl From<BackupDatabaseFamily> for String {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(from = "String", into = "String")]
 pub enum BackupKind {
-    SqliteDatabaseSnapshot,
-    MySqlLogicalDump,
     PostgresqlLogicalDump,
     Unknown,
 }
@@ -80,8 +70,6 @@ pub enum BackupKind {
 impl BackupKind {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::SqliteDatabaseSnapshot => "sqlite-database-snapshot",
-            Self::MySqlLogicalDump => "mysql-logical-dump",
             Self::PostgresqlLogicalDump => "postgresql-logical-dump",
             Self::Unknown => "unknown",
         }
@@ -89,8 +77,6 @@ impl BackupKind {
 
     pub fn parse(value: &str) -> Self {
         match value.trim().to_ascii_lowercase().as_str() {
-            "sqlite-database-snapshot" => Self::SqliteDatabaseSnapshot,
-            "mysql-logical-dump" => Self::MySqlLogicalDump,
             "postgresql-logical-dump" => Self::PostgresqlLogicalDump,
             _ => Self::Unknown,
         }
@@ -98,8 +84,6 @@ impl BackupKind {
 
     pub fn label(self, family: BackupDatabaseFamily) -> &'static str {
         match self {
-            Self::SqliteDatabaseSnapshot => "SQLite 数据库快照",
-            Self::MySqlLogicalDump => "MySQL / MariaDB 逻辑导出",
             Self::PostgresqlLogicalDump => "PostgreSQL 逻辑导出",
             Self::Unknown => family.label(),
         }
@@ -156,7 +140,6 @@ impl From<BackupScope> for String {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(from = "String", into = "String")]
 pub enum RestoreMode {
-    UiRestartFileSwap,
     UiRestartSqlImport,
     OpsToolingOnly,
     DownloadOnly,
@@ -166,7 +149,6 @@ pub enum RestoreMode {
 impl RestoreMode {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::UiRestartFileSwap => "ui-restart-file-swap",
             Self::UiRestartSqlImport => "ui-restart-sql-import",
             Self::OpsToolingOnly => "ops-tooling-only",
             Self::DownloadOnly => "download-only",
@@ -176,7 +158,6 @@ impl RestoreMode {
 
     pub fn parse(value: &str) -> Self {
         match value.trim().to_ascii_lowercase().as_str() {
-            "ui-restart-file-swap" => Self::UiRestartFileSwap,
             "ui-restart-sql-import" => Self::UiRestartSqlImport,
             "ops-tooling-only" => Self::OpsToolingOnly,
             "download-only" => Self::DownloadOnly,
@@ -186,7 +167,6 @@ impl RestoreMode {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::UiRestartFileSwap => "重启前文件替换恢复",
             Self::UiRestartSqlImport => "重启前导入恢复",
             Self::OpsToolingOnly => "仅运维脚本恢复",
             Self::DownloadOnly => "仅下载，不支持页面恢复",
@@ -309,7 +289,7 @@ impl From<BackupRestoreStatus> for String {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BackupSemantics {
     pub database_family: BackupDatabaseFamily,
     pub backup_kind: BackupKind,
@@ -326,28 +306,6 @@ impl Default for BackupSemantics {
 }
 
 impl BackupSemantics {
-    pub fn sqlite_database_snapshot() -> Self {
-        Self {
-            database_family: BackupDatabaseFamily::Sqlite,
-            backup_kind: BackupKind::SqliteDatabaseSnapshot,
-            backup_scope: BackupScope::DatabaseOnly,
-            restore_mode: RestoreMode::UiRestartFileSwap,
-            artifact_layout: ArtifactLayout::SingleFilePlusManifest,
-            ui_restore_supported: true,
-        }
-    }
-
-    pub fn mysql_logical_dump() -> Self {
-        Self {
-            database_family: BackupDatabaseFamily::MySql,
-            backup_kind: BackupKind::MySqlLogicalDump,
-            backup_scope: BackupScope::DatabaseOnly,
-            restore_mode: RestoreMode::OpsToolingOnly,
-            artifact_layout: ArtifactLayout::SingleFilePlusManifest,
-            ui_restore_supported: false,
-        }
-    }
-
     pub fn postgresql_logical_dump() -> Self {
         Self {
             database_family: BackupDatabaseFamily::Postgres,
@@ -382,10 +340,6 @@ impl BackupSemantics {
         self.ui_restore_supported
     }
 
-    pub fn is_sqlite_database_snapshot(&self) -> bool {
-        self.backup_kind == BackupKind::SqliteDatabaseSnapshot
-    }
-
     pub fn is_unknown(&self) -> bool {
         self.backup_kind == BackupKind::Unknown
     }
@@ -395,18 +349,12 @@ impl BackupSemantics {
 pub struct BackupRestoreStorageSummary {
     pub storage_backend: StorageBackendKind,
     pub local_storage_path: String,
-    pub s3_endpoint: Option<String>,
-    pub s3_region: Option<String>,
-    pub s3_bucket: Option<String>,
-    pub s3_prefix: Option<String>,
-    pub s3_force_path_style: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(from = "String", into = "String")]
 pub enum BackupObjectRollbackStrategy {
     LocalDirectorySnapshot,
-    S3VersionedRollbackAnchor,
     Unknown,
 }
 
@@ -414,7 +362,6 @@ impl BackupObjectRollbackStrategy {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::LocalDirectorySnapshot => "local-directory-snapshot",
-            Self::S3VersionedRollbackAnchor => "s3-versioned-rollback-anchor",
             Self::Unknown => "unknown",
         }
     }
@@ -422,17 +369,12 @@ impl BackupObjectRollbackStrategy {
     pub fn parse(value: &str) -> Self {
         match value.trim().to_ascii_lowercase().as_str() {
             "local-directory-snapshot" => Self::LocalDirectorySnapshot,
-            "s3-versioned-rollback-anchor" => Self::S3VersionedRollbackAnchor,
             _ => Self::Unknown,
         }
     }
 
     pub fn is_local_directory_snapshot(self) -> bool {
         matches!(self, Self::LocalDirectorySnapshot)
-    }
-
-    pub fn is_s3_versioned_rollback_anchor(self) -> bool {
-        matches!(self, Self::S3VersionedRollbackAnchor)
     }
 }
 
@@ -453,12 +395,6 @@ pub struct BackupObjectRollbackAnchor {
     pub strategy: BackupObjectRollbackStrategy,
     pub checkpoint_at: DateTime<Utc>,
     pub local_storage_path: Option<String>,
-    pub s3_endpoint: Option<String>,
-    pub s3_region: Option<String>,
-    pub s3_bucket: Option<String>,
-    pub s3_prefix: Option<String>,
-    pub s3_force_path_style: bool,
-    pub s3_bucket_versioning_status: Option<String>,
     pub capture_error: Option<String>,
 }
 
@@ -483,7 +419,7 @@ pub struct BackupRestorePrecheckResponse {
 }
 
 fn default_restore_database_kind() -> BackupDatabaseFamily {
-    BackupDatabaseFamily::Sqlite
+    BackupDatabaseFamily::Unknown
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

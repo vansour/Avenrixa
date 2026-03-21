@@ -1,7 +1,7 @@
 use crate::services::api_client::ApiClient;
 use crate::store::images::{ImageCollectionKind, ImageStore};
 use crate::types::api::{
-    DeleteRequest, ImageResponse, Paginated, PaginationParams, SetExpiryRequest,
+    CursorPaginated, CursorPaginationParams, DeleteRequest, ImageResponse, SetExpiryRequest,
 };
 use crate::types::errors::Result;
 use crate::types::models::ImageItem;
@@ -21,8 +21,11 @@ impl ImageService {
         }
     }
 
-    /// 获取图片列表（传统分页）
-    pub async fn get_images(&self, params: PaginationParams) -> Result<Paginated<ImageItem>> {
+    /// 获取图片列表（游标分页）
+    pub async fn get_images(
+        &self,
+        params: CursorPaginationParams,
+    ) -> Result<CursorPaginated<ImageItem>> {
         let query_params = Self::build_query_params(&params);
         let url = if query_params.is_empty() {
             "/api/v1/images".to_string()
@@ -32,15 +35,14 @@ impl ImageService {
 
         let result = self
             .api_client
-            .get_json::<Paginated<ImageResponse>>(&url)
+            .get_json::<CursorPaginated<ImageResponse>>(&url)
             .await?;
         let result = map_paginated_images(result);
         self.image_store.replace_page(
             ImageCollectionKind::Active,
             result.data.clone(),
-            result.page.max(1) as u32,
-            params.page_size.unwrap_or(result.page_size).max(1) as u32,
-            result.total.max(0) as u64,
+            params.limit.unwrap_or(result.limit).max(1) as u32,
+            result.next_cursor.clone(),
             result.has_next,
         );
         Ok(result)
@@ -92,25 +94,24 @@ impl ImageService {
     }
 
     /// 构建 URL 查询参数
-    fn build_query_params(params: &PaginationParams) -> String {
+    fn build_query_params(params: &CursorPaginationParams) -> String {
         let mut query_parts = Vec::new();
 
-        if let Some(page) = params.page {
-            query_parts.push(format!("page={}", page));
+        if let Some(cursor) = &params.cursor {
+            query_parts.push(format!("cursor={}", cursor));
         }
-        if let Some(page_size) = params.page_size {
-            query_parts.push(format!("page_size={}", page_size));
+        if let Some(limit) = params.limit {
+            query_parts.push(format!("limit={}", limit));
         }
         query_parts.join("&")
     }
 }
 
-fn map_paginated_images(result: Paginated<ImageResponse>) -> Paginated<ImageItem> {
-    Paginated {
+fn map_paginated_images(result: CursorPaginated<ImageResponse>) -> CursorPaginated<ImageItem> {
+    CursorPaginated {
         data: result.data.into_iter().map(ImageItem::from).collect(),
-        page: result.page,
-        page_size: result.page_size,
-        total: result.total,
+        limit: result.limit,
+        next_cursor: result.next_cursor,
         has_next: result.has_next,
     }
 }
@@ -120,32 +121,32 @@ mod tests {
     use super::*;
 
     #[test]
-    fn build_query_params_keeps_declared_pagination_order() {
-        let params = PaginationParams {
-            page: Some(2),
-            page_size: Some(40),
+    fn build_query_params_keeps_declared_cursor_order() {
+        let params = CursorPaginationParams {
+            cursor: Some("cursor-2".to_string()),
+            limit: Some(40),
         };
 
         let query = ImageService::build_query_params(&params);
 
-        assert_eq!(query, "page=2&page_size=40");
+        assert_eq!(query, "cursor=cursor-2&limit=40");
     }
 
     #[test]
     fn build_query_params_omits_absent_values() {
-        let params = PaginationParams {
-            page: None,
-            page_size: Some(20),
+        let params = CursorPaginationParams {
+            cursor: None,
+            limit: Some(20),
         };
 
         let query = ImageService::build_query_params(&params);
 
-        assert_eq!(query, "page_size=20");
+        assert_eq!(query, "limit=20");
     }
 
     #[test]
     fn map_paginated_images_converts_api_items_to_view_items() {
-        let result = map_paginated_images(Paginated {
+        let result = map_paginated_images(CursorPaginated {
             data: vec![ImageResponse {
                 image_key: "img_1".to_string(),
                 filename: "demo.png".to_string(),
@@ -156,15 +157,15 @@ mod tests {
                 expires_at: None,
                 created_at: chrono::Utc::now(),
             }],
-            page: 2,
-            page_size: 20,
-            total: 41,
+            limit: 20,
+            next_cursor: Some("cursor-2".to_string()),
             has_next: true,
         });
 
         assert_eq!(result.data.len(), 1);
         assert_eq!(result.data[0].filename, "demo.png");
-        assert_eq!(result.page, 2);
+        assert_eq!(result.limit, 20);
+        assert_eq!(result.next_cursor.as_deref(), Some("cursor-2"));
         assert!(result.has_next);
     }
 }

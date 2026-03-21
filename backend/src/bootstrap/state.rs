@@ -2,11 +2,23 @@ use super::cache::connect_cache;
 use super::database::initialize_database;
 use super::services::build_services;
 use crate::config::Config;
-use crate::db::AppState;
+use crate::db::{AppState, DatabasePool};
 use crate::domain::auth::state_repository::DatabaseAuthStateRepository;
 
 pub async fn build_app_state(config: Config) -> anyhow::Result<AppState> {
     let database = initialize_database(&config).await?;
+    assemble_app_state(config, database).await
+}
+
+#[cfg(test)]
+pub(crate) async fn build_app_state_with_database(
+    config: Config,
+    database: DatabasePool,
+) -> anyhow::Result<AppState> {
+    assemble_app_state(config, database).await
+}
+
+async fn assemble_app_state(config: Config, database: DatabasePool) -> anyhow::Result<AppState> {
     let cache_connections = connect_cache(&config).await;
     let services = build_services(&database, &cache_connections, &config).await?;
 

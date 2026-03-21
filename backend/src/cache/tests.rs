@@ -4,14 +4,14 @@ use uuid::Uuid;
 #[test]
 fn test_image_cache_list() {
     let user_id = Uuid::new_v4();
-    let page = 1;
-    let page_size = 20;
+    let cursor = Some("cursor-token");
+    let limit = 20;
 
-    let key = ImageCache::list(user_id, page, page_size);
+    let key = ImageCache::list(user_id, cursor, limit);
 
     assert!(key.contains(&user_id.to_string()));
-    assert!(key.contains(&page.to_string()));
-    assert!(key.contains(&page_size.to_string()));
+    assert!(key.contains(cursor.unwrap()));
+    assert!(key.contains(&limit.to_string()));
     assert!(key.starts_with("images:list:"));
 }
 
@@ -33,8 +33,8 @@ fn test_cache_key_empty_prefix() {
 fn test_image_cache_different_pages() {
     let user_id = Uuid::new_v4();
 
-    let key1 = ImageCache::list(user_id, 1, 20);
-    let key2 = ImageCache::list(user_id, 2, 20);
+    let key1 = ImageCache::list(user_id, None, 20);
+    let key2 = ImageCache::list(user_id, Some("next"), 20);
 
     assert_ne!(key1, key2);
 }

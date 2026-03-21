@@ -1,86 +1,90 @@
 use super::*;
+use base64::Engine;
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct ImageListCursorToken {
+    created_at_micros: i64,
+    id: Uuid,
+}
 
 impl<I: ImageRepository> ImageDomainService<I> {
+    fn decode_image_list_cursor(cursor: &str) -> Result<ImageListCursorToken, AppError> {
+        let raw = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(cursor)
+            .map_err(|_| AppError::ValidationError("图片列表游标无效".to_string()))?;
+        let token: ImageListCursorToken = serde_json::from_slice(&raw)
+            .map_err(|_| AppError::ValidationError("图片列表游标无效".to_string()))?;
+        let Some(_) = chrono::DateTime::<Utc>::from_timestamp_micros(token.created_at_micros)
+        else {
+            return Err(AppError::ValidationError("图片列表游标无效".to_string()));
+        };
+        Ok(token)
+    }
+
+    fn encode_image_list_cursor(image: &Image) -> Result<String, AppError> {
+        let token = ImageListCursorToken {
+            created_at_micros: image.created_at.timestamp_micros(),
+            id: image.id,
+        };
+        let bytes = serde_json::to_vec(&token).map_err(|error| AppError::Internal(error.into()))?;
+        Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes))
+    }
+
     /// 获取图片列表
     #[tracing::instrument(skip(self))]
     pub async fn get_images(
         &self,
         user_id: Uuid,
-        page: i32,
-        page_size: i32,
-    ) -> Result<Paginated<Image>, AppError> {
-        let offset = (page - 1) * page_size;
+        cursor: Option<&str>,
+        limit: i32,
+    ) -> Result<CursorPaginated<Image>, AppError> {
+        let limit = limit.clamp(1, 100);
+        let decoded_cursor = cursor.map(Self::decode_image_list_cursor).transpose()?;
 
-        let cache_key = ImageCache::list(user_id, page, page_size);
+        let cache_key = ImageCache::list(user_id, cursor, limit);
         if let Some(manager) = self.cache.as_ref() {
             let mut cache = manager.clone();
             if let Ok(Some(cached)) =
-                Cache::get::<Paginated<Image>, _>(&mut cache, &cache_key).await
+                Cache::get::<CursorPaginated<Image>, _>(&mut cache, &cache_key).await
             {
                 return Ok(cached);
             }
         }
 
-        let images = self
+        let mut images = self
             .image_repository
-            .find_images_by_user_paginated(user_id, page_size, offset)
+            .find_images_by_user_after_cursor(
+                user_id,
+                limit + 1,
+                decoded_cursor.as_ref().and_then(|token| {
+                    chrono::DateTime::<Utc>::from_timestamp_micros(token.created_at_micros)
+                }),
+                decoded_cursor.as_ref().map(|token| token.id),
+            )
             .await?;
 
-        // 提取总数并清理
-        let mut images = images;
-        let total = images.first().and_then(|img| img.total_count).unwrap_or(0);
-        for img in &mut images {
-            img.total_count = None;
+        let has_next = images.len() > limit as usize;
+        if has_next {
+            images.truncate(limit as usize);
         }
 
-        // 文件存在性检查逻辑 (如果启用)
-        let valid_images = if self.config.storage.enable_file_check {
-            let concurrent_threshold = self.config.storage.file_check_concurrent_threshold.max(1);
-            let storage_manager = self.storage_manager.clone();
+        for image in &mut images {
+            image.total_count = None;
+        }
 
-            if images.len() <= concurrent_threshold {
-                let mut checked_images = Vec::with_capacity(images.len());
-                for img in images {
-                    if storage_manager.exists(&img.filename).await.unwrap_or(false) {
-                        checked_images.push(img);
-                    }
-                }
-                checked_images
-            } else {
-                // 并发检查文件存在性后按原索引恢复顺序，避免影响分页排序稳定性
-                let mut checked_images = stream::iter(images.into_iter().enumerate())
-                    .map(|(idx, img)| {
-                        let storage_manager = storage_manager.clone();
-                        async move {
-                            if storage_manager
-                                .exists(img.filename.as_str())
-                                .await
-                                .unwrap_or(false)
-                            {
-                                Some((idx, img))
-                            } else {
-                                None
-                            }
-                        }
-                    })
-                    .buffer_unordered(concurrent_threshold)
-                    .filter_map(|item| async move { item })
-                    .collect::<Vec<_>>()
-                    .await;
-
-                checked_images.sort_by_key(|(idx, _)| *idx);
-                checked_images.into_iter().map(|(_, img)| img).collect()
-            }
-        } else {
+        let next_cursor = if has_next {
             images
+                .last()
+                .map(Self::encode_image_list_cursor)
+                .transpose()?
+        } else {
+            None
         };
 
-        let has_next = ((page * page_size) as i64) < total;
-        let result = Paginated {
-            data: valid_images,
-            page,
-            page_size,
-            total,
+        let result = CursorPaginated {
+            data: images,
+            limit,
+            next_cursor,
             has_next,
         };
 

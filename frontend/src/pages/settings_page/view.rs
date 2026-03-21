@@ -5,8 +5,7 @@ mod shared;
 mod storage;
 
 pub use forms::{
-    render_general_fields, render_general_fields_compact, render_s3_fields,
-    render_s3_fields_compact,
+    render_general_fields, render_general_fields_compact,
 };
 pub use section::{
     ADMIN_SETTINGS_SECTIONS, SettingsSection, USER_SETTINGS_SECTIONS, render_settings_fields,

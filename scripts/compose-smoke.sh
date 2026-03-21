@@ -506,7 +506,7 @@ run_postgres_image_smoke() {
   image_key="$(printf '%s' "${upload_response}" | jq -r '.image_key')"
   expect_non_empty "${image_key}" "upload should return image_key"
 
-  images_page="$(curl -fsS -b "${ADMIN_COOKIE_JAR}" "${api_base}/images?page=1&page_size=20")"
+  images_page="$(curl -fsS -b "${ADMIN_COOKIE_JAR}" "${api_base}/images?limit=20")"
   expect_eq \
     "$(page_has_image "${images_page}" "${image_key}")" \
     "1" \
@@ -541,7 +541,7 @@ run_postgres_image_smoke() {
     -d "$(jq -n --arg image_key "${image_key}" '{image_keys: [$image_key]}')" \
     >/dev/null
 
-  images_page="$(curl -fsS -b "${ADMIN_COOKIE_JAR}" "${api_base}/images?page=1&page_size=20")"
+  images_page="$(curl -fsS -b "${ADMIN_COOKIE_JAR}" "${api_base}/images?limit=20")"
   expect_eq \
     "$(page_has_image "${images_page}" "${image_key}")" \
     "0" \
@@ -944,7 +944,7 @@ run_mysql_image_smoke() {
   image_key="$(printf '%s' "${upload_response}" | jq -r '.image_key')"
   expect_non_empty "${image_key}" "upload should return image_key"
 
-  images_page="$(curl -fsS -b "${ADMIN_COOKIE_JAR}" "${api_base}/images?page=1&page_size=20")"
+  images_page="$(curl -fsS -b "${ADMIN_COOKIE_JAR}" "${api_base}/images?limit=20")"
   expect_eq \
     "$(page_has_image "${images_page}" "${image_key}")" \
     "1" \
@@ -964,7 +964,7 @@ run_mysql_image_smoke() {
     -d "$(jq -n --arg image_key "${image_key}" '{image_keys: [$image_key]}')" \
     >/dev/null
 
-  images_page="$(curl -fsS -b "${ADMIN_COOKIE_JAR}" "${api_base}/images?page=1&page_size=20")"
+  images_page="$(curl -fsS -b "${ADMIN_COOKIE_JAR}" "${api_base}/images?limit=20")"
   expect_eq \
     "$(page_has_image "${images_page}" "${image_key}")" \
     "0" \
