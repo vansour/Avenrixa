@@ -21,39 +21,10 @@ fi
 workspace_package_version() {
   sed -n 's/^version = "\(.*\)"/\1/p' "${ROOT_DIR}/Cargo.toml" | head -n 1
 }
-
-compose_variant_uses_mysql() {
-  case "${COMPOSE_VARIANT}" in
-    mysql|mariadb|mysql-ops|mariadb-ops)
-      return 0
-      ;;
-    *)
-      return 1
-      ;;
-  esac
-}
-
-compose_variant_uses_mariadb() {
-  case "${COMPOSE_VARIANT}" in
-    mariadb|mariadb-ops)
-      return 0
-      ;;
-    *)
-      return 1
-      ;;
-  esac
-}
-
 compose_variant_default_data_dir() {
   case "${COMPOSE_VARIANT}" in
     postgres)
       printf '%s/data' "${ROOT_DIR}"
-      ;;
-    mariadb|mariadb-ops)
-      printf '%s/data-mariadb' "${ROOT_DIR}"
-      ;;
-    mysql|mysql-ops)
-      printf '%s/data-mysql' "${ROOT_DIR}"
       ;;
     *)
       echo "Unsupported COMPOSE_VARIANT: ${COMPOSE_VARIANT}" >&2
@@ -66,18 +37,6 @@ compose_variant_default_database_url() {
   case "${COMPOSE_VARIANT}" in
     postgres)
       printf 'postgresql://user:pass@postgres:5432/image'
-      ;;
-    mysql)
-      printf 'mysql://user:pass@mysql:3306/image'
-      ;;
-    mariadb)
-      printf 'mariadb://user:pass@mysql:3306/image'
-      ;;
-    mysql-ops)
-      printf 'mysql://avenrixa:replace-with-strong-app-password@mysql:3306/image'
-      ;;
-    mariadb-ops)
-      printf 'mariadb://avenrixa:replace-with-strong-app-password@mysql:3306/image'
       ;;
     *)
       echo "Unsupported COMPOSE_VARIANT: ${COMPOSE_VARIANT}" >&2
@@ -346,7 +305,7 @@ compose_runtime_generate() {
   local postgres_archive_command=""
   local postgres_wal_archive_volume_yaml=""
 
-  app_data_dir="${DATA_DIR:-${MYSQL_DATA_DIR:-$(compose_variant_default_data_dir)}}"
+    app_data_dir="${DATA_DIR:-$(compose_variant_default_data_dir)}"
   if [[ "${app_data_dir}" != /* ]]; then
     app_data_dir="${ROOT_DIR}/${app_data_dir}"
   fi
@@ -408,82 +367,6 @@ EOF
 )
       database_service_block+=$'\n'
       ;;
-    mysql)
-      app_container_name="avenrixa-mysql-app"
-      database_kind="mysql"
-      app_depends_on=$'    depends_on:\n      mysql:\n        condition: service_healthy'
-      volumes_block=$'volumes:\n  mysql_data:\n'
-      database_service_block=$'  mysql:\n    container_name: avenrixa-mysql\n    image: mysql:8.4\n    environment:\n      MYSQL_DATABASE: image\n      MYSQL_USER: user\n      MYSQL_PASSWORD: pass\n      MYSQL_ROOT_PASSWORD: rootpass\n    volumes:\n      - "mysql_data:/var/lib/mysql"\n    healthcheck:\n      test: mysqladmin ping -h 127.0.0.1 -uuser -ppass\n      interval: 5s\n      timeout: 5s\n      retries: 10\n    restart: unless-stopped\n'
-      ;;
-    mariadb)
-      app_container_name="avenrixa-mariadb-app"
-      database_kind="mysql"
-      app_depends_on=$'    depends_on:\n      mysql:\n        condition: service_healthy'
-      volumes_block=$'volumes:\n  mariadb_data:\n'
-      database_service_block=$'  mysql:\n    container_name: avenrixa-mariadb\n    image: mariadb:12\n    environment:\n      MARIADB_DATABASE: image\n      MARIADB_USER: user\n      MARIADB_PASSWORD: pass\n      MARIADB_ROOT_PASSWORD: rootpass\n      MYSQL_DATABASE: image\n      MYSQL_USER: user\n      MYSQL_PASSWORD: pass\n      MYSQL_ROOT_PASSWORD: rootpass\n    volumes:\n      - "mariadb_data:/var/lib/mysql"\n    healthcheck:\n      test:\n        - CMD-SHELL\n        - mariadb-admin ping -h 127.0.0.1 -uuser -ppass || mysqladmin ping -h 127.0.0.1 -uuser -ppass\n      interval: 5s\n      timeout: 5s\n      retries: 10\n    restart: unless-stopped\n'
-      ;;
-    mysql-ops)
-      app_container_name="avenrixa-mysql-app"
-      database_kind="mysql"
-      app_depends_on=$'    depends_on:\n      mysql:\n        condition: service_healthy'
-      volumes_block=$'volumes:\n  mysql_data:\n'
-      auth_cookie_secure="${AUTH_COOKIE_SECURE:-true}"
-      jwt_secret="${JWT_SECRET:-replace-with-a-random-secret-at-least-32-characters}"
-      database_service_block=$'  mysql:\n    container_name: avenrixa-mysql\n    image: mysql:8.4\n    environment:\n      MYSQL_DATABASE: image\n      MYSQL_USER: avenrixa\n      MYSQL_PASSWORD: replace-with-strong-app-password\n      MYSQL_ROOT_PASSWORD: replace-with-strong-root-password\n    volumes:\n      - "mysql_data:/var/lib/mysql"\n    healthcheck:\n      test: mysqladmin ping -h 127.0.0.1 -uavenrixa -preplace-with-strong-app-password\n      interval: 5s\n      timeout: 5s\n      retries: 10\n    restart: unless-stopped\n'
-      ;;
-    mariadb-ops)
-      app_container_name="avenrixa-mariadb-app"
-      database_kind="mysql"
-      app_depends_on=$'    depends_on:\n      mysql:\n        condition: service_healthy'
-      volumes_block=$'volumes:\n  mariadb_data:\n'
-      auth_cookie_secure="${AUTH_COOKIE_SECURE:-true}"
-      jwt_secret="${JWT_SECRET:-replace-with-a-random-secret-at-least-32-characters}"
-      database_service_block=$'  mysql:\n    container_name: avenrixa-mariadb\n    image: mariadb:12\n    environment:\n      MARIADB_DATABASE: image\n      MARIADB_USER: avenrixa\n      MARIADB_PASSWORD: replace-with-strong-app-password\n      MARIADB_ROOT_PASSWORD: replace-with-strong-root-password\n      MYSQL_DATABASE: image\n      MYSQL_USER: avenrixa\n      MYSQL_PASSWORD: replace-with-strong-app-password\n      MYSQL_ROOT_PASSWORD: replace-with-strong-root-password\n    volumes:\n      - "mariadb_data:/var/lib/mysql"\n    healthcheck:\n      test:\n        - CMD-SHELL\n        - mariadb-admin ping -h 127.0.0.1 -uavenrixa -preplace-with-strong-app-password || mysqladmin ping -h 127.0.0.1 -uavenrixa -preplace-with-strong-app-password\n      interval: 5s\n      timeout: 5s\n      retries: 10\n    restart: unless-stopped\n'
-      ;;
-    *)
-      echo "Unsupported COMPOSE_VARIANT: ${COMPOSE_VARIANT}" >&2
-      return 1
-      ;;
-  esac
-
-  if [[ "${CACHE_MODE}" == "none" ]]; then
-    cache_url=""
-  else
-    cache_url="redis://cache:6379"
-    if [[ -z "${app_depends_on}" ]]; then
-      app_depends_on=$'    depends_on:'
-    fi
-    app_depends_on="${app_depends_on}"$'\n      cache:\n        condition: service_healthy'
-  fi
-
-  if [[ -v DATABASE_URL ]]; then
-    app_database_url="${DATABASE_URL}"
-  else
-    app_database_url="${database_url}"
-  fi
-
-  if [[ -v REDIS_URL ]]; then
-    app_redis_url="${REDIS_URL}"
-  else
-    app_redis_url="${cache_url}"
-  fi
-
-  database_url_yaml="$(yaml_double_quote "${app_database_url}")"
-  redis_url_yaml="$(yaml_double_quote "${app_redis_url}")"
-  jwt_secret_yaml="$(yaml_double_quote "${jwt_secret}")"
-  auth_cookie_secure_yaml="$(yaml_double_quote "${auth_cookie_secure}")"
-  auth_cookie_same_site_yaml="$(yaml_double_quote "${auth_cookie_same_site}")"
-  app_image_ref_yaml="$(yaml_double_quote "${app_image_ref}")"
-  app_version_yaml="$(yaml_double_quote "${app_version}")"
-  app_revision_yaml="$(yaml_double_quote "${app_revision}")"
-  build_date_yaml="$(yaml_double_quote "${build_date}")"
-
-  case "${CACHE_MODE}" in
-    redis8)
-      cache_service_block=$'  cache:\n    container_name: avenrixa-cache\n    image: redis:8\n    healthcheck:\n      test: redis-cli ping\n      interval: 5s\n      timeout: 5s\n      retries: 5\n    restart: unless-stopped\n'
-      ;;
-    dragonfly)
-      cache_service_block=$'  cache:\n    container_name: avenrixa-cache\n    image: ghcr.io/dragonflydb/dragonfly:latest\n    command: --dir=/data\n    healthcheck:\n      test: redis-cli ping\n      interval: 5s\n      timeout: 5s\n      retries: 5\n    restart: unless-stopped\n'
       ;;
     none)
       cache_service_block=""

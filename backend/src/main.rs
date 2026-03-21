@@ -112,8 +112,8 @@ mod tests {
         let temp_dir = tempfile::tempdir().expect("temp dir should be created");
         let bootstrap_path = temp_dir.path().join("bootstrap.json");
         let fallback = BootstrapConfigFile {
-            database_kind: DatabaseKind::MySql,
-            database_url: "mysql://user:pass@127.0.0.1:3307/bootstrap_fallback".to_string(),
+            database_kind: DatabaseKind::Postgres,
+            database_url: "postgresql://user:pass@127.0.0.1:5432/bootstrap_fallback".to_string(),
         };
         std::fs::write(
             &bootstrap_path,

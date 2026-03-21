@@ -10,15 +10,6 @@ SMOKE_POLL_INTERVAL_SECONDS="${SMOKE_POLL_INTERVAL_SECONDS:-2}"
 COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-avenrixa-browser-regression}"
 COMPOSE_VARIANT="${COMPOSE_VARIANT:-mysql}"
 PRESERVE_STACK_ON_FAILURE="${PRESERVE_STACK_ON_FAILURE:-0}"
-MYSQL_SMOKE_RESET_DATA_DIR="${MYSQL_SMOKE_RESET_DATA_DIR:-1}"
-CACHE_MODE="${CACHE_MODE:-redis8}"
-
-ADMIN_EMAIL="${ADMIN_EMAIL:-admin@example.com}"
-ADMIN_PASSWORD="${ADMIN_PASSWORD:-Password123456!}"
-ADMIN_NEW_PASSWORD="${ADMIN_NEW_PASSWORD:-Password123456!updated}"
-SECOND_ADMIN_EMAIL="${SECOND_ADMIN_EMAIL:-browser-second-admin@example.com}"
-SITE_NAME="${SITE_NAME:-MySQL/MariaDB Browser Regression}"
-MYSQL_DATABASE_URL="${MYSQL_DATABASE_URL:-}"
 BROWSER_BASE_URL="${BROWSER_BASE_URL:-http://127.0.0.1:${APP_HOST_PORT}}"
 BROWSER_PHASE_TIMEOUT_MS="${BROWSER_PHASE_TIMEOUT_MS:-45000}"
 MYSQL_DATA_DIR="${MYSQL_DATA_DIR:-}"
@@ -27,15 +18,9 @@ BROWSER_TMP_PARENT_DIR="${BROWSER_TMP_PARENT_DIR:-${TMPDIR:-${ROOT_DIR}/tmp}}"
 source "${ROOT_DIR}/scripts/compose-runtime.sh"
 
 configured_container_names() {
-  compose config 2>/dev/null | sed -n 's/^[[:space:]]*container_name:[[:space:]]*//p'
-}
-
-remove_container_name_conflicts() {
   local container_name
   local container_id
 
-  while IFS= read -r container_name; do
-    [[ -n "${container_name}" ]] || continue
     container_id="$(docker ps -aq -f "name=^/${container_name}$")"
     if [[ -n "${container_id}" ]]; then
       log_step "Removing conflicting container ${container_name}"
@@ -188,13 +173,6 @@ uses_mariadb_compose_file() {
 }
 
 default_mysql_database_url() {
-  compose_variant_default_database_url
-}
-
-default_mysql_data_dir() {
-  compose_variant_default_data_dir
-}
-
 reset_mysql_data_dir_if_needed() {
   if [[ "${MYSQL_SMOKE_RESET_DATA_DIR}" != "1" ]]; then
     return 0
@@ -203,13 +181,6 @@ reset_mysql_data_dir_if_needed() {
   if ! uses_mysql_compose_file; then
     return 0
   fi
-
-  log_step "Resetting MySQL/MariaDB browser regression data directory"
-  rm -rf "${MYSQL_DATA_DIR}"
-  mkdir -p "${MYSQL_DATA_DIR}"
-}
-
-ensure_playwright_browser() {
   if BROWSER_EXECUTABLE_PATH="$(detect_browser_executable)"; then
     export BROWSER_EXECUTABLE_PATH
     return 0
@@ -218,28 +189,6 @@ ensure_playwright_browser() {
   log_step "Installing Playwright Chromium"
   (
     cd scripts/browser-regression
-    npx playwright install chromium >/dev/null
-  )
-}
-
-expected_browser_database_connection() {
-  case "${MYSQL_DATABASE_URL}" in
-    mariadb://*)
-      printf 'mariadb://******'
-      ;;
-    mysql://*)
-      printf 'mysql://******'
-      ;;
-    *)
-      printf '******'
-      ;;
-  esac
-}
-
-expected_browser_cache_connection() {
-  case "${CACHE_MODE}" in
-    redis8|dragonfly)
-      printf 'redis://******'
       ;;
     none)
       printf '未配置 REDIS_URL'
@@ -321,25 +270,6 @@ assert_cache_health_component
 log_step "Browser phase 1: check preconfigured database or run bootstrap fallback"
 phase_one_output="$(run_browser_phase "bootstrap-mysql")"
 phase_one_skipped="$(printf '%s' "${phase_one_output}" | jq -r '.skipped // false')"
-
-if [[ "${phase_one_skipped}" != "true" ]]; then
-  log_step "Restarting app after database bootstrap fallback"
-  compose restart app >/dev/null
-  wait_for_url "${health_url}" "${SMOKE_TIMEOUT_SECONDS}"
-  assert_cache_health_component
-fi
-
-log_step "Browser phase 2: install wizard, first-run guide, maintenance backup flow"
-phase_two_output="$(run_browser_phase "install-and-backup")"
-backup_filename="$(printf '%s' "${phase_two_output}" | jq -r '.backupFilename')"
-if [[ -z "${backup_filename}" || "${backup_filename}" == "null" ]]; then
-  echo "Browser regression did not return a backup filename" >&2
-  exit 1
-fi
-
-log_step "Browser phase 3: verify backup audit and maintenance wording"
-run_browser_phase "verify-backup-audit" BROWSER_BACKUP_FILENAME="${backup_filename}" >/dev/null
-
 log_step "Seeding second admin for demotion regression"
 seed_second_admin_for_demotion_regression
 

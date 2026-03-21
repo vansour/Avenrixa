@@ -20,8 +20,6 @@ ADMIN_PASSWORD="${ADMIN_PASSWORD:-Password123456!}"
 ADMIN_NEW_PASSWORD="${ADMIN_NEW_PASSWORD:-Password654321!}"
 SITE_NAME="${SITE_NAME:-Avenrixa Compose Smoke}"
 LINK_BASE_URL="${LINK_BASE_URL:-http://127.0.0.1:${APP_HOST_PORT}/login}"
-MYSQL_DATABASE_URL="${MYSQL_DATABASE_URL:-}"
-POSTGRES_DATABASE_URL="${POSTGRES_DATABASE_URL:-}"
 MYSQL_DATA_DIR="${MYSQL_DATA_DIR:-}"
 RUNTIME_DATA_DIR="${RUNTIME_DATA_DIR:-}"
 
@@ -69,22 +67,10 @@ resolve_smoke_flow() {
       ;;
     mysql|mariadb|mysql-ops|mariadb-ops)
       printf 'mysql'
-      return 0
-      ;;
-  esac
-
-  printf 'health'
 }
 
 uses_mysql_compose_file() {
   compose_variant_uses_mysql
-}
-
-uses_mariadb_compose_file() {
-  compose_variant_uses_mariadb
-}
-
-default_mysql_database_url() {
   compose_variant_default_database_url
 }
 
@@ -93,21 +79,6 @@ default_postgres_database_url() {
 }
 
 default_runtime_data_dir() {
-  compose_variant_default_data_dir
-}
-
-default_mysql_data_dir() {
-  default_runtime_data_dir
-}
-
-require_commands() {
-  local required_commands=(docker curl jq)
-
-  if [[ "${CURRENT_FLOW}" == "mysql" || "${CURRENT_FLOW}" == "postgres" ]]; then
-    required_commands+=(jq base64 mktemp)
-  fi
-  if [[ "${CURRENT_FLOW}" == "postgres" ]]; then
-    required_commands+=(date)
   fi
 
   for command in "${required_commands[@]}"; do
@@ -294,10 +265,6 @@ page_has_image() {
   local image_key="$2"
 
   printf '%s' "${payload}" | jq -r --arg image_key "${image_key}" \
-    '.data | map(select(.image_key == $image_key)) | length'
-}
-
-page_has_backup() {
   local payload="$1"
   local filename="$2"
 
@@ -858,48 +825,6 @@ configure_mysql_runtime() {
       log_step "Reusing existing MySQL/MariaDB bootstrap fallback config"
     fi
 
-    log_step "Restarting app to enter runtime mode"
-    compose restart app >/dev/null
-  else
-    expect_eq "${mode}" "runtime" "MySQL/MariaDB compose should expose runtime bootstrap status"
-    expect_eq "${database_kind}" "mysql" "MySQL/MariaDB compose should run with mysql database kind"
-  fi
-
-  wait_for_url "${api_base}/install/status" "${SMOKE_TIMEOUT_SECONDS}"
-  assert_cache_health_component
-}
-
-install_mysql_app() {
-  local install_status
-  local install_payload
-  local admin_me
-
-  install_status="$(curl -fsS "${api_base}/install/status")"
-  expect_eq \
-    "$(printf '%s' "${install_status}" | jq -r '.installed')" \
-    "false" \
-    "MySQL/MariaDB smoke requires an uninstalled database"
-
-  log_step "Completing installation wizard"
-  install_payload="$(
-    jq -n \
-      --arg admin_email "${ADMIN_EMAIL}" \
-      --arg admin_password "${ADMIN_PASSWORD}" \
-      --arg site_name "${SITE_NAME}" \
-      --arg link_base_url "${LINK_BASE_URL}" \
-      '{
-        admin_email: $admin_email,
-        admin_password: $admin_password,
-        favicon_data_url: null,
-        config: {
-          site_name: $site_name,
-          storage_backend: "local",
-          local_storage_path: "/data/images",
-          mail_enabled: false,
-          mail_smtp_host: "",
-          mail_smtp_port: 1025,
-          mail_smtp_user: null,
-          mail_smtp_password: null,
           mail_from_email: "noreply@example.com",
           mail_from_name: "Avenrixa",
           mail_link_base_url: $link_base_url,
@@ -944,63 +869,6 @@ run_mysql_image_smoke() {
   image_key="$(printf '%s' "${upload_response}" | jq -r '.image_key')"
   expect_non_empty "${image_key}" "upload should return image_key"
 
-  images_page="$(curl -fsS -b "${ADMIN_COOKIE_JAR}" "${api_base}/images?limit=20")"
-  expect_eq \
-    "$(page_has_image "${images_page}" "${image_key}")" \
-    "1" \
-    "active image list should contain uploaded image"
-
-  image_detail="$(curl -fsS -b "${ADMIN_COOKIE_JAR}" "${api_base}/images/${image_key}")"
-  expect_eq \
-    "$(printf '%s' "${image_detail}" | jq -r '.image_key')" \
-    "${image_key}" \
-    "image detail should return uploaded image"
-
-  log_step "Deleting image"
-  curl -fsS \
-    -b "${ADMIN_COOKIE_JAR}" \
-    -X DELETE "${api_base}/images" \
-    -H 'Content-Type: application/json' \
-    -d "$(jq -n --arg image_key "${image_key}" '{image_keys: [$image_key]}')" \
-    >/dev/null
-
-  images_page="$(curl -fsS -b "${ADMIN_COOKIE_JAR}" "${api_base}/images?limit=20")"
-  expect_eq \
-    "$(page_has_image "${images_page}" "${image_key}")" \
-    "0" \
-    "active image list should not contain deleted image"
-}
-
-run_mysql_backup_smoke() {
-  local backup_filename
-
-  backup_filename="$(create_mysql_backup)"
-  download_mysql_backup "${backup_filename}"
-  assert_mysql_restore_ops_only "${backup_filename}"
-  delete_mysql_backup "${backup_filename}"
-}
-
-create_mysql_backup() {
-  local backup_response
-  local backup_filename
-  local backups_page
-
-  log_step "Creating MySQL/MariaDB backup" >&2
-  backup_response="$(curl -fsS -b "${ADMIN_COOKIE_JAR}" -X POST "${api_base}/backup")"
-  backup_filename="$(printf '%s' "${backup_response}" | jq -r '.filename')"
-  expect_non_empty "${backup_filename}" "backup creation should return filename"
-
-  backups_page="$(curl -fsS -b "${ADMIN_COOKIE_JAR}" "${api_base}/backups")"
-  expect_eq \
-    "$(page_has_backup "${backups_page}" "${backup_filename}")" \
-    "1" \
-    "backup list should contain created MySQL/MariaDB backup"
-
-  printf '%s' "${backup_filename}"
-}
-
-download_mysql_backup() {
-  local backup_filename="$1"
 
   log_step "Downloading MySQL/MariaDB backup"
   curl -fsS \
@@ -1060,49 +928,6 @@ assert_mysql_restore_ops_only() {
     "$(printf '%s' "${precheck_response}" | jq -r '.object_rollback_anchor.strategy // empty')" \
     "local-directory-snapshot" \
     "MySQL/MariaDB restore precheck should expose local object rollback anchor"
-  expect_eq \
-    "$(printf '%s' "${precheck_response}" | jq -r '.semantics.ui_restore_supported')" \
-    "false" \
-    "MySQL/MariaDB backup semantics should mark page restore unsupported"
-  expect_eq \
-    "$(printf '%s' "${precheck_response}" | jq -r '.semantics.restore_mode')" \
-    "ops-tooling-only" \
-    "MySQL/MariaDB backup semantics should expose ops-only restore mode"
-  expect_eq \
-    "$(printf '%s' "${precheck_response}" | jq -r '[.blockers[] | select(. == "当前这类备份不支持页面恢复，只支持下载或运维侧恢复。")] | length')" \
-    "1" \
-    "MySQL/MariaDB restore precheck should explain why page restore is blocked"
-
-  schedule_http_code="$(
-    curl -s -o /dev/null -w '%{http_code}' \
-      -b "${ADMIN_COOKIE_JAR}" \
-      -X POST "${api_base}/backups/${backup_filename}/restore"
-  )"
-  expect_eq \
-    "${schedule_http_code}" \
-    "400" \
-    "MySQL/MariaDB restore scheduling should be rejected in the page flow"
-}
-
-run_mysql_auth_smoke() {
-  local post_logout_status
-
-  log_step "Logging out and logging back in"
-  curl -fsS \
-    -b "${ADMIN_COOKIE_JAR}" \
-    -c "${ADMIN_COOKIE_JAR}" \
-    -X POST "${api_base}/auth/logout" \
-    >/dev/null
-
-  post_logout_status="$(
-    curl -s -o /dev/null -w '%{http_code}' -b "${ADMIN_COOKIE_JAR}" "${api_base}/auth/me"
-  )"
-  expect_eq "${post_logout_status}" "401" "logout should invalidate admin session"
-  login_admin
-}
-
-run_mysql_smoke() {
-  prepare_mysql_fixture
 
   log_step "Waiting for bootstrap health"
   wait_for_url "${health_url}" "${SMOKE_TIMEOUT_SECONDS}"
@@ -1146,13 +971,6 @@ case "${CURRENT_FLOW}" in
     exit 1
     ;;
 esac
-
-require_commands
-
-reset_runtime_data_dir_if_needed
-
-echo "Using compose variant: ${COMPOSE_VARIANT}"
-echo "Smoke flow: ${CURRENT_FLOW}"
 echo "Cache mode: ${CACHE_MODE}"
 echo "Smoke health URL: ${health_url}"
 echo "Runtime data dir: ${RUNTIME_DATA_DIR}"
@@ -1162,14 +980,3 @@ remove_container_name_conflicts
 compose build
 start_stack
 
-case "${CURRENT_FLOW}" in
-  health)
-    run_health_smoke
-    ;;
-  postgres)
-    run_postgres_smoke
-    ;;
-  mysql)
-    run_mysql_smoke
-    ;;
-esac
