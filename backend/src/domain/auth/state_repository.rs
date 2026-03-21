@@ -24,6 +24,7 @@ pub trait AuthStateRepository: Send + Sync {
 
     async fn bump_user_token_version(&self, user_id: Uuid) -> Result<u64, sqlx::Error>;
 
+    #[allow(dead_code)]
     async fn bump_session_epoch(&self) -> Result<u64, sqlx::Error>;
 
     async fn revoke_token_hash(
@@ -35,7 +36,7 @@ pub trait AuthStateRepository: Send + Sync {
     async fn is_token_hash_revoked(&self, token_hash: &str) -> Result<bool, sqlx::Error>;
 
     async fn purge_expired_revoked_tokens(&self, cutoff: DateTime<Utc>)
-        -> Result<u64, sqlx::Error>;
+    -> Result<u64, sqlx::Error>;
 }
 
 pub fn hash_token(token: &str) -> String {
@@ -120,7 +121,10 @@ impl AuthStateRepository for DatabaseAuthStateRepository {
         }
     }
 
-    async fn purge_expired_revoked_tokens(&self, cutoff: DateTime<Utc>) -> Result<u64, sqlx::Error> {
+    async fn purge_expired_revoked_tokens(
+        &self,
+        cutoff: DateTime<Utc>,
+    ) -> Result<u64, sqlx::Error> {
         match self {
             Self::Postgres(repo) => repo.purge_expired_revoked_tokens(cutoff).await,
         }
@@ -248,13 +252,14 @@ impl AuthStateRepository for PostgresAuthStateRepository {
         Ok(result.is_some())
     }
 
-    async fn purge_expired_revoked_tokens(&self, cutoff: DateTime<Utc>) -> Result<u64, sqlx::Error> {
-        let result = sqlx::query(
-            "DELETE FROM revoked_token_hashes WHERE expires_at < $1",
-        )
-        .bind(cutoff)
-        .execute(&self.pool)
-        .await?;
+    async fn purge_expired_revoked_tokens(
+        &self,
+        cutoff: DateTime<Utc>,
+    ) -> Result<u64, sqlx::Error> {
+        let result = sqlx::query("DELETE FROM revoked_token_hashes WHERE expires_at < $1")
+            .bind(cutoff)
+            .execute(&self.pool)
+            .await?;
 
         Ok(result.rows_affected())
     }

@@ -53,8 +53,7 @@ impl ImageRepository for PostgresImageRepository {
         user_id: Uuid,
         image_ids: &[Uuid],
     ) -> Result<u64, sqlx::Error> {
-        self.hard_delete_images_by_user(user_id, image_ids)
-            .await
+        self.hard_delete_images_by_user(user_id, image_ids).await
     }
 
     async fn find_image_by_hash(

@@ -229,7 +229,10 @@ mod tests {
         let resolved = store.resolve_runtime_database_config(config, Some(&file));
 
         assert_eq!(resolved.database.kind, DatabaseKind::Postgres);
-        assert_eq!(resolved.database.url, "postgresql://user:pass@postgres:5432/image");
+        assert_eq!(
+            resolved.database.url,
+            "postgresql://user:pass@postgres:5432/image"
+        );
     }
 
     #[test]

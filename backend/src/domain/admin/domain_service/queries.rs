@@ -114,18 +114,16 @@ impl AdminDomainService {
         let offset = (page - 1) * page_size;
 
         let logs = match &self.database {
-            DatabasePool::Postgres(pool) => {
-                sqlx::query_as::<_, AuditLogRecord>(
-                    "SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT $1 OFFSET $2",
-                )
-                .bind(page_size)
-                .bind(offset)
-                .fetch_all(pool)
-                .await?
-                .into_iter()
-                .map(Into::into)
-                .collect()
-            }
+            DatabasePool::Postgres(pool) => sqlx::query_as::<_, AuditLogRecord>(
+                "SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT $1 OFFSET $2",
+            )
+            .bind(page_size)
+            .bind(offset)
+            .fetch_all(pool)
+            .await?
+            .into_iter()
+            .map(Into::into)
+            .collect(),
         };
 
         let total = match &self.database {

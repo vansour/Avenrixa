@@ -1,8 +1,8 @@
 use std::borrow::Cow;
 
 use once_cell::sync::Lazy;
-use sqlx::migrate::{Migration, MigrationType};
 use sqlx::migrate::Migrator;
+use sqlx::migrate::{Migration, MigrationType};
 
 fn migration(version: i64, description: &'static str, sql: &'static str) -> Migration {
     Migration::new(
@@ -41,11 +41,7 @@ static POSTGRES_MIGRATOR: Lazy<Migrator> = Lazy::new(|| Migrator {
             "add storage cleanup jobs",
             POSTGRES_0005_ADD_STORAGE_CLEANUP_JOBS_SQL,
         ),
-        migration(
-            6,
-            "add media blobs",
-            POSTGRES_0006_ADD_MEDIA_BLOBS_SQL,
-        ),
+        migration(6, "add media blobs", POSTGRES_0006_ADD_MEDIA_BLOBS_SQL),
     ]),
     ..Migrator::DEFAULT
 });

@@ -4,8 +4,8 @@ use chrono::{DateTime, Utc};
 use sqlx::{Postgres, QueryBuilder};
 use uuid::Uuid;
 
-use super::sql::{IMAGE_SELECT_COLUMNS, MEDIA_BLOB_SELECT_COLUMNS};
 use super::PostgresImageRepository;
+use super::sql::{IMAGE_SELECT_COLUMNS, MEDIA_BLOB_SELECT_COLUMNS};
 use crate::models::{Image, ImageStatus, MediaBlob};
 
 fn active_status() -> &'static str {
@@ -244,4 +244,3 @@ impl PostgresImageRepository {
         Ok(())
     }
 }
-

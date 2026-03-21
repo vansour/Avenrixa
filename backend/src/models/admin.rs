@@ -3,8 +3,8 @@ use serde::{Deserialize, Serialize};
 pub use shared_types::admin::{
     AdminSettingsConfig, AuditLog, AuditLogResponse, ComponentStatus, HealthMetrics, HealthStatus,
     InstallBootstrapRequest, InstallBootstrapResponse, InstallStatusResponse, Setting,
-    StorageDirectoryBrowseResponse, StorageDirectoryEntry, SystemStats, UpdateAdminSettingsConfigRequest,
-    UpdateSettingRequest,
+    StorageDirectoryBrowseResponse, StorageDirectoryEntry, SystemStats,
+    UpdateAdminSettingsConfigRequest, UpdateSettingRequest,
 };
 pub use shared_types::backup::{
     BackupDatabaseFamily, BackupFileSummary, BackupObjectRollbackAnchor,

@@ -2,9 +2,7 @@ mod page_controller;
 mod summary;
 
 use crate::pages::settings_page::render_general_fields_compact;
-use crate::types::api::{
-    AdminSettingsConfig, BootstrapStatusResponse, InstallBootstrapResponse,
-};
+use crate::types::api::{AdminSettingsConfig, BootstrapStatusResponse, InstallBootstrapResponse};
 use dioxus::prelude::*;
 
 use page_controller::use_install_wizard_controller;
@@ -32,7 +30,6 @@ pub fn InstallWizardPage(
     let mut show_admin_password = controller.show_admin_password;
     let mut show_confirm_password = controller.show_confirm_password;
     let mut current_step = controller.current_step;
-
 
     let handle_primary_action = move |_| {
         let step = current_step();

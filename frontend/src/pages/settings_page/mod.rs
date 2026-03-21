@@ -15,8 +15,8 @@ use controllers::{
 use page_controller::use_settings_page_controller;
 pub(super) use page_controller::{handle_settings_auth_error, settings_auth_expired_message};
 use summary::{
-    count_config_changes, current_mail_summary, current_storage_summary,
-    resolved_settings_section, settings_anchor_for_section,
+    count_config_changes, current_mail_summary, current_storage_summary, resolved_settings_section,
+    settings_anchor_for_section,
 };
 use view::{
     ADMIN_SETTINGS_SECTIONS, SettingsSection, USER_SETTINGS_SECTIONS, render_settings_fields,
@@ -24,8 +24,8 @@ use view::{
 
 pub use state::{SettingsFormState, default_mail_link_base_url};
 pub use view::{
-    render_general_fields, render_general_fields_compact,
-    render_storage_fields, render_storage_fields_compact,
+    render_general_fields, render_general_fields_compact, render_storage_fields,
+    render_storage_fields_compact,
 };
 
 #[component]

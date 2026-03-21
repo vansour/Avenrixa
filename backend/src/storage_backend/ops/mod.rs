@@ -45,6 +45,8 @@ pub(super) async fn delete_with_storage_snapshot(
 ) -> Result<(), AppError> {
     validate_file_key(file_key)?;
     match snapshot.storage_backend {
-        StorageBackend::Local => local::delete_with_base_path(&snapshot.local_storage_path, file_key).await,
+        StorageBackend::Local => {
+            local::delete_with_base_path(&snapshot.local_storage_path, file_key).await
+        }
     }
 }

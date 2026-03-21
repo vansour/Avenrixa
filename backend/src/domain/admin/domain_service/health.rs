@@ -69,10 +69,7 @@ impl AdminDomainService {
                     if overall_status == HealthState::Healthy {
                         overall_status = HealthState::Degraded;
                     }
-                    ComponentStatus::degraded(format!(
-                        "外部缓存不可用，已降级为无缓存模式: {}",
-                        e
-                    ))
+                    ComponentStatus::degraded(format!("外部缓存不可用，已降级为无缓存模式: {}", e))
                 }
             }
         } else {
@@ -155,16 +152,14 @@ impl AdminDomainService {
 
     async fn storage_used_mb(&self) -> Option<f64> {
         match &self.database {
-            DatabasePool::Postgres(pool) => {
-                sqlx::query_scalar::<_, Option<i64>>(
-                    "SELECT CAST(SUM(size) AS BIGINT) FROM images WHERE status = 'active'"
-                )
-                .fetch_one(pool)
-                .await
-                .ok()
-                .flatten()
-                .map(|size| size as f64 / 1024.0 / 1024.0)
-            }
+            DatabasePool::Postgres(pool) => sqlx::query_scalar::<_, Option<i64>>(
+                "SELECT CAST(SUM(size) AS BIGINT) FROM images WHERE status = 'active'",
+            )
+            .fetch_one(pool)
+            .await
+            .ok()
+            .flatten()
+            .map(|size| size as f64 / 1024.0 / 1024.0),
         }
     }
 }

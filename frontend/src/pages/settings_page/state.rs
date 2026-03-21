@@ -1,6 +1,5 @@
 use crate::types::api::{
-    AdminSettingsConfig, StorageBackendKind,
-    UpdateAdminSettingsConfigRequest,
+    AdminSettingsConfig, StorageBackendKind, UpdateAdminSettingsConfigRequest,
 };
 use dioxus::prelude::*;
 

@@ -1,14 +1,10 @@
-use sqlx::QueryBuilder;
 use uuid::Uuid;
 
 use super::PostgresImageRepository;
 use crate::models::Image;
 
 impl PostgresImageRepository {
-    pub(super) async fn create_image(
-        &self,
-        image: &Image,
-    ) -> Result<(), sqlx::Error> {
+    pub(super) async fn create_image(&self, image: &Image) -> Result<(), sqlx::Error> {
         sqlx::query(
             "INSERT INTO images (id, user_id, filename, thumbnail, size, hash, format, views, status, expires_at, created_at)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
@@ -29,10 +25,7 @@ impl PostgresImageRepository {
         Ok(())
     }
 
-    pub(super) async fn update_image(
-        &self,
-        image: &Image,
-    ) -> Result<(), sqlx::Error> {
+    pub(super) async fn update_image(&self, image: &Image) -> Result<(), sqlx::Error> {
         sqlx::query(
             "UPDATE images
              SET filename = $1,
@@ -68,26 +61,16 @@ impl PostgresImageRepository {
             return Ok(0);
         }
 
-        let placeholders: String = image_ids.iter().map(|_| "?").collect::<Vec<_>>();
-        let placeholders_str = placeholders.join(",");
+        let placeholders: String = vec!["?"; image_ids.len()].join(",");
 
         sqlx::query(&format!(
-            "DELETE FROM images WHERE user_id = $1 AND id = ANY({})",
-            placeholders_str
+            "DELETE FROM images WHERE user_id = $1 AND id IN ({})",
+            placeholders
         ))
         .bind(user_id)
         .execute(&self.pool)
         .await?;
 
-        let count: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM images WHERE user_id = $1 AND id = ANY({})",
-            user_id,
-            image_ids.len() as i64
-        )
-        .fetch_one(&self.pool)
-        .await?
-        .unwrap_or(0);
-
-        Ok(count)
+        Ok(image_ids.len() as u64)
     }
 }

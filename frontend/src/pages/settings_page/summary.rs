@@ -1,8 +1,8 @@
 use crate::store::SettingsAnchor;
 use crate::types::api::AdminSettingsConfig;
 
-use super::state::{SettingsFormState, display_mail_smtp_port};
 use super::SettingsSection;
+use super::state::{SettingsFormState, display_mail_smtp_port};
 
 pub(super) fn resolved_settings_section(
     is_admin: bool,

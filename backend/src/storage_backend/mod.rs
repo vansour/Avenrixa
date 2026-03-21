@@ -2,8 +2,8 @@ mod cleanup;
 mod ops;
 mod path;
 
-use std::sync::Arc;
 use crate::runtime_settings::RuntimeSettings;
+use std::sync::Arc;
 
 pub use cleanup::{enqueue_storage_cleanup_jobs, process_pending_storage_cleanup_jobs};
 
@@ -49,7 +49,10 @@ impl StorageManager {
         Ok(())
     }
 
-    pub async fn apply_runtime_settings(&self, settings: RuntimeSettings) -> Result<(), crate::error::AppError> {
+    pub async fn apply_runtime_settings(
+        &self,
+        settings: RuntimeSettings,
+    ) -> Result<(), crate::error::AppError> {
         self.validate_runtime_settings(&settings).await?;
 
         {
@@ -68,7 +71,10 @@ impl StorageManager {
         self.local_health_status(&settings).await
     }
 
-    async fn local_health_status(&self, settings: &RuntimeSettings) -> crate::models::ComponentStatus {
+    async fn local_health_status(
+        &self,
+        settings: &RuntimeSettings,
+    ) -> crate::models::ComponentStatus {
         let path = std::path::Path::new(&settings.local_storage_path);
         if path.exists() {
             crate::models::ComponentStatus {

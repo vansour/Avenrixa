@@ -7,10 +7,7 @@ use tokio::process::Command;
 use tracing::{error, info};
 use uuid::Uuid;
 
-use self::commands::{
-    pg_dump_binary,
-    run_streaming_dump_command,
-};
+use self::commands::{pg_dump_binary, run_streaming_dump_command};
 use self::files::{
     backup_path, ensure_nonempty_backup_file, file_timestamp, is_valid_backup_filename,
     persist_backup_manifest,
@@ -435,12 +432,7 @@ mod tests {
             config.storage.path.clone(),
         )));
 
-        AdminDomainService::new(
-            database,
-            None,
-            config,
-            storage_manager,
-        )
+        AdminDomainService::new(database, None, config, storage_manager)
     }
 
     fn write_script(path: &Path, body: &str) {

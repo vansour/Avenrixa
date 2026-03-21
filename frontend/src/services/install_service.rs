@@ -1,8 +1,8 @@
 use crate::services::api_client::ApiClient;
 use crate::types::api::{
     BootstrapStatusResponse, InstallBootstrapRequest, InstallBootstrapResponse,
-    InstallStatusResponse, StorageDirectoryBrowseResponse,
-    UpdateBootstrapDatabaseConfigRequest, UpdateBootstrapDatabaseConfigResponse,
+    InstallStatusResponse, StorageDirectoryBrowseResponse, UpdateBootstrapDatabaseConfigRequest,
+    UpdateBootstrapDatabaseConfigResponse,
 };
 use crate::types::errors::Result;
 

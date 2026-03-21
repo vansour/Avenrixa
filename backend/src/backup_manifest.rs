@@ -1,6 +1,6 @@
-use std::path::{Path, PathBuf};
 use chrono::{DateTime, Utc};
 use serde::Serialize;
+use std::path::{Path, PathBuf};
 
 use crate::config::DatabaseKind;
 use crate::models::{
@@ -114,13 +114,13 @@ fn normalize_backup_manifest(
 
 #[cfg(test)]
 mod tests {
-    use chrono::Utc;
-    use shared_types::backup::BackupKind;
     use crate::models::{
         BackupDatabaseFamily, BackupMetadataManifest, BackupObjectRollbackAnchor,
         BackupObjectRollbackStrategy, BackupRestoreStorageSummary, BackupSemantics,
         StorageBackendKind,
     };
+    use chrono::Utc;
+    use shared_types::backup::BackupKind;
 
     #[test]
     fn legacy_manifest_is_upgraded_with_inferred_semantics() {

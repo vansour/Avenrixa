@@ -20,13 +20,13 @@ use crate::db::{
 use crate::error::AppError;
 use crate::handlers::auth::common::{append_session_cookies, issue_session_tokens};
 use crate::handlers::storage_browser::{BrowseStorageDirectoriesQuery, browse_storage_directories};
+use crate::models::storage_backend_kind_from_runtime;
 use crate::models::{
     AdminSettingsConfig, InstallBootstrapRequest, InstallBootstrapResponse, InstallStatusResponse,
     StorageDirectoryBrowseResponse,
 };
 use crate::runtime_settings::RuntimeSettings;
 use crate::runtime_settings::validate_and_merge;
-use crate::models::storage_backend_kind_from_runtime;
 
 fn runtime_settings_to_admin_config(
     settings: &RuntimeSettings,
@@ -216,7 +216,10 @@ pub async fn bootstrap_installation(
                 created_at: user_response.created_at,
             },
             favicon_configured: favicon_data_url.is_some(),
-            config: runtime_settings_to_admin_config(&settings, state.storage_manager.restart_required(&settings)),
+            config: runtime_settings_to_admin_config(
+                &settings,
+                state.storage_manager.restart_required(&settings),
+            ),
         }),
     ))
 }
@@ -277,7 +280,10 @@ fn public_install_status_config(
     installed: bool,
     restart_required: bool,
 ) -> AdminSettingsConfig {
-    let mut config = runtime_settings_to_admin_config(settings, if installed { false } else { restart_required });
+    let mut config = runtime_settings_to_admin_config(
+        settings,
+        if installed { false } else { restart_required },
+    );
 
     // `install/status` is intentionally public because the login shell and first-run flow
     // need basic bootstrap state. Do not expose runtime connection details or secret-bearing

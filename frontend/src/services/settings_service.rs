@@ -1,7 +1,6 @@
 use crate::services::api_client::ApiClient;
 use crate::types::api::{
-    AdminSettingsConfig, StorageDirectoryBrowseResponse,
-    UpdateAdminSettingsConfigRequest,
+    AdminSettingsConfig, StorageDirectoryBrowseResponse, UpdateAdminSettingsConfigRequest,
 };
 use crate::types::errors::Result;
 

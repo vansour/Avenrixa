@@ -1,10 +1,7 @@
 use sqlx::PgPool;
 use tracing::info;
 
-use super::{
-    DatabasePool,
-    migrations::postgres_migrator,
-};
+use super::{DatabasePool, migrations::postgres_migrator};
 
 pub async fn run_migrations(pool: &DatabasePool) -> Result<(), sqlx::Error> {
     match pool {

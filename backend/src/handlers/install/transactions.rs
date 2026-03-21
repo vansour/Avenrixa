@@ -1,8 +1,7 @@
 use crate::db::{
     AppState, INSTALL_STATE_SETTING_KEY, SITE_FAVICON_DATA_URL_SETTING_KEY,
-    acquire_installation_lock, create_admin_account_tx, delete_admin_account_tx,
-    has_admin_account_tx, is_app_installed_tx, mark_app_installed_tx,
-    upsert_setting_tx, delete_setting_tx,
+    acquire_installation_lock, create_admin_account_tx, delete_admin_account_tx, delete_setting_tx,
+    has_admin_account_tx, is_app_installed_tx, mark_app_installed_tx, upsert_setting_tx,
 };
 use crate::error::AppError;
 use crate::models::User;

@@ -12,8 +12,8 @@ use crate::models::{
 use crate::runtime_settings::{
     RuntimeSettings, SETTING_LOCAL_STORAGE_PATH, SETTING_MAIL_ENABLED, SETTING_MAIL_FROM_EMAIL,
     SETTING_MAIL_FROM_NAME, SETTING_MAIL_LINK_BASE_URL, SETTING_MAIL_SMTP_HOST,
-    SETTING_MAIL_SMTP_PASSWORD, SETTING_MAIL_SMTP_PORT, SETTING_MAIL_SMTP_USER,
-    SETTING_SITE_NAME, SETTING_STORAGE_BACKEND, admin_setting_policy, mask_admin_setting_value,
+    SETTING_MAIL_SMTP_PASSWORD, SETTING_MAIL_SMTP_PORT, SETTING_MAIL_SMTP_USER, SETTING_SITE_NAME,
+    SETTING_STORAGE_BACKEND, admin_setting_policy, mask_admin_setting_value,
 };
 use axum::{
     Json,
@@ -106,7 +106,10 @@ pub async fn update_admin_settings_config(
         .await;
     }
 
-    Ok(Json(runtime_settings_to_admin_config(&updated, restart_required)))
+    Ok(Json(runtime_settings_to_admin_config(
+        &updated,
+        restart_required,
+    )))
 }
 
 pub async fn update_setting(
@@ -195,8 +198,5 @@ fn changed_setting_keys(current: &RuntimeSettings, updated: &RuntimeSettings) ->
 }
 
 fn raw_setting_is_high_risk(key: &str) -> bool {
-    matches!(
-        key,
-        SETTING_STORAGE_BACKEND | SETTING_LOCAL_STORAGE_PATH
-    )
+    matches!(key, SETTING_STORAGE_BACKEND | SETTING_LOCAL_STORAGE_PATH)
 }

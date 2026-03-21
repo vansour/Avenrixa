@@ -83,7 +83,10 @@ fn admin_routes() -> Router<AppState> {
             "/backups/{filename}/restore",
             routing::post(admin::schedule_restore),
         )
-        .route("/backup-restore/status", routing::get(admin::get_restore_status))
+        .route(
+            "/backup-restore/status",
+            routing::get(admin::get_restore_status),
+        )
         .route("/users", routing::get(admin::get_users))
         .route("/users/{id}", routing::put(admin::update_user_role))
         .route("/audit-logs", routing::get(admin::get_audit_logs))

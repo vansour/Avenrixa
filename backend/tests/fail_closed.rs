@@ -63,10 +63,10 @@ fn configured_runtime_database_failure_exits_instead_of_falling_back_to_bootstra
     );
     assert!(
         !stderr.contains("refusing to expose bootstrap mode")
-        || stderr.contains("Runtime initialization failed")
-        && !stderr.contains("Configuration validation failed")
-        && !stderr.contains("PostgreSQL 数据库 URL")
-        && !stderr.contains("JWT_SECRET"),
+            || stderr.contains("Runtime initialization failed")
+                && !stderr.contains("Configuration validation failed")
+                && !stderr.contains("PostgreSQL 数据库 URL")
+                && !stderr.contains("JWT_SECRET"),
         "stderr should indicate failed startup behavior\nstderr:\n{}",
         stderr
     );

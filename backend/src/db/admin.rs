@@ -61,10 +61,11 @@ pub async fn acquire_installation_lock(
 pub async fn is_app_installed(pool: &DatabasePool) -> Result<bool, sqlx::Error> {
     match pool {
         DatabasePool::Postgres(pool) => {
-            let value = sqlx::query_scalar::<_, String>("SELECT value FROM settings WHERE key = $1")
-                .bind(INSTALL_STATE_SETTING_KEY)
-                .fetch_optional(pool)
-                .await?;
+            let value =
+                sqlx::query_scalar::<_, String>("SELECT value FROM settings WHERE key = $1")
+                    .bind(INSTALL_STATE_SETTING_KEY)
+                    .fetch_optional(pool)
+                    .await?;
             Ok(matches!(
                 value.as_deref().map(str::trim),
                 Some("true" | "TRUE" | "True" | "1")
