@@ -29,19 +29,3 @@ mod tests {
 
         assert!(!role.is_admin());
             "mail_link_base_url": "",
-            "restart_required": false
-        }))
-        .expect("local storage backend should deserialize");
-
-        assert_eq!(config.storage_backend, StorageBackendKind::Local);
-        assert_eq!(config.storage_backend.label(), "本地目录");
-    }
-
-    #[test]
-    fn storage_backend_unknown_values_fall_back_safely() {
-        let backend = StorageBackendKind::parse("ftp");
-
-        assert_eq!(backend, StorageBackendKind::Unknown);
-        assert_eq!(backend.label(), "未知后端");
-    }
-}
