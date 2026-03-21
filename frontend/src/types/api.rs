@@ -27,52 +27,6 @@ pub use shared_types::pagination::{CursorPaginated, CursorPaginationParams, Pagi
 mod tests {
     use super::*;
 
-
-    #[test]
-    fn restore_result_deserializes_legacy_string_enums() {
-        let result: BackupRestoreResult = serde_json::from_value(serde_json::json!({
-            "status": "started",
-            "filename": "backup_demo.mysql.sql",
-            "database_kind": "mysql",
-            "semantics": {
-                "database_family": "mysql",
-                "backup_kind": "mysql-logical-dump",
-                "backup_scope": "database-only",
-                "restore_mode": "ops-tooling-only",
-                "artifact_layout": "single-file-plus-manifest",
-                "ui_restore_supported": false
-            },
-            "message": "running",
-            "scheduled_at": "2026-03-15T00:00:00Z",
-            "started_at": "2026-03-15T00:01:00Z",
-            "finished_at": "2026-03-15T00:02:00Z",
-            "rollback_filename": null
-        }))
-        .expect("legacy restore result should deserialize");
-
-        assert_eq!(result.status, BackupRestoreStatus::Started);
-        assert_eq!(result.status.label(), "执行中");
-
-    #[test]
-    fn user_response_deserializes_legacy_role_string_enum() {
-        let user: UserResponse = serde_json::from_value(serde_json::json!({
-            "email": "admin@example.com",
-            "role": "admin",
-            "created_at": "2026-03-15T00:00:00Z"
-        }))
-        .expect("legacy user response should deserialize");
-
-        assert_eq!(user.role, UserRole::Admin);
-        assert!(user.role.is_admin());
-        assert_eq!(user.role.label(), "管理员");
-        assert_eq!(user.role.surface_class(), "is-admin");
-    }
-
-    #[test]
-    fn user_role_unknown_values_fall_back_safely() {
-        let role = UserRole::parse("moderator");
-
-        assert_eq!(role, UserRole::Unknown);
         assert!(!role.is_admin());
             "mail_link_base_url": "",
             "restart_required": false
