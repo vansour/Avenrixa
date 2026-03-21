@@ -23,9 +23,3 @@ pub use shared_types::common::{HealthState, StorageBackendKind, UserRole};
 pub use shared_types::image::{DeleteRequest, ImageResponse, SetExpiryRequest};
 pub use shared_types::pagination::{CursorPaginated, CursorPaginationParams, PaginationParams};
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-        assert!(!role.is_admin());
-            "mail_link_base_url": "",
