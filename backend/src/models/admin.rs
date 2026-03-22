@@ -3,15 +3,14 @@ use serde::{Deserialize, Serialize};
 pub use shared_types::admin::{
     AdminSettingsConfig, AuditLog, AuditLogResponse, ComponentStatus, HealthMetrics, HealthStatus,
     InstallBootstrapRequest, InstallBootstrapResponse, InstallStatusResponse, Setting,
-    StorageDirectoryBrowseResponse, StorageDirectoryEntry, SystemStats, TestS3StorageConfigRequest,
-    TestS3StorageConfigResponse, UpdateAdminSettingsConfigRequest, UpdateSettingRequest,
+    StorageDirectoryBrowseResponse, StorageDirectoryEntry, SystemStats,
+    UpdateAdminSettingsConfigRequest, UpdateSettingRequest,
 };
 pub use shared_types::backup::{
     BackupDatabaseFamily, BackupFileSummary, BackupObjectRollbackAnchor,
     BackupObjectRollbackStrategy, BackupResponse, BackupRestorePrecheckResponse,
-    BackupRestoreResult, BackupRestoreScheduleResponse, BackupRestoreStatus,
-    BackupRestoreStatusResponse, BackupRestoreStorageSummary, BackupSemantics,
-    PendingBackupRestore,
+    BackupRestoreScheduleResponse, BackupRestoreStatusResponse, BackupRestoreStorageSummary,
+    BackupSemantics,
 };
 pub use shared_types::common::{HealthState, StorageBackendKind};
 use uuid::Uuid;
@@ -49,7 +48,6 @@ impl From<AuditLogRecord> for AuditLog {
 pub fn storage_backend_kind_from_runtime(value: RuntimeStorageBackend) -> StorageBackendKind {
     match value {
         RuntimeStorageBackend::Local => StorageBackendKind::Local,
-        RuntimeStorageBackend::S3 => StorageBackendKind::S3,
     }
 }
 
@@ -58,7 +56,6 @@ pub fn runtime_storage_backend_from_kind(
 ) -> Option<RuntimeStorageBackend> {
     match value {
         StorageBackendKind::Local => Some(RuntimeStorageBackend::Local),
-        StorageBackendKind::S3 => Some(RuntimeStorageBackend::S3),
         StorageBackendKind::Unknown => None,
     }
 }
@@ -66,27 +63,22 @@ pub fn runtime_storage_backend_from_kind(
 pub fn backup_database_family_from_config(value: DatabaseKind) -> BackupDatabaseFamily {
     match value {
         DatabaseKind::Postgres => BackupDatabaseFamily::Postgres,
-        DatabaseKind::MySql => BackupDatabaseFamily::MySql,
-        DatabaseKind::Sqlite => BackupDatabaseFamily::Sqlite,
     }
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn config_database_kind_from_backup_family(
     value: BackupDatabaseFamily,
 ) -> Option<DatabaseKind> {
     match value {
         BackupDatabaseFamily::Postgres => Some(DatabaseKind::Postgres),
-        BackupDatabaseFamily::MySql => Some(DatabaseKind::MySql),
-        BackupDatabaseFamily::Sqlite => Some(DatabaseKind::Sqlite),
-        BackupDatabaseFamily::Unknown => None,
+        _ => None,
     }
 }
 
 pub fn backup_semantics_from_database_kind(kind: DatabaseKind) -> BackupSemantics {
     match kind {
         DatabaseKind::Postgres => BackupSemantics::postgresql_logical_dump(),
-        DatabaseKind::MySql => BackupSemantics::mysql_logical_dump(),
-        DatabaseKind::Sqlite => BackupSemantics::sqlite_database_snapshot(),
     }
 }
 
@@ -98,11 +90,7 @@ pub fn infer_backup_semantics(
         return backup_semantics_from_database_kind(kind);
     }
 
-    if filename.ends_with(".sqlite3") {
-        BackupSemantics::sqlite_database_snapshot()
-    } else if filename.ends_with(".mysql.sql") {
-        BackupSemantics::mysql_logical_dump()
-    } else if filename.ends_with(".sql") {
+    if filename.ends_with(".sql") {
         BackupSemantics::postgresql_logical_dump()
     } else {
         BackupSemantics::unknown()
@@ -132,30 +120,29 @@ fn default_backup_manifest_format_version() -> u32 {
 #[cfg(test)]
 mod tests {
     use crate::config::DatabaseKind;
-    use shared_types::backup::{BackupKind, RestoreMode};
+    use shared_types::backup::{BackupKind, BackupRestoreStatus, RestoreMode};
 
     use super::{
-        BackupDatabaseFamily, BackupObjectRollbackStrategy, BackupRestoreStatus, HealthState,
-        StorageBackendKind, backup_database_family_from_config,
-        backup_semantics_from_database_kind, config_database_kind_from_backup_family,
-        infer_backup_semantics,
+        BackupDatabaseFamily, BackupObjectRollbackStrategy, HealthState, StorageBackendKind,
+        backup_database_family_from_config, backup_semantics_from_database_kind,
+        config_database_kind_from_backup_family, infer_backup_semantics,
     };
 
     #[test]
     fn backup_semantics_infer_from_database_kind() {
-        let semantics = backup_semantics_from_database_kind(DatabaseKind::Sqlite);
-        assert_eq!(semantics.database_family, BackupDatabaseFamily::Sqlite);
-        assert_eq!(semantics.backup_kind, BackupKind::SqliteDatabaseSnapshot);
-        assert_eq!(semantics.restore_mode, RestoreMode::UiRestartFileSwap);
-        assert!(semantics.ui_restore_supported);
+        let semantics = backup_semantics_from_database_kind(DatabaseKind::Postgres);
+        assert_eq!(semantics.database_family, BackupDatabaseFamily::Postgres);
+        assert_eq!(semantics.backup_kind, BackupKind::PostgresqlLogicalDump);
+        assert_eq!(semantics.restore_mode, RestoreMode::DownloadOnly);
+        assert!(!semantics.ui_restore_supported);
     }
 
     #[test]
     fn backup_semantics_infer_from_filename_for_legacy_records() {
-        let semantics = infer_backup_semantics("backup_123.mysql.sql", None);
-        assert_eq!(semantics.database_family, BackupDatabaseFamily::MySql);
-        assert_eq!(semantics.backup_kind, BackupKind::MySqlLogicalDump);
-        assert_eq!(semantics.restore_mode, RestoreMode::OpsToolingOnly);
+        let semantics = infer_backup_semantics("backup_123.sql", None);
+        assert_eq!(semantics.database_family, BackupDatabaseFamily::Postgres);
+        assert_eq!(semantics.backup_kind, BackupKind::PostgresqlLogicalDump);
+        assert_eq!(semantics.restore_mode, RestoreMode::DownloadOnly);
         assert!(!semantics.ui_restore_supported);
     }
 
@@ -192,7 +179,6 @@ mod tests {
             StorageBackendKind::parse("local"),
             StorageBackendKind::Local
         );
-        assert_eq!(StorageBackendKind::parse("S3"), StorageBackendKind::S3);
         assert_eq!(
             StorageBackendKind::parse("ftp"),
             StorageBackendKind::Unknown
@@ -207,7 +193,7 @@ mod tests {
         );
         assert_eq!(
             BackupObjectRollbackStrategy::parse("S3-versioned-rollback-anchor"),
-            BackupObjectRollbackStrategy::S3VersionedRollbackAnchor
+            BackupObjectRollbackStrategy::Unknown
         );
         assert_eq!(
             BackupObjectRollbackStrategy::parse("other"),
@@ -217,12 +203,12 @@ mod tests {
 
     #[test]
     fn backup_database_family_round_trips_config_kind() {
-        let family = backup_database_family_from_config(DatabaseKind::MySql);
+        let family = backup_database_family_from_config(DatabaseKind::Postgres);
 
-        assert_eq!(family, BackupDatabaseFamily::MySql);
+        assert_eq!(family, BackupDatabaseFamily::Postgres);
         assert_eq!(
             config_database_kind_from_backup_family(family),
-            Some(DatabaseKind::MySql)
+            Some(DatabaseKind::Postgres)
         );
         assert_eq!(
             config_database_kind_from_backup_family(BackupDatabaseFamily::Unknown),

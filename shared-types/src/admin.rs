@@ -17,17 +17,12 @@ pub struct AdminSettingsConfig {
     pub mail_from_email: String,
     pub mail_from_name: String,
     pub mail_link_base_url: String,
-    pub s3_endpoint: Option<String>,
-    pub s3_region: Option<String>,
-    pub s3_bucket: Option<String>,
-    pub s3_prefix: Option<String>,
-    pub s3_access_key: Option<String>,
-    pub s3_secret_key_set: bool,
-    pub s3_force_path_style: bool,
     pub restart_required: bool,
+    #[serde(default)]
+    pub settings_version: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct InstallStatusResponse {
     pub installed: bool,
     pub has_admin: bool,
@@ -48,25 +43,10 @@ pub struct StorageDirectoryBrowseResponse {
     pub directories: Vec<StorageDirectoryEntry>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct TestS3StorageConfigRequest {
-    pub s3_endpoint: Option<String>,
-    pub s3_region: Option<String>,
-    pub s3_bucket: Option<String>,
-    pub s3_prefix: Option<String>,
-    pub s3_access_key: Option<String>,
-    pub s3_secret_key: Option<String>,
-    pub s3_secret_key_set: bool,
-    pub s3_force_path_style: Option<bool>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct TestS3StorageConfigResponse {
-    pub message: String,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateAdminSettingsConfigRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_settings_version: Option<String>,
     pub site_name: String,
     pub storage_backend: StorageBackendKind,
     pub local_storage_path: String,
@@ -78,13 +58,6 @@ pub struct UpdateAdminSettingsConfigRequest {
     pub mail_from_email: String,
     pub mail_from_name: String,
     pub mail_link_base_url: String,
-    pub s3_endpoint: Option<String>,
-    pub s3_region: Option<String>,
-    pub s3_bucket: Option<String>,
-    pub s3_prefix: Option<String>,
-    pub s3_access_key: Option<String>,
-    pub s3_secret_key: Option<String>,
-    pub s3_force_path_style: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -193,7 +166,6 @@ pub struct HealthStatus {
     pub status: HealthState,
     pub timestamp: DateTime<Utc>,
     pub database: ComponentStatus,
-    #[serde(alias = "redis")]
     pub cache: ComponentStatus,
     pub storage: ComponentStatus,
     pub version: Option<String>,

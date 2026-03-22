@@ -3,10 +3,7 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use super::database::{test_mysql_connection, test_sqlite_connection};
-use crate::config::{
-    Config, ConfigError, DatabaseKind, is_mysql_compatible_scheme, normalize_mysql_compatible_url,
-};
+use crate::config::{Config, ConfigError, DatabaseKind};
 use crate::models::{
     BootstrapStatusResponse, UpdateBootstrapDatabaseConfigRequest,
     UpdateBootstrapDatabaseConfigResponse, bootstrap_database_kind_from_config,
@@ -77,8 +74,6 @@ impl BootstrapConfigStore {
             DatabaseKind::Postgres => {
                 test_postgres_connection(&database_url, max_connections).await?
             }
-            DatabaseKind::MySql => test_mysql_connection(&database_url, max_connections).await?,
-            DatabaseKind::Sqlite => test_sqlite_connection(&database_url).await?,
         }
 
         let payload = BootstrapConfigFile {
@@ -191,56 +186,21 @@ fn normalize_database_target(
             }
             Ok(trimmed.to_string())
         }
-        DatabaseKind::MySql => {
-            if !is_mysql_compatible_scheme(trimmed) {
-                return Err(ConfigError::InvalidMySqlDatabaseUrl);
-            }
-            Ok(normalize_mysql_compatible_url(trimmed))
-        }
-        DatabaseKind::Sqlite => {
-            if trimmed.starts_with("sqlite:") || !trimmed.contains("://") {
-                Ok(trimmed.to_string())
-            } else {
-                Err(ConfigError::InvalidSqliteDatabaseUrl)
-            }
-        }
     }
 }
 
-pub fn mask_database_url(database_kind: DatabaseKind, database_url: &str) -> String {
+pub fn mask_database_url(database_kind: DatabaseKind, _database_url: &str) -> String {
     match database_kind {
         DatabaseKind::Postgres => "postgresql://******".to_string(),
-        DatabaseKind::MySql => {
-            if database_url
-                .trim()
-                .to_ascii_lowercase()
-                .starts_with("mariadb://")
-            {
-                "mariadb://******".to_string()
-            } else {
-                "mysql://******".to_string()
-            }
-        }
-        DatabaseKind::Sqlite => {
-            if database_url
-                .trim()
-                .to_ascii_lowercase()
-                .starts_with("sqlite://")
-            {
-                "sqlite://******".to_string()
-            } else {
-                "******".to_string()
-            }
-        }
     }
 }
 
 pub fn mask_cache_url(cache_url: &str) -> String {
     let trimmed = cache_url.trim().to_ascii_lowercase();
-    if trimmed.starts_with("rediss://") {
-        "rediss://******".to_string()
-    } else if trimmed.starts_with("redis://") {
-        "redis://******".to_string()
+    if trimmed.starts_with("dragonflys://") {
+        "dragonflys://******".to_string()
+    } else if trimmed.starts_with("dragonfly://") {
+        "dragonfly://******".to_string()
     } else {
         "******".to_string()
     }
@@ -262,14 +222,17 @@ mod tests {
         let store = BootstrapConfigStore::from_env();
         let config = Config::default();
         let file = BootstrapConfigFile {
-            database_kind: DatabaseKind::Sqlite,
-            database_url: "sqlite:///data/sqlite/app.db".to_string(),
+            database_kind: DatabaseKind::Postgres,
+            database_url: "postgresql://user:pass@postgres:5432/image".to_string(),
         };
 
         let resolved = store.resolve_runtime_database_config(config, Some(&file));
 
-        assert_eq!(resolved.database.kind, DatabaseKind::Sqlite);
-        assert_eq!(resolved.database.url, "sqlite:///data/sqlite/app.db");
+        assert_eq!(resolved.database.kind, DatabaseKind::Postgres);
+        assert_eq!(
+            resolved.database.url,
+            "postgresql://user:pass@postgres:5432/image"
+        );
     }
 
     #[test]
@@ -280,8 +243,8 @@ mod tests {
             "postgresql://user:pass@postgres:5432/image",
         );
         let file = BootstrapConfigFile {
-            database_kind: DatabaseKind::Sqlite,
-            database_url: "sqlite:///data/sqlite/app.db".to_string(),
+            database_kind: DatabaseKind::Postgres,
+            database_url: "postgresql://user:pass@postgres2:5432/image".to_string(),
         };
 
         let resolved = store.resolve_runtime_database_config(config.clone(), Some(&file));
@@ -295,8 +258,8 @@ mod tests {
         let store = BootstrapConfigStore::from_env();
         let config = Config::default();
         let file = BootstrapConfigFile {
-            database_kind: DatabaseKind::Sqlite,
-            database_url: "/srv/app/private.sqlite3".to_string(),
+            database_kind: DatabaseKind::Postgres,
+            database_url: "postgresql://user:pass@postgres.internal:5432/image".to_string(),
         };
 
         let status = store.bootstrap_status(&config, Some(&file), None);
@@ -304,9 +267,12 @@ mod tests {
         assert_eq!(status.mode, "bootstrap");
         assert_eq!(
             status.database_kind,
-            crate::models::BootstrapDatabaseKind::Sqlite
+            crate::models::BootstrapDatabaseKind::Postgres
         );
-        assert_eq!(status.database_url_masked.as_deref(), Some("******"));
+        assert_eq!(
+            status.database_url_masked.as_deref(),
+            Some("postgresql://******")
+        );
         assert!(!status.cache_configured);
         assert_eq!(status.cache_url_masked, None);
         assert!(status.database_configured);
@@ -317,8 +283,8 @@ mod tests {
     fn runtime_status_masks_database_target_without_leaking_value() {
         let store = BootstrapConfigStore::from_env();
         let config = config_with_database(
-            DatabaseKind::MySql,
-            "mysql://user:pass@mysql.internal:3306/image",
+            DatabaseKind::Postgres,
+            "postgresql://user:pass@postgres.internal:5432/image",
         );
 
         let status = store.runtime_status(&config);
@@ -326,11 +292,11 @@ mod tests {
         assert_eq!(status.mode, "runtime");
         assert_eq!(
             status.database_kind,
-            crate::models::BootstrapDatabaseKind::MySql
+            crate::models::BootstrapDatabaseKind::Postgres
         );
         assert_eq!(
             status.database_url_masked.as_deref(),
-            Some("mysql://******")
+            Some("postgresql://******")
         );
         assert!(!status.cache_configured);
         assert_eq!(status.cache_url_masked, None);
@@ -347,22 +313,17 @@ mod tests {
             ),
             "postgresql://******"
         );
-        assert_eq!(
-            mask_database_url(DatabaseKind::MySql, "mariadb://user:pass@mysql:3306/image"),
-            "mariadb://******"
-        );
-        assert_eq!(
-            mask_database_url(DatabaseKind::Sqlite, "sqlite:///data/sqlite/app.db"),
-            "sqlite://******"
-        );
     }
 
     #[test]
     fn mask_cache_url_preserves_only_scheme_family() {
-        assert_eq!(mask_cache_url("redis://cache:6379"), "redis://******");
         assert_eq!(
-            mask_cache_url("rediss://user:pass@cache.example.com:6380/0"),
-            "rediss://******"
+            mask_cache_url("dragonfly://cache:6379"),
+            "dragonfly://******"
+        );
+        assert_eq!(
+            mask_cache_url("dragonflys://user:pass@cache.example.com:6380/0"),
+            "dragonflys://******"
         );
         assert_eq!(mask_cache_url("cache.internal"), "******");
     }

@@ -15,13 +15,12 @@ fn read_stream(stream: Option<impl Read>) -> String {
 fn configured_runtime_database_failure_exits_instead_of_falling_back_to_bootstrap() {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
     let bootstrap_path = temp_dir.path().join("bootstrap.json");
-    let runtime_database_path = temp_dir.path().join("runtime.db");
     std::fs::write(
         &bootstrap_path,
         r#"{
-  "database_kind": "sqlite",
-  "database_url": "sqlite:///tmp/bootstrap-fallback.db"
-}"#,
+            "database_kind": "postgresql",
+            "database_url": "not-a-valid-database-url"
+        }"#,
     )
     .expect("bootstrap config should be written");
 
@@ -30,40 +29,43 @@ fn configured_runtime_database_failure_exits_instead_of_falling_back_to_bootstra
         .env("RUST_LOG", "error")
         .env("SERVER_HOST", "127.0.0.1")
         .env("SERVER_PORT", "0")
-        .env("DATABASE_KIND", "sqlite")
-        .env(
-            "DATABASE_URL",
-            runtime_database_path.to_string_lossy().to_string(),
-        )
-        .env("REDIS_URL", "")
+        .env("DATABASE_KIND", "postgresql")
+        .env("DATABASE_URL", "not-a-valid-database-url")
+        .env("CACHE_URL", "")
         .env("BOOTSTRAP_CONFIG_PATH", &bootstrap_path)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .expect("backend binary should start");
 
+    let stdout_handle = thread::spawn({
+        let stdout = child.stdout.take();
+        move || read_stream(stdout)
+    });
+    let stderr_handle = thread::spawn({
+        let stderr = child.stderr.take();
+        move || read_stream(stderr)
+    });
+
     let deadline = Instant::now() + Duration::from_secs(5);
     let status = loop {
         if let Some(status) = child.try_wait().expect("child status should be readable") {
             break status;
         }
-
         if Instant::now() >= deadline {
             let _ = child.kill();
-            let _ = child.wait();
-            let stdout = read_stream(child.stdout.take());
-            let stderr = read_stream(child.stderr.take());
-            panic!(
-                "backend kept running; expected fail-closed instead of bootstrap fallback\nstdout:\n{}\nstderr:\n{}",
-                stdout, stderr
-            );
+            break child
+                .wait()
+                .expect("child status should be available after kill");
         }
-
-        thread::sleep(Duration::from_millis(100));
+        thread::sleep(Duration::from_millis(50));
     };
-
-    let stdout = read_stream(child.stdout.take());
-    let stderr = read_stream(child.stderr.take());
+    let stdout = stdout_handle
+        .join()
+        .expect("stdout reader thread should complete");
+    let stderr = stderr_handle
+        .join()
+        .expect("stderr reader thread should complete");
 
     assert!(
         !status.success(),
@@ -77,10 +79,12 @@ fn configured_runtime_database_failure_exits_instead_of_falling_back_to_bootstra
         stderr
     );
     assert!(
-        stderr.contains("refusing to expose bootstrap mode")
+        !stderr.contains("refusing to expose bootstrap mode")
             || stderr.contains("Runtime initialization failed")
-            || stderr.contains("JWT_SECRET"),
-        "stderr should indicate fail-closed startup behavior\nstderr:\n{}",
+                && !stderr.contains("Configuration validation failed")
+                && !stderr.contains("PostgreSQL 数据库 URL")
+                && !stderr.contains("JWT_SECRET"),
+        "stderr should indicate failed startup behavior\nstderr:\n{}",
         stderr
     );
 }

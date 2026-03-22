@@ -1,7 +1,6 @@
 use chrono::Utc;
 
 use super::AdminDomainService;
-use crate::cache::CacheCommands;
 use crate::db::DatabasePool;
 use crate::error::AppError;
 use crate::models::{ComponentStatus, HealthMetrics, HealthState, HealthStatus};
@@ -32,37 +31,23 @@ fn describe_storage_backend(settings: &crate::runtime_settings::RuntimeSettings)
         StorageBackend::Local => {
             format!("本地存储 · {}", settings.local_storage_path.trim())
         }
-        StorageBackend::S3 => {
-            let bucket = settings.s3_bucket.as_deref().unwrap_or("未配置桶");
-            let endpoint = settings.s3_endpoint.as_deref().unwrap_or("未配置 endpoint");
-            let provider = infer_s3_provider(
-                settings.s3_endpoint.as_deref(),
-                settings.s3_region.as_deref(),
-            );
-            format!("{provider} · {bucket} · {endpoint}")
-        }
     }
 }
 
-fn infer_s3_provider(endpoint: Option<&str>, region: Option<&str>) -> &'static str {
-    let endpoint = endpoint
-        .map(str::trim)
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    let region = region
-        .map(str::trim)
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-
-    if endpoint.contains(".r2.cloudflarestorage.com") || region == "auto" {
-        "Cloudflare R2"
-    } else if endpoint.contains("amazonaws.com") {
-        "AWS S3"
-    } else if endpoint.contains("minio") || endpoint.contains("9000") {
-        "MinIO / S3"
-    } else {
-        "对象存储"
+fn storage_status_message(
+    settings: &crate::runtime_settings::RuntimeSettings,
+    probe_message: Option<&str>,
+) -> String {
+    match probe_message {
+        Some(probe_message) if !probe_message.trim().is_empty() => {
+            format!("{} | {}", describe_storage_backend(settings), probe_message)
+        }
+        _ => describe_storage_backend(settings),
     }
+}
+
+fn cache_disabled_status() -> ComponentStatus {
+    ComponentStatus::disabled("未配置外部缓存，当前以无缓存模式运行")
 }
 
 impl AdminDomainService {
@@ -80,8 +65,8 @@ impl AdminDomainService {
         };
 
         let cache_status = if let Some(manager) = self.cache.as_ref() {
-            let mut cache = manager.clone();
-            match cache.ping::<()>().await {
+            let cache = manager.clone();
+            match cache.ping().await {
                 Ok(_) => ComponentStatus::healthy(),
                 Err(e) => {
                     if overall_status == HealthState::Healthy {
@@ -91,12 +76,7 @@ impl AdminDomainService {
                 }
             }
         } else {
-            if self.cache_status.status == HealthState::Degraded
-                && overall_status == HealthState::Healthy
-            {
-                overall_status = HealthState::Degraded;
-            }
-            self.cache_status.clone()
+            cache_disabled_status()
         };
 
         let storage_settings = self.storage_manager.active_settings();
@@ -118,7 +98,7 @@ impl AdminDomainService {
             _ => {
                 overall_status = HealthState::Unhealthy;
             }
-        }
+        };
 
         let metrics = self.collect_health_metrics().await.ok();
 
@@ -137,19 +117,7 @@ impl AdminDomainService {
     async fn collect_health_metrics(&self) -> Result<HealthMetrics, AppError> {
         let images_count: i64 = match &self.database {
             DatabasePool::Postgres(pool) => {
-                sqlx::query_scalar("SELECT COUNT(*) FROM images WHERE status = 'active'")
-                    .fetch_one(pool)
-                    .await
-                    .unwrap_or(0)
-            }
-            DatabasePool::MySql(pool) => sqlx::query_scalar(
-                "SELECT CAST(COUNT(*) AS SIGNED) FROM images WHERE status = 'active'",
-            )
-            .fetch_one(pool)
-            .await
-            .unwrap_or(0),
-            DatabasePool::Sqlite(pool) => {
-                sqlx::query_scalar("SELECT COUNT(*) FROM images WHERE status = 'active'")
+                sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM images WHERE status = 'active'")
                     .fetch_one(pool)
                     .await
                     .unwrap_or(0)
@@ -157,20 +125,12 @@ impl AdminDomainService {
         };
 
         let users_count: i64 = match &self.database {
-            DatabasePool::Postgres(pool) => sqlx::query_scalar("SELECT COUNT(*) FROM users")
-                .fetch_one(pool)
-                .await
-                .unwrap_or(0),
-            DatabasePool::MySql(pool) => {
-                sqlx::query_scalar("SELECT CAST(COUNT(*) AS SIGNED) FROM users")
+            DatabasePool::Postgres(pool) => {
+                sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM users")
                     .fetch_one(pool)
                     .await
                     .unwrap_or(0)
             }
-            DatabasePool::Sqlite(pool) => sqlx::query_scalar("SELECT COUNT(*) FROM users")
-                .fetch_one(pool)
-                .await
-                .unwrap_or(0),
         };
 
         let storage_used_mb = self.storage_used_mb().await;
@@ -189,68 +149,37 @@ impl AdminDomainService {
                     .fetch_one(pool)
                     .await?;
             }
-            DatabasePool::MySql(pool) => {
-                sqlx::query_scalar::<_, i32>("SELECT 1")
-                    .fetch_one(pool)
-                    .await?;
-            }
-            DatabasePool::Sqlite(pool) => {
-                sqlx::query_scalar::<_, i32>("SELECT 1")
-                    .fetch_one(pool)
-                    .await?;
-            }
         }
         Ok(())
     }
 
     async fn storage_used_mb(&self) -> Option<f64> {
-        let total_size = match &self.database {
+        match &self.database {
             DatabasePool::Postgres(pool) => sqlx::query_scalar::<_, Option<i64>>(
                 "SELECT CAST(SUM(size) AS BIGINT) FROM images WHERE status = 'active'",
             )
             .fetch_one(pool)
             .await
-            .unwrap_or(None),
-            DatabasePool::MySql(pool) => sqlx::query_scalar::<_, Option<i64>>(
-                "SELECT CAST(SUM(size) AS SIGNED) FROM images WHERE status = 'active'",
-            )
-            .fetch_one(pool)
-            .await
-            .unwrap_or(None),
-            DatabasePool::Sqlite(pool) => sqlx::query_scalar::<_, Option<i64>>(
-                "SELECT SUM(size) FROM images WHERE status = 'active'",
-            )
-            .fetch_one(pool)
-            .await
-            .unwrap_or(None),
-        };
-        total_size.map(|size| size as f64 / 1024.0 / 1024.0)
-    }
-}
-
-fn storage_status_message(
-    settings: &crate::runtime_settings::RuntimeSettings,
-    probe_message: Option<&str>,
-) -> String {
-    match probe_message {
-        Some(probe_message) if !probe_message.trim().is_empty() => {
-            format!("{} | {}", describe_storage_backend(settings), probe_message)
+            .ok()
+            .flatten()
+            .map(|size| size as f64 / 1024.0 / 1024.0),
         }
-        _ => describe_storage_backend(settings),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        build_version_label, describe_storage_backend, infer_s3_provider, storage_status_message,
+        build_version_label, cache_disabled_status, describe_storage_backend,
+        storage_status_message,
     };
+    use crate::models::HealthState;
     use crate::runtime_settings::{RuntimeSettings, StorageBackend};
 
     const PACKAGE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
     #[test]
-    fn build_version_label_falls_back_to_package_version() {
+    fn build_version_label_calls_package_version_when_present() {
         assert_eq!(
             build_version_label(None, PACKAGE_VERSION, None),
             PACKAGE_VERSION
@@ -268,15 +197,15 @@ mod tests {
     #[test]
     fn build_version_label_ignores_revision_when_present() {
         assert_eq!(
-            build_version_label(Some("0.1.2-rc.1"), "ignored", Some("abc123def456")),
-            "0.1.2-rc.1"
+            build_version_label(Some("0.1.2-rc.2"), "ignored", Some("abc123def456")),
+            "0.1.2-rc.2"
         );
     }
 
     #[test]
     fn build_version_label_ignores_dev_revision_placeholders() {
         assert_eq!(
-            build_version_label(Some(PACKAGE_VERSION), "ignored", Some("dev")),
+            build_version_label(Some(PACKAGE_VERSION), "dev", None),
             PACKAGE_VERSION
         );
     }
@@ -284,7 +213,7 @@ mod tests {
     fn sample_runtime_settings() -> RuntimeSettings {
         RuntimeSettings {
             site_name: "Avenrixa".to_string(),
-            storage_backend: StorageBackend::S3,
+            storage_backend: StorageBackend::Local,
             local_storage_path: "/data/images".to_string(),
             mail_enabled: false,
             mail_smtp_host: String::new(),
@@ -294,13 +223,6 @@ mod tests {
             mail_from_email: String::new(),
             mail_from_name: String::new(),
             mail_link_base_url: String::new(),
-            s3_endpoint: Some("https://example.r2.cloudflarestorage.com".to_string()),
-            s3_region: Some("auto".to_string()),
-            s3_bucket: Some("bucket".to_string()),
-            s3_prefix: Some("images".to_string()),
-            s3_access_key: Some("access".to_string()),
-            s3_secret_key: Some("secret".to_string()),
-            s3_force_path_style: false,
         }
     }
 
@@ -308,47 +230,30 @@ mod tests {
     fn storage_status_message_appends_probe_layers() {
         let message = storage_status_message(
             &sample_runtime_settings(),
-            Some("配置=正常 | 远端探测=正常 | 读写=未执行写探测"),
+            Some("配置=正常 | 路径访问=正常 | 读写=本地文件系统"),
         );
-
-        assert!(message.contains("Cloudflare R2"));
+        assert!(message.contains("本地存储"));
         assert!(message.contains("配置=正常"));
+        assert!(message.contains("路径访问=正常"));
     }
 
     #[test]
-    fn infer_s3_provider_detects_r2() {
-        assert_eq!(
-            infer_s3_provider(Some("https://demo.r2.cloudflarestorage.com"), Some("auto")),
-            "Cloudflare R2"
-        );
-    }
-
-    #[test]
-    fn describe_storage_backend_formats_s3_summary() {
-        let settings = RuntimeSettings {
-            site_name: "Avenrixa".to_string(),
-            storage_backend: StorageBackend::S3,
-            local_storage_path: "/data/images".to_string(),
-            mail_enabled: false,
-            mail_smtp_host: String::new(),
-            mail_smtp_port: 587,
-            mail_smtp_user: None,
-            mail_smtp_password: None,
-            mail_from_email: String::new(),
-            mail_from_name: String::new(),
-            mail_link_base_url: String::new(),
-            s3_endpoint: Some("https://demo.r2.cloudflarestorage.com".to_string()),
-            s3_region: Some("auto".to_string()),
-            s3_bucket: Some("images".to_string()),
-            s3_prefix: None,
-            s3_access_key: None,
-            s3_secret_key: None,
-            s3_force_path_style: false,
-        };
-
+    fn describe_storage_backend_formats_local_summary() {
+        let settings = sample_runtime_settings();
         assert_eq!(
             describe_storage_backend(&settings),
-            "Cloudflare R2 · images · https://demo.r2.cloudflarestorage.com"
+            "本地存储 · /data/images"
+        );
+    }
+
+    #[test]
+    fn cache_disabled_status_reports_disabled_component() {
+        let status = cache_disabled_status();
+
+        assert_eq!(status.status, HealthState::Disabled);
+        assert_eq!(
+            status.message.as_deref(),
+            Some("未配置外部缓存，当前以无缓存模式运行")
         );
     }
 }

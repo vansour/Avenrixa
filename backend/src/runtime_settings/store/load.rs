@@ -6,12 +6,9 @@ use crate::error::AppError;
 use super::super::model::{
     RuntimeSettings, SETTING_LOCAL_STORAGE_PATH, SETTING_MAIL_ENABLED, SETTING_MAIL_FROM_EMAIL,
     SETTING_MAIL_FROM_NAME, SETTING_MAIL_LINK_BASE_URL, SETTING_MAIL_SMTP_HOST,
-    SETTING_MAIL_SMTP_PASSWORD, SETTING_MAIL_SMTP_PORT, SETTING_MAIL_SMTP_USER,
-    SETTING_S3_ACCESS_KEY, SETTING_S3_BUCKET, SETTING_S3_ENDPOINT, SETTING_S3_FORCE_PATH_STYLE,
-    SETTING_S3_PREFIX, SETTING_S3_REGION, SETTING_S3_SECRET_KEY, SETTING_SITE_NAME,
+    SETTING_MAIL_SMTP_PASSWORD, SETTING_MAIL_SMTP_PORT, SETTING_MAIL_SMTP_USER, SETTING_SITE_NAME,
     SETTING_STORAGE_BACKEND, StorageBackend,
 };
-use super::super::validation::normalize_s3_prefix;
 
 pub(crate) async fn load_from_db(
     pool: &DatabasePool,
@@ -19,16 +16,6 @@ pub(crate) async fn load_from_db(
 ) -> Result<RuntimeSettings, AppError> {
     let rows = match pool {
         DatabasePool::Postgres(pool) => {
-            sqlx::query_as::<_, (String, String)>("SELECT key, value FROM settings")
-                .fetch_all(pool)
-                .await?
-        }
-        DatabasePool::MySql(pool) => {
-            sqlx::query_as::<_, (String, String)>("SELECT `key`, `value` FROM settings")
-                .fetch_all(pool)
-                .await?
-        }
-        DatabasePool::Sqlite(pool) => {
             sqlx::query_as::<_, (String, String)>("SELECT key, value FROM settings")
                 .fetch_all(pool)
                 .await?
@@ -92,34 +79,6 @@ pub(crate) async fn load_from_db(
     if let Some(mail_link_base_url) = kv.get(SETTING_MAIL_LINK_BASE_URL) {
         settings.mail_link_base_url = mail_link_base_url.trim().to_string();
     }
-
-    settings.s3_endpoint = kv
-        .get(SETTING_S3_ENDPOINT)
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty());
-    settings.s3_region = kv
-        .get(SETTING_S3_REGION)
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty());
-    settings.s3_bucket = kv
-        .get(SETTING_S3_BUCKET)
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty());
-    settings.s3_prefix = kv
-        .get(SETTING_S3_PREFIX)
-        .map(|value| normalize_s3_prefix(value.trim()));
-    settings.s3_access_key = kv
-        .get(SETTING_S3_ACCESS_KEY)
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty());
-    settings.s3_secret_key = kv
-        .get(SETTING_S3_SECRET_KEY)
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty());
-    settings.s3_force_path_style = kv
-        .get(SETTING_S3_FORCE_PATH_STYLE)
-        .and_then(|value| value.parse::<bool>().ok())
-        .unwrap_or(true);
 
     Ok(settings)
 }

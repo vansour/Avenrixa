@@ -2,7 +2,6 @@ use super::DatabasePool;
 use crate::auth::AuthService;
 use crate::cache::{Cache, CacheConnection};
 use crate::config::Config;
-use crate::config::DatabaseKind;
 use crate::domain::admin::AdminDomainService;
 use crate::domain::auth::DefaultAuthDomainService;
 use crate::domain::auth::state_repository::DatabaseAuthStateRepository;
@@ -31,20 +30,12 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn database_kind(&self) -> DatabaseKind {
-        self.database.kind()
-    }
-
-    pub fn postgres_pool(&self) -> anyhow::Result<&sqlx::PgPool> {
-        self.database.postgres()
-    }
-
     pub async fn invalidate_user_image_cache(&self, user_id: Uuid) -> Result<(), anyhow::Error> {
-        let Some(mut cache) = self.cache.clone() else {
+        let Some(cache) = self.cache.clone() else {
             return Ok(());
         };
         Cache::del_pattern(
-            &mut cache,
+            &cache,
             &crate::cache::ImageCache::images_invalidate(user_id),
         )
         .await

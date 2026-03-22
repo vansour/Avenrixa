@@ -389,7 +389,7 @@ async function waitForBackupFilename(page) {
         (item) =>
           /^backup_/i.test(item) &&
           !item.startsWith("rollback_before_restore_") &&
-          (item.endsWith(".sql") || item.endsWith(".mysql.sql") || item.endsWith(".sqlite3"))
+          (item.endsWith(".sql") || item.endsWith(".mysql.sql"))
       );
     if (match) {
       return match;
@@ -548,7 +548,7 @@ async function phaseVerifyBackupAudit(page) {
 
   await clickSettingsNav(page, "维护工具");
   await waitForText(page, config.backupFilename, "维护工具中的备份文件名");
-  await waitForText(page, /逻辑导出|SQLite 数据库快照/, "维护工具数据库类型文案");
+  await waitForText(page, /逻辑导出/, "维护工具数据库类型文案");
   await waitForText(page, "仅支持下载或运维恢复", "维护工具恢复限制文案");
 
   return { backupFilename: config.backupFilename };

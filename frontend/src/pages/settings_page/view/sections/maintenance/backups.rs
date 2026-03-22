@@ -70,8 +70,6 @@ pub(super) fn render_backup_files_section(
                             .as_deref()
                             .is_some_and(|value| value == backup.filename.as_str());
                         let supports_restore = backup_supports_restore(&backup.semantics);
-                        let is_experimental_page_restore =
-                            backup.semantics.is_sqlite_database_snapshot();
                         rsx! {
                             article { class: "settings-entity-card",
                                 div { class: "settings-entity-main",
@@ -80,17 +78,10 @@ pub(super) fn render_backup_files_section(
                                             h3 { "{backup.filename}" }
                                             div { class: "settings-kv-badges",
                                                 span { class: "settings-kv-badge", "{kind_label}" }
-                                                if is_experimental_page_restore {
-                                                    span { class: "settings-kv-badge is-warning", "Experimental" }
-                                                }
                                             }
                                         }
                                         p { class: "settings-entity-meta", "{backup_meta}" }
-                                        if is_experimental_page_restore {
-                                            p { class: "settings-action-note",
-                                                "页面恢复为 Experimental，仅建议在受控环境使用。"
-                                            }
-                                        } else if !supports_restore {
+                                        if !supports_restore {
                                             p { class: "settings-action-note", "仅支持下载或运维恢复。" }
                                         }
                                     }

@@ -30,7 +30,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6.0.2
         with:
           fetch-depth: 0
 
@@ -80,10 +80,12 @@ jobs:
           if [[ "${release_version}" == *-* ]]; then
             rolling_rc_image_ref="${image_repository}:rc"
           fi
-          echo "release_version=${release_version}" >> "${GITHUB_OUTPUT}"
-          echo "image_repository=${image_repository}" >> "${GITHUB_OUTPUT}"
-          echo "release_image_ref=${image_repository}:${release_version}" >> "${GITHUB_OUTPUT}"
-          echo "rolling_rc_image_ref=${rolling_rc_image_ref}" >> "${GITHUB_OUTPUT}"
+          {
+            echo "release_version=${release_version}"
+            echo "image_repository=${image_repository}"
+            echo "release_image_ref=${image_repository}:${release_version}"
+            echo "rolling_rc_image_ref=${rolling_rc_image_ref}"
+          } >> "${GITHUB_OUTPUT}"
 
       - name: Install system dependencies
         run: |
@@ -96,10 +98,10 @@ jobs:
           components: rustfmt
 
       - name: Cache cargo artifacts
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@v2.9.1
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4.0.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}

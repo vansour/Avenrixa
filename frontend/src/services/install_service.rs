@@ -1,8 +1,7 @@
 use crate::services::api_client::ApiClient;
 use crate::types::api::{
     BootstrapStatusResponse, InstallBootstrapRequest, InstallBootstrapResponse,
-    InstallStatusResponse, StorageDirectoryBrowseResponse, TestS3StorageConfigRequest,
-    TestS3StorageConfigResponse, UpdateBootstrapDatabaseConfigRequest,
+    InstallStatusResponse, StorageDirectoryBrowseResponse, UpdateBootstrapDatabaseConfigRequest,
     UpdateBootstrapDatabaseConfigResponse,
 };
 use crate::types::errors::Result;
@@ -54,15 +53,6 @@ impl InstallService {
     ) -> Result<InstallBootstrapResponse> {
         self.api_client
             .post_json_response("/api/v1/install/bootstrap", &req)
-            .await
-    }
-
-    pub async fn test_s3_storage_config(
-        &self,
-        req: TestS3StorageConfigRequest,
-    ) -> Result<TestS3StorageConfigResponse> {
-        self.api_client
-            .post_json_response("/api/v1/install/storage/s3/test", &req)
             .await
     }
 }

@@ -13,7 +13,7 @@
 GitHub Actions 触发方式：
 
 - `.github/workflows/release-rc-preflight.yml`
-- 推送 RC tag 时会自动触发，例如 `v0.1.2-rc.1`
+- 推送 RC tag 时会自动触发，例如 `v0.1.2-rc.2`
 - 手动触发时必须位于 `release/*` 分支
 - 默认发布到 `ghcr.io/<repository_owner>/avenrixa:<version>`，并追加 `ghcr.io/<repository_owner>/avenrixa:rc`
 - 可通过 workflow input `image_repository` 覆盖目标仓库
@@ -29,9 +29,9 @@ GitHub Actions 触发方式：
 
 ## 当前候选版
 
-- 版本示例：`0.1.2-rc.1`
-- 本地默认镜像引用：`ghcr.io/vansour/avenrixa:0.1.2-rc.1`
-- GitHub Actions 默认发布引用：`ghcr.io/<repository_owner>/avenrixa:0.1.2-rc.1`
+- 版本示例：`0.1.2-rc.2`
+- 本地默认镜像引用：`ghcr.io/vansour/avenrixa:0.1.2-rc.2`
+- GitHub Actions 默认发布引用：`ghcr.io/<repository_owner>/avenrixa:0.1.2-rc.2`
 - GitHub Actions 默认滚动 RC 标签：`ghcr.io/<repository_owner>/avenrixa:rc`
 
 ## 常用参数

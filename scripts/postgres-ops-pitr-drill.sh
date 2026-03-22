@@ -292,6 +292,7 @@ run_drill() {
 
   log_step "Clearing local WAL archive to force remote pull during restore"
   compose_reset_host_dir "${POSTGRES_WAL_ARCHIVE_HOST_DIR}"
+  local restore_wal_archive_dir="${POSTGRES_WAL_ARCHIVE_HOST_DIR}"
 
   if [[ "${PITR_TARGET_MODE}" == "name" ]]; then
     log_step "Restoring to named PITR restore point"
@@ -299,11 +300,11 @@ run_drill() {
     COMPOSE_VARIANT="${COMPOSE_VARIANT}" \
     ARTIFACT_DIR="${ARTIFACT_DIR}" \
     POSTGRES_ENABLE_WAL_ARCHIVE="${POSTGRES_ENABLE_WAL_ARCHIVE}" \
-    POSTGRES_WAL_ARCHIVE_HOST_DIR="${POSTGRES_WAL_ARCHIVE_HOST_DIR}" \
+    POSTGRES_WAL_ARCHIVE_HOST_DIR="${restore_wal_archive_dir}" \
     POSTGRES_WAL_REMOTE_URI="${POSTGRES_WAL_REMOTE_URI}" \
     POSTGRES_RESTORE_MANIFEST_PATH="${physical_manifest_path}" \
     POSTGRES_RESTORE_TARGET_NAME="${pitr_target_restore_point}" \
-    POSTGRES_RESTORE_WAL_ARCHIVE_DIR="${POSTGRES_WAL_ARCHIVE_HOST_DIR}" \
+    POSTGRES_RESTORE_WAL_ARCHIVE_DIR="${restore_wal_archive_dir}" \
     ./scripts/postgres-ops-restore.sh
   else
     log_step "Restoring to PITR target time ${pitr_target_time}"
@@ -311,11 +312,11 @@ run_drill() {
     COMPOSE_VARIANT="${COMPOSE_VARIANT}" \
     ARTIFACT_DIR="${ARTIFACT_DIR}" \
     POSTGRES_ENABLE_WAL_ARCHIVE="${POSTGRES_ENABLE_WAL_ARCHIVE}" \
-    POSTGRES_WAL_ARCHIVE_HOST_DIR="${POSTGRES_WAL_ARCHIVE_HOST_DIR}" \
+    POSTGRES_WAL_ARCHIVE_HOST_DIR="${restore_wal_archive_dir}" \
     POSTGRES_WAL_REMOTE_URI="${POSTGRES_WAL_REMOTE_URI}" \
     POSTGRES_RESTORE_MANIFEST_PATH="${physical_manifest_path}" \
     POSTGRES_RESTORE_TARGET_TIME="${pitr_target_time}" \
-    POSTGRES_RESTORE_WAL_ARCHIVE_DIR="${POSTGRES_WAL_ARCHIVE_HOST_DIR}" \
+    POSTGRES_RESTORE_WAL_ARCHIVE_DIR="${restore_wal_archive_dir}" \
     ./scripts/postgres-ops-restore.sh
   fi
 

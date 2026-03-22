@@ -3,25 +3,47 @@ use crate::audit::log_audit_db;
 use crate::db::AppState;
 use crate::db::get_setting_value;
 use crate::error::AppError;
-use crate::handlers::s3_test::{build_s3_test_settings, s3_test_success_response};
 use crate::handlers::storage_browser::{BrowseStorageDirectoriesQuery, browse_storage_directories};
 use crate::middleware::AdminUser;
 use crate::models::{
-    AdminSettingsConfig, Setting, TestS3StorageConfigRequest, TestS3StorageConfigResponse,
-    UpdateAdminSettingsConfigRequest, UpdateSettingRequest,
+    AdminSettingsConfig, Setting, UpdateAdminSettingsConfigRequest, UpdateSettingRequest,
+    storage_backend_kind_from_runtime,
 };
 use crate::runtime_settings::{
     RuntimeSettings, SETTING_LOCAL_STORAGE_PATH, SETTING_MAIL_ENABLED, SETTING_MAIL_FROM_EMAIL,
     SETTING_MAIL_FROM_NAME, SETTING_MAIL_LINK_BASE_URL, SETTING_MAIL_SMTP_HOST,
-    SETTING_MAIL_SMTP_PASSWORD, SETTING_MAIL_SMTP_PORT, SETTING_MAIL_SMTP_USER,
-    SETTING_S3_ACCESS_KEY, SETTING_S3_BUCKET, SETTING_S3_ENDPOINT, SETTING_S3_FORCE_PATH_STYLE,
-    SETTING_S3_PREFIX, SETTING_S3_REGION, SETTING_S3_SECRET_KEY, SETTING_SITE_NAME,
+    SETTING_MAIL_SMTP_PASSWORD, SETTING_MAIL_SMTP_PORT, SETTING_MAIL_SMTP_USER, SETTING_SITE_NAME,
     SETTING_STORAGE_BACKEND, admin_setting_policy, mask_admin_setting_value,
 };
 use axum::{
     Json,
     extract::{Path, Query, State},
 };
+
+fn runtime_settings_to_admin_config(
+    settings: &RuntimeSettings,
+    restart_required: bool,
+) -> AdminSettingsConfig {
+    AdminSettingsConfig {
+        site_name: settings.site_name.clone(),
+        storage_backend: storage_backend_kind_from_runtime(settings.storage_backend),
+        local_storage_path: settings.local_storage_path.clone(),
+        mail_enabled: settings.mail_enabled,
+        mail_smtp_host: settings.mail_smtp_host.clone(),
+        mail_smtp_port: settings.mail_smtp_port,
+        mail_smtp_user: settings.mail_smtp_user.clone(),
+        mail_smtp_password_set: settings
+            .mail_smtp_password
+            .as_ref()
+            .map(|v| !v.trim().is_empty())
+            .unwrap_or(false),
+        mail_from_email: settings.mail_from_email.clone(),
+        mail_from_name: settings.mail_from_name.clone(),
+        mail_link_base_url: settings.mail_link_base_url.clone(),
+        restart_required,
+        settings_version: settings.settings_version(),
+    }
+}
 
 pub async fn get_settings_admin(
     State(state): State<AppState>,
@@ -37,7 +59,8 @@ pub async fn get_admin_settings_config(
     _admin_user: AdminUser,
 ) -> Result<Json<AdminSettingsConfig>, AppError> {
     let settings = state.runtime_settings.get_runtime_settings().await?;
-    Ok(Json(settings.to_admin_config(
+    Ok(Json(runtime_settings_to_admin_config(
+        &settings,
         state.storage_manager.restart_required(&settings),
     )))
 }
@@ -49,21 +72,6 @@ pub async fn browse_admin_storage_directories(
     Ok(Json(
         browse_storage_directories(query.path.as_deref()).await?,
     ))
-}
-
-pub async fn test_admin_s3_storage(
-    State(state): State<AppState>,
-    _admin_user: AdminUser,
-    Json(req): Json<TestS3StorageConfigRequest>,
-) -> Result<Json<TestS3StorageConfigResponse>, AppError> {
-    let current_settings = state.runtime_settings.get_runtime_settings().await?;
-    let test_settings = build_s3_test_settings(current_settings, req)?;
-    state
-        .storage_manager
-        .test_s3_settings(&test_settings)
-        .await?;
-
-    Ok(Json(s3_test_success_response()))
 }
 
 pub async fn update_admin_settings_config(
@@ -98,7 +106,10 @@ pub async fn update_admin_settings_config(
         .await;
     }
 
-    Ok(Json(updated.to_admin_config(restart_required)))
+    Ok(Json(runtime_settings_to_admin_config(
+        &updated,
+        restart_required,
+    )))
 }
 
 pub async fn update_setting(
@@ -182,40 +193,10 @@ fn changed_setting_keys(current: &RuntimeSettings, updated: &RuntimeSettings) ->
     if current.mail_link_base_url != updated.mail_link_base_url {
         changed.push(SETTING_MAIL_LINK_BASE_URL);
     }
-    if current.s3_endpoint != updated.s3_endpoint {
-        changed.push(SETTING_S3_ENDPOINT);
-    }
-    if current.s3_region != updated.s3_region {
-        changed.push(SETTING_S3_REGION);
-    }
-    if current.s3_bucket != updated.s3_bucket {
-        changed.push(SETTING_S3_BUCKET);
-    }
-    if current.s3_prefix != updated.s3_prefix {
-        changed.push(SETTING_S3_PREFIX);
-    }
-    if current.s3_access_key != updated.s3_access_key {
-        changed.push(SETTING_S3_ACCESS_KEY);
-    }
-    if current.s3_secret_key != updated.s3_secret_key {
-        changed.push(SETTING_S3_SECRET_KEY);
-    }
-    if current.s3_force_path_style != updated.s3_force_path_style {
-        changed.push(SETTING_S3_FORCE_PATH_STYLE);
-    }
 
     changed
 }
 
 fn raw_setting_is_high_risk(key: &str) -> bool {
-    matches!(
-        key,
-        SETTING_STORAGE_BACKEND
-            | SETTING_LOCAL_STORAGE_PATH
-            | SETTING_S3_ENDPOINT
-            | SETTING_S3_REGION
-            | SETTING_S3_BUCKET
-            | SETTING_S3_PREFIX
-            | SETTING_S3_FORCE_PATH_STYLE
-    )
+    matches!(key, SETTING_STORAGE_BACKEND | SETTING_LOCAL_STORAGE_PATH)
 }
