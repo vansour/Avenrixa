@@ -10,7 +10,5 @@ pub use bootstrap_state::BootstrapAppState;
 pub use logging::init_logging;
 pub use state::build_app_state;
 #[cfg(test)]
-pub(crate) use state::build_app_state_with_database;
-#[cfg(test)]
 pub(crate) use store::BootstrapConfigFile;
 pub use store::BootstrapConfigStore;

@@ -54,6 +54,7 @@ impl StorageManager {
         settings: RuntimeSettings,
     ) -> Result<(), crate::error::AppError> {
         self.validate_runtime_settings(&settings).await?;
+        tokio::fs::create_dir_all(&settings.local_storage_path).await?;
 
         {
             let mut guard = self
@@ -90,5 +91,52 @@ impl StorageManager {
 
     pub fn cache_hint(&self, _file_key: &str) -> String {
         "storage://local".to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::StorageManager;
+    use crate::runtime_settings::{RuntimeSettings, StorageBackend};
+
+    fn sample_runtime_settings(local_storage_path: String) -> RuntimeSettings {
+        RuntimeSettings {
+            site_name: "Avenrixa".to_string(),
+            storage_backend: StorageBackend::Local,
+            local_storage_path,
+            mail_enabled: false,
+            mail_smtp_host: String::new(),
+            mail_smtp_port: 587,
+            mail_smtp_user: None,
+            mail_smtp_password: None,
+            mail_from_email: String::new(),
+            mail_from_name: String::new(),
+            mail_link_base_url: String::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn apply_runtime_settings_creates_local_storage_directory() {
+        let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+        let storage_path = temp_dir.path().join("images");
+        let manager = StorageManager::new(sample_runtime_settings(
+            temp_dir
+                .path()
+                .join("bootstrap")
+                .to_string_lossy()
+                .into_owned(),
+        ));
+        let settings = sample_runtime_settings(storage_path.to_string_lossy().into_owned());
+
+        manager
+            .apply_runtime_settings(settings)
+            .await
+            .expect("runtime settings should be applied");
+
+        assert!(
+            tokio::fs::try_exists(&storage_path)
+                .await
+                .expect("storage path existence check should succeed")
+        );
     }
 }

@@ -31,12 +31,21 @@ fn configured_runtime_database_failure_exits_instead_of_falling_back_to_bootstra
         .env("SERVER_PORT", "0")
         .env("DATABASE_KIND", "postgresql")
         .env("DATABASE_URL", "not-a-valid-database-url")
-        .env("REDIS_URL", "")
+        .env("CACHE_URL", "")
         .env("BOOTSTRAP_CONFIG_PATH", &bootstrap_path)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .expect("backend binary should start");
+
+    let stdout_handle = thread::spawn({
+        let stdout = child.stdout.take();
+        move || read_stream(stdout)
+    });
+    let stderr_handle = thread::spawn({
+        let stderr = child.stderr.take();
+        move || read_stream(stderr)
+    });
 
     let deadline = Instant::now() + Duration::from_secs(5);
     let status = loop {
@@ -45,10 +54,18 @@ fn configured_runtime_database_failure_exits_instead_of_falling_back_to_bootstra
         }
         if Instant::now() >= deadline {
             let _ = child.kill();
-            let _ = child.wait();
-            break;
+            break child
+                .wait()
+                .expect("child status should be available after kill");
         }
+        thread::sleep(Duration::from_millis(50));
     };
+    let stdout = stdout_handle
+        .join()
+        .expect("stdout reader thread should complete");
+    let stderr = stderr_handle
+        .join()
+        .expect("stderr reader thread should complete");
 
     assert!(
         !status.success(),

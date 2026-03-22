@@ -81,7 +81,7 @@ pub fn InstallWizardPage(
         "stat-pill stat-pill-warning"
     };
     let cache_label = if bootstrap_status.cache_configured {
-        "Redis 外部缓存".to_string()
+        "Dragonfly 外部缓存".to_string()
     } else {
         "无外部缓存".to_string()
     };
@@ -93,7 +93,7 @@ pub fn InstallWizardPage(
     let cache_connection = bootstrap_status
         .cache_url_masked
         .clone()
-        .unwrap_or_else(|| "未配置 REDIS_URL".to_string());
+        .unwrap_or_else(|| "未配置 CACHE_URL".to_string());
     let cache_status_class = if bootstrap_status.cache_configured {
         "stat-pill stat-pill-active"
     } else {

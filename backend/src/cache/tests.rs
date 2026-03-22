@@ -4,13 +4,13 @@ use uuid::Uuid;
 #[test]
 fn test_image_cache_list() {
     let user_id = Uuid::new_v4();
-    let cursor = Some("cursor-token");
+    let cursor = "cursor-token";
     let limit = 20;
 
-    let key = ImageCache::list(user_id, cursor, limit);
+    let key = ImageCache::list(user_id, Some(cursor), limit);
 
     assert!(key.contains(&user_id.to_string()));
-    assert!(key.contains(cursor.unwrap()));
+    assert!(key.contains(cursor));
     assert!(key.contains(&limit.to_string()));
     assert!(key.starts_with("images:list:"));
 }

@@ -47,7 +47,7 @@
 `0.1` 当前只定义一条默认推荐栈：
 
 - 数据库：PostgreSQL
-- 缓存：Redis 8
+- 缓存：Dragonfly
 - 存储：本地目录
 - 部署模型：基于仓库根目录 `compose.yml` 的单栈部署
 
@@ -64,7 +64,7 @@
 
 以下能力保留在 `0.1` 文档和仓库中，但按 Beta 处理：
 
-- PostgreSQL + Redis 8 + S3 / MinIO
+- PostgreSQL + Dragonfly + S3 / MinIO
 - MySQL 8.4 部署、烟测、运维脚本与演练
 - MariaDB 12 部署、烟测、运维脚本与演练
 
@@ -78,7 +78,6 @@ Beta 的含义不是“不能用”，而是：
 
 以下能力保留，但按 Experimental 处理：
 
-- Dragonfly 缓存模式
 - 无外部缓存模式
 - 子路径部署
 - “所有数据库后端都具备同等级恢复体验”的假设

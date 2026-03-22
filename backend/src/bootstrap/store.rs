@@ -197,10 +197,10 @@ pub fn mask_database_url(database_kind: DatabaseKind, _database_url: &str) -> St
 
 pub fn mask_cache_url(cache_url: &str) -> String {
     let trimmed = cache_url.trim().to_ascii_lowercase();
-    if trimmed.starts_with("rediss://") {
-        "rediss://******".to_string()
-    } else if trimmed.starts_with("redis://") {
-        "redis://******".to_string()
+    if trimmed.starts_with("dragonflys://") {
+        "dragonflys://******".to_string()
+    } else if trimmed.starts_with("dragonfly://") {
+        "dragonfly://******".to_string()
     } else {
         "******".to_string()
     }
@@ -317,10 +317,13 @@ mod tests {
 
     #[test]
     fn mask_cache_url_preserves_only_scheme_family() {
-        assert_eq!(mask_cache_url("redis://cache:6379"), "redis://******");
         assert_eq!(
-            mask_cache_url("rediss://user:pass@cache.example.com:6380/0"),
-            "rediss://******"
+            mask_cache_url("dragonfly://cache:6379"),
+            "dragonfly://******"
+        );
+        assert_eq!(
+            mask_cache_url("dragonflys://user:pass@cache.example.com:6380/0"),
+            "dragonflys://******"
         );
         assert_eq!(mask_cache_url("cache.internal"), "******");
     }

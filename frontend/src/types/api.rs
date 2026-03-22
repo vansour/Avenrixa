@@ -22,4 +22,3 @@ pub use shared_types::bootstrap::{
 pub use shared_types::common::{HealthState, StorageBackendKind, UserRole};
 pub use shared_types::image::{DeleteRequest, ImageResponse, SetExpiryRequest};
 pub use shared_types::pagination::{CursorPaginated, CursorPaginationParams, PaginationParams};
-

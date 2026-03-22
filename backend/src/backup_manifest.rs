@@ -114,6 +114,7 @@ fn normalize_backup_manifest(
 
 #[cfg(test)]
 mod tests {
+    use super::normalize_backup_manifest;
     use crate::models::{
         BackupDatabaseFamily, BackupMetadataManifest, BackupObjectRollbackAnchor,
         BackupObjectRollbackStrategy, BackupRestoreStorageSummary, BackupSemantics,

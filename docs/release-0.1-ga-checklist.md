@@ -2,7 +2,7 @@
 
 本文档用于把 `0.1` 正式版的阻塞项收口成一个可执行的发布门禁，而不是继续分散在 README、CI 和专项演练脚本里。
 
-按 [`release-0.1-scope.md`](release-0.1-scope.md) 当前定义，只有 `PostgreSQL + Redis 8 + 本地存储` 是 `0.1` 的默认 GA 推荐栈；这份清单只对这条主链路负责。
+按 [`release-0.1-scope.md`](release-0.1-scope.md) 当前定义，只有 `PostgreSQL + Dragonfly + 本地存储` 是 `0.1` 的默认 GA 推荐栈；这份清单只对这条主链路负责。
 
 ## 统一入口
 
@@ -25,7 +25,7 @@ GitHub Actions 手动触发：
 - `cargo fmt --all --check`
 - `cargo check --workspace`
 - `cargo test --workspace`
-- 默认 `PostgreSQL + Redis 8` Compose smoke：`./scripts/compose-smoke.sh`
+- 默认 `PostgreSQL + Dragonfly` Compose smoke：`./scripts/compose-smoke.sh`
 - PostgreSQL 物理备份 / 恢复演练：`./scripts/postgres-ops-drill.sh`
 - PostgreSQL PITR 演练（named restore point）：`./scripts/postgres-ops-pitr-drill.sh`
 - PostgreSQL PITR 演练（time target）：`PITR_TARGET_MODE=time ./scripts/postgres-ops-pitr-drill.sh`

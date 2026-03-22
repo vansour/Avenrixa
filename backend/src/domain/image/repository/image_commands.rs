@@ -61,16 +61,12 @@ impl PostgresImageRepository {
             return Ok(0);
         }
 
-        let placeholders: String = vec!["?"; image_ids.len()].join(",");
+        let result = sqlx::query("DELETE FROM images WHERE user_id = $1 AND id = ANY($2)")
+            .bind(user_id)
+            .bind(image_ids)
+            .execute(&self.pool)
+            .await?;
 
-        sqlx::query(&format!(
-            "DELETE FROM images WHERE user_id = $1 AND id IN ({})",
-            placeholders
-        ))
-        .bind(user_id)
-        .execute(&self.pool)
-        .await?;
-
-        Ok(image_ids.len() as u64)
+        Ok(result.rows_affected())
     }
 }

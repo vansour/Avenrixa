@@ -29,7 +29,7 @@ impl Config {
             }
             config.database.url = db_url;
         }
-        if let Ok(cache_url) = std::env::var("REDIS_URL") {
+        if let Ok(cache_url) = std::env::var("CACHE_URL") {
             config.cache_backend.url = if cache_url.trim().is_empty() {
                 None
             } else {

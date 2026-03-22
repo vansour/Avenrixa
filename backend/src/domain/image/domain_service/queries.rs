@@ -43,9 +43,8 @@ impl<I: ImageRepository> ImageDomainService<I> {
 
         let cache_key = ImageCache::list(user_id, cursor, limit);
         if let Some(manager) = self.cache.as_ref() {
-            let mut cache = manager.clone();
-            if let Ok(Some(cached)) =
-                Cache::get::<CursorPaginated<Image>, _>(&mut cache, &cache_key).await
+            let cache = manager.clone();
+            if let Ok(Some(cached)) = Cache::get::<CursorPaginated<Image>>(&cache, &cache_key).await
             {
                 return Ok(cached);
             }
@@ -90,9 +89,9 @@ impl<I: ImageRepository> ImageDomainService<I> {
 
         // 缓存结果
         if let Some(manager) = self.cache.as_ref() {
-            let mut cache = manager.clone();
+            let cache = manager.clone();
             let ttl = self.config.cache_policy.list_ttl;
-            let _ = Cache::set(&mut cache, &cache_key, &result, ttl).await;
+            let _ = Cache::set(&cache, &cache_key, &result, ttl).await;
         }
 
         Ok(result)

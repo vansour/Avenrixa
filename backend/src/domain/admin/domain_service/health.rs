@@ -1,5 +1,4 @@
 use chrono::Utc;
-use redis::AsyncCommands;
 
 use super::AdminDomainService;
 use crate::db::DatabasePool;
@@ -62,8 +61,8 @@ impl AdminDomainService {
         };
 
         let cache_status = if let Some(manager) = self.cache.as_ref() {
-            let mut cache = manager.clone();
-            match cache.ping::<()>().await {
+            let cache = manager.clone();
+            match cache.ping().await {
                 Ok(_) => ComponentStatus::healthy(),
                 Err(e) => {
                     if overall_status == HealthState::Healthy {
@@ -190,8 +189,8 @@ mod tests {
     #[test]
     fn build_version_label_ignores_revision_when_present() {
         assert_eq!(
-            build_version_label(Some("0.1.2-rc.1"), "ignored", Some("abc123def456")),
-            "0.1.2-rc.1"
+            build_version_label(Some("0.1.2-rc.2"), "ignored", Some("abc123def456")),
+            "0.1.2-rc.2"
         );
     }
 

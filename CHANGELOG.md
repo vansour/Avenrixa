@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.2-rc.2 - 2026-03-22
+
+- 将 `0.1` 默认推荐缓存路径彻底收口到 `Dragonfly`，移除项目内 `Redis` / `REDIS_URL` 口径，并把底层缓存客户端替换为 `fred` 封装。
+- 清理 Compose、发布脚本、安装向导与运行时配置中的历史多数据库/多缓存残留，默认主链路统一到 `PostgreSQL + Dragonfly + 本地存储`。
+- 修复 `cargo check`、`cargo clippy --workspace --all-targets -- -D warnings` 与 `cargo test --workspace` 中的遗留错误，删除需要 Docker 的旧迁移升级测试，确保候选版冻结时三条 Rust 门禁全绿。
+- 修正 RC 发布准备链路中的版本冻结与测试覆盖细节，包括缓存 TLS 初始化、备份语义断言和 fail-closed 启动测试。
+
 ## 0.1.2-rc.1 - 2026-03-17
 
 - 收口 PostgreSQL 备份与 S3 健康探测链路，降低大库备份内存峰值，并把远端桶可达性纳入健康状态。

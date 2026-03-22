@@ -166,7 +166,6 @@ pub struct HealthStatus {
     pub status: HealthState,
     pub timestamp: DateTime<Utc>,
     pub database: ComponentStatus,
-    #[serde(alias = "redis")]
     pub cache: ComponentStatus,
     pub storage: ComponentStatus,
     pub version: Option<String>,

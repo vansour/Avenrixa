@@ -10,14 +10,6 @@ pub async fn build_app_state(config: Config) -> anyhow::Result<AppState> {
     assemble_app_state(config, database).await
 }
 
-#[cfg(test)]
-pub(crate) async fn build_app_state_with_database(
-    config: Config,
-    database: DatabasePool,
-) -> anyhow::Result<AppState> {
-    assemble_app_state(config, database).await
-}
-
 async fn assemble_app_state(config: Config, database: DatabasePool) -> anyhow::Result<AppState> {
     let cache_connections = connect_cache(&config).await;
     let services = build_services(&database, &cache_connections, &config).await?;

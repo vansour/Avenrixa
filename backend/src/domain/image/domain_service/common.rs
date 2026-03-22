@@ -1,5 +1,4 @@
 use super::*;
-use crate::cache::CacheCommands;
 
 impl<I: ImageRepository> ImageDomainService<I> {
     pub(super) fn validate_image_key(image_key: &str) -> Result<(), AppError> {
@@ -35,7 +34,7 @@ impl<I: ImageRepository> ImageDomainService<I> {
             return Ok(());
         }
 
-        let mut cache = manager.clone();
+        let cache = manager.clone();
         let mut unique_hashes = HashSet::new();
         for hash in hashes {
             if hash.trim().is_empty() {
@@ -45,16 +44,13 @@ impl<I: ImageRepository> ImageDomainService<I> {
         }
 
         for hash in unique_hashes {
-            let _ = Cache::del(&mut cache, HashCache::existing_info(&hash, "user", user_id)).await;
-            let _ = Cache::del(&mut cache, HashCache::image_hash(&hash, "user")).await;
+            let _ = Cache::del(&cache, HashCache::existing_info(&hash, "user", user_id)).await;
+            let _ = Cache::del(&cache, HashCache::image_hash(&hash, "user")).await;
 
             if self.config.image.dedup_strategy == "global" {
-                let _ = Cache::del(
-                    &mut cache,
-                    HashCache::existing_info(&hash, "global", user_id),
-                )
-                .await;
-                let _ = Cache::del(&mut cache, HashCache::image_hash(&hash, "global")).await;
+                let _ =
+                    Cache::del(&cache, HashCache::existing_info(&hash, "global", user_id)).await;
+                let _ = Cache::del(&cache, HashCache::image_hash(&hash, "global")).await;
             }
         }
 
@@ -68,10 +64,14 @@ impl<I: ImageRepository> ImageDomainService<I> {
     ) -> Result<(), AppError> {
         if let Some(manager) = self.cache.as_ref() {
             let cache_key = format!("{}{}", self.config.cache_backend.key_prefix, image_id);
-            let mut cache = manager.clone();
-            let _: Result<(), _> = cache
-                .set_ex(cache_key, storage_path, self.config.cache_backend.ttl)
-                .await;
+            let cache = manager.clone();
+            let _ = Cache::set_raw(
+                &cache,
+                &cache_key,
+                storage_path,
+                self.config.cache_backend.ttl,
+            )
+            .await;
         }
         Ok(())
     }
@@ -86,9 +86,8 @@ impl<I: ImageRepository> ImageDomainService<I> {
         let cache_info_key = HashCache::existing_info(hash, strategy, user_id);
 
         if let Some(manager) = self.cache.as_ref() {
-            let mut cache = manager.clone();
-            if let Ok(Some(cached)) = Cache::get::<ImageInfo, _>(&mut cache, &cache_info_key).await
-            {
+            let cache = manager.clone();
+            if let Ok(Some(cached)) = Cache::get::<ImageInfo>(&cache, &cache_info_key).await {
                 info!("Hash cache hit for image hash: {}", hash);
                 return Ok(Some(cached));
             }
@@ -120,11 +119,11 @@ impl<I: ImageRepository> ImageDomainService<I> {
         };
 
         if let (Some(info), Some(manager)) = (&existing, self.cache.as_ref()) {
-            let mut cache = manager.clone();
+            let cache = manager.clone();
             let cache_ttl = self.config.cache_policy.list_ttl;
-            let _ = Cache::set(&mut cache, &cache_info_key, info, cache_ttl).await;
+            let _ = Cache::set(&cache, &cache_info_key, info, cache_ttl).await;
             let hash_cache_key = HashCache::image_hash(hash, strategy);
-            let _ = Cache::set(&mut cache, &hash_cache_key, "1", 3600).await;
+            let _ = Cache::set(&cache, &hash_cache_key, "1", 3600).await;
         }
 
         Ok(existing)

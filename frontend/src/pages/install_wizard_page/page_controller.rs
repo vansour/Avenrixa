@@ -22,7 +22,6 @@ pub(super) fn use_install_wizard_controller(
     initial_config: &AdminSettingsConfig,
     _on_installed: EventHandler<InstallBootstrapResponse>,
 ) -> InstallWizardController {
-
     let site_name = use_signal({
         let initial = initial_site_name(initial_config);
         move || initial.clone()

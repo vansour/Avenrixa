@@ -133,8 +133,8 @@ mod tests {
         let semantics = backup_semantics_from_database_kind(DatabaseKind::Postgres);
         assert_eq!(semantics.database_family, BackupDatabaseFamily::Postgres);
         assert_eq!(semantics.backup_kind, BackupKind::PostgresqlLogicalDump);
-        assert_eq!(semantics.restore_mode, RestoreMode::UiRestartSqlImport);
-        assert!(semantics.ui_restore_supported);
+        assert_eq!(semantics.restore_mode, RestoreMode::DownloadOnly);
+        assert!(!semantics.ui_restore_supported);
     }
 
     #[test]
@@ -142,8 +142,8 @@ mod tests {
         let semantics = infer_backup_semantics("backup_123.sql", None);
         assert_eq!(semantics.database_family, BackupDatabaseFamily::Postgres);
         assert_eq!(semantics.backup_kind, BackupKind::PostgresqlLogicalDump);
-        assert_eq!(semantics.restore_mode, RestoreMode::UiRestartSqlImport);
-        assert!(semantics.ui_restore_supported);
+        assert_eq!(semantics.restore_mode, RestoreMode::DownloadOnly);
+        assert!(!semantics.ui_restore_supported);
     }
 
     #[test]

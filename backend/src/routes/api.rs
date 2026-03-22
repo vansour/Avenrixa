@@ -2,15 +2,6 @@ use crate::db::AppState;
 use crate::handlers::{admin, auth, bootstrap, images, install};
 use axum::{Router, routing};
 
-#[cfg(test)]
-pub fn create_api_routes() -> Router<AppState> {
-    Router::new()
-        .merge(boot_public_routes())
-        .merge(throttled_public_routes())
-        .merge(protected_routes())
-        .merge(admin_routes())
-}
-
 pub fn create_boot_public_routes() -> Router<AppState> {
     boot_public_routes()
 }

@@ -1,7 +1,7 @@
 # Avenrixa
 一个基于 Rust Workspace 的图片管理项目，包含：
 
-- `backend`：Axum + SQLx + Redis 8 / 可选缓存的后端服务
+- `backend`：Axum + SQLx + Dragonfly / 可选缓存的后端服务
 - `frontend`：Dioxus Web 前端
 
 ## 0.1 范围
@@ -10,11 +10,11 @@
 
 `0.1` 当前的默认推荐栈是：
 
-- `PostgreSQL + Redis 8 + 本地存储`
+- `PostgreSQL + Dragonfly + 本地存储`
 
 当前支持级别按下面收录：
 
-- `GA`：PostgreSQL、Redis 8、本地存储，以及 PostgreSQL 物理备份 / 恢复 / PITR 主路径
+- `GA`：PostgreSQL、Dragonfly、本地存储，以及 PostgreSQL 物理备份 / 恢复 / PITR 主路径
 
 正式版边界、非目标和后续阶段的统一口径见 [`docs/release-0.1-scope.md`](docs/release-0.1-scope.md)。
 
@@ -34,7 +34,7 @@ docker compose up --build -d
 
 手工部署现在统一编辑仓库根目录的 [`compose.yml`](compose.yml)：
 
-- 默认已激活 `PostgreSQL + Redis 8`
+- 默认已激活 `PostgreSQL + Dragonfly`
 - 同一个文件里也写好了 PostgreSQL 连接
 - 如需使用无缓存模式，可以在 `compose.yml` 中注释掉 `cache` 服务
 
@@ -42,7 +42,7 @@ docker compose up --build -d
 
 - 给 `services.app` 保留一组预设
 - 给数据库服务保留一组 `postgres`
-- 按需保留 `cache`（Redis 8 / 无外部缓存）
+- 按需保留 `cache`（Dragonfly / 无外部缓存）
 
 服务默认监听 `http://localhost:8080`。
 
@@ -88,7 +88,7 @@ postgresql://user:pass@postgres:5432/image
 postgresql://avenrixa:replace-with-strong-app-password@postgres:5432/image
 ```
 
-`REDIS_URL` 现在也是可选项。默认 Compose 会带上 Redis 8 `cache` 服务；如果你的自定义部署没有提供 `REDIS_URL`，应用会以"无外部缓存"模式启动，登录态与核心功能仍然可用，只是列表/哈希缓存与健康状态会显示为 `disabled` 或 `degraded`。
+`CACHE_URL` 现在也是可选项。默认 Compose 会带上 Dragonfly `cache` 服务；如果你的自定义部署没有提供 `CACHE_URL`，应用会以"无外部缓存"模式启动，登录态与核心功能仍然可用，只是列表/哈希缓存与健康状态会显示为 `disabled` 或 `degraded`。
 
 PostgreSQL 的部署与运维备份说明见 [`docs/postgresql.md`](docs/postgresql.md)。
 
@@ -240,7 +240,7 @@ cargo test --workspace
 这条入口会串行执行：
 
 - Rust checks
-- 默认 `PostgreSQL + Redis 8` Compose smoke
+- 默认 `PostgreSQL + Dragonfly` Compose smoke
 - PostgreSQL 物理备份 / 恢复演练
 - PostgreSQL PITR 演练（restore point / time）
 
@@ -290,7 +290,7 @@ cargo test --workspace
 
 按 [`docs/release-0.1-scope.md`](docs/release-0.1-scope.md) 当前定义：
 
-- `COMPOSE_VARIANT=postgres` 且 `CACHE_MODE=redis8` 是 `0.1` 的默认 GA 主链路冒烟
+- `COMPOSE_VARIANT=postgres` 且 `CACHE_MODE=dragonfly` 是 `0.1` 的默认 GA 主链路冒烟
 - `none` 属于补充覆盖，用于 Experimental 路径观察，不作为 `0.1` GA 发布门槛
 
 仓库内提供了一个容器级冒烟脚本，会构建镜像、拉起 Compose 依赖，并按具体变体执行健康检查或主链路校验：
@@ -305,33 +305,9 @@ cargo test --workspace
 CACHE_MODE=none ./scripts/compose-smoke.sh
 ```
 
-默认 `COMPOSE_VARIANT=postgres CACHE_MODE=redis8` 现在会跑 `0.1` GA 主链路：运行时检查、安装向导、管理员登录/刷新/登出/改密、图片上传/删除、结构化设置持久化、系统统计、审计日志，以及 PostgreSQL 逻辑备份"仅下载、不支持页面恢复"的语义校验。
+默认 `COMPOSE_VARIANT=postgres CACHE_MODE=dragonfly` 现在会跑 `0.1` GA 主链路：运行时检查、安装向导、管理员登录/刷新/登出/改密、图片上传/删除、结构化设置持久化、系统统计、审计日志，以及 PostgreSQL 逻辑备份"仅下载、不支持页面恢复"的语义校验。
 
-默认情况下，这条脚本会重建当前 Compose 入口对应的数据目录；PostgreSQL 对应 `./data`，MySQL 8.4 对应 `./data-mysql`，MariaDB 12 对应 `./data-mariadb`。如果你确实要复用现有目录，可以显式传入 `SMOKE_RESET_DATA_DIR=0`。
-
-## 浏览器点击回归
-
-这条浏览器回归当前用于补充覆盖，帮助持续观察 `Beta` 栈的页面行为；它不是 `0.1` GA 发布的默认阻塞门槛。
-
-如果你要对页面链路跑一遍真实浏览器点击回归，使用：
-
-```bash
-./scripts/browser-click-regression.sh
-```
-
-如果要在浏览器点击回归里切换缓存模式，也使用同一个环境变量：
-
-```bash
-CACHE_MODE=none ./scripts/browser-click-regression.sh
-```
-
-这条脚本会自动完成：
-
-- 检查 Compose 是否已预设 PostgreSQL 数据库连接；如未预设则自动走数据库引导页保存连接
-- 进入安装向导并完成管理员安装
-- 首次进入引导的 4 个按钮逐个点击校对
-
-如果当前机器没有可直接使用的 Chrome / Chromium，脚本会自动安装 Playwright Chromium。
+默认情况下，这条脚本会重建当前 Compose 入口对应的数据目录；当前 PostgreSQL 主链路对应 `./data`。如果你确实要复用已有目录，可以显式传入 `SMOKE_RESET_DATA_DIR=0`。
 
 默认情况下，这条脚本也会重建当前 Compose 入口对应的数据目录；如需复用当前目录，显式传入 `RESET_DATA_DIR=0`。
 

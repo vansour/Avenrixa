@@ -341,7 +341,6 @@ impl AdminDomainService {
 mod tests {
     use super::*;
     use crate::config::{Config, DatabaseKind};
-    use crate::models::ComponentStatus;
     use crate::runtime_settings::{RuntimeSettings, StorageBackend};
     use crate::storage_backend::StorageManager;
     use std::ffi::OsString;
@@ -469,7 +468,7 @@ mod tests {
             .await
             .expect("backup file should exist");
 
-        assert_eq!(contents, "CREATE TABLE demo(id int);\\n");
+        assert_eq!(contents, "CREATE TABLE demo(id int);\n");
         assert!(
             tokio::fs::try_exists(&manifest_file)
                 .await

@@ -31,11 +31,11 @@ pub struct AppState {
 
 impl AppState {
     pub async fn invalidate_user_image_cache(&self, user_id: Uuid) -> Result<(), anyhow::Error> {
-        let Some(mut cache) = self.cache.clone() else {
+        let Some(cache) = self.cache.clone() else {
             return Ok(());
         };
         Cache::del_pattern(
-            &mut cache,
+            &cache,
             &crate::cache::ImageCache::images_invalidate(user_id),
         )
         .await

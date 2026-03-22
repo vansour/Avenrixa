@@ -1,4 +1,4 @@
-use super::{CacheCommands, CacheConnectionLike};
+use super::CacheConnection;
 use serde::{Serialize, de::DeserializeOwned};
 use tracing::warn;
 
@@ -18,13 +18,15 @@ impl Cache {
         format!("{}{}", self.key_prefix, key.as_ref())
     }
 
-    pub async fn get<T, C>(conn: &mut C, key: impl AsRef<str>) -> Result<Option<T>, anyhow::Error>
+    pub async fn get<T>(
+        conn: &CacheConnection,
+        key: impl AsRef<str>,
+    ) -> Result<Option<T>, anyhow::Error>
     where
         T: DeserializeOwned,
-        C: CacheConnectionLike + Send + Sync,
     {
         let key = prefixed_key(key);
-        let value: Result<Option<String>, _> = conn.get(&key).await;
+        let value = conn.get(&key).await;
 
         match value {
             Ok(Some(value)) => serde_json::from_str(&value)
@@ -38,19 +40,16 @@ impl Cache {
         }
     }
 
-    pub async fn set<C>(
-        conn: &mut C,
+    pub async fn set(
+        conn: &CacheConnection,
         key: impl AsRef<str>,
         value: impl Serialize,
         ttl_seconds: u64,
-    ) -> Result<(), anyhow::Error>
-    where
-        C: CacheConnectionLike + Send + Sync,
-    {
+    ) -> Result<(), anyhow::Error> {
         let key = prefixed_key(key);
         let value = serde_json::to_string(&value)
             .map_err(|error| anyhow::anyhow!("Serialization failed: {}", error))?;
-        let result: Result<(), _> = conn.set_ex(&key, value, ttl_seconds).await;
+        let result = conn.set_string(&key, value, ttl_seconds).await;
 
         if let Err(error) = result {
             warn!("External cache set error (key: {}): {}", key, error);
@@ -59,44 +58,50 @@ impl Cache {
         Ok(())
     }
 
-    pub async fn del<C>(conn: &mut C, key: impl AsRef<str>) -> Result<(), anyhow::Error>
-    where
-        C: CacheConnectionLike + Send + Sync,
-    {
+    pub async fn set_raw(
+        conn: &CacheConnection,
+        key: impl AsRef<str>,
+        value: impl Into<String>,
+        ttl_seconds: u64,
+    ) -> Result<(), anyhow::Error> {
         let key = prefixed_key(key);
-        let result: Result<(), _> = conn.del(&key).await;
+        let result = conn.set_string(&key, value, ttl_seconds).await;
+        if let Err(error) = result {
+            warn!("External cache set error (key: {}): {}", key, error);
+        }
+        Ok(())
+    }
+
+    pub async fn del(conn: &CacheConnection, key: impl AsRef<str>) -> Result<(), anyhow::Error> {
+        let key = prefixed_key(key);
+        let result = conn.del(&key).await;
         if let Err(error) = result {
             warn!("External cache del error (key: {}): {}", key, error);
         }
         Ok(())
     }
 
-    pub async fn del_pattern<C>(conn: &mut C, pattern: impl AsRef<str>) -> Result<(), anyhow::Error>
-    where
-        C: CacheConnectionLike + Send + Sync,
-    {
+    pub async fn del_pattern(
+        conn: &CacheConnection,
+        pattern: impl AsRef<str>,
+    ) -> Result<(), anyhow::Error> {
         let pattern = prefixed_key(pattern);
-        let mut cursor: u64 = 0;
+        let mut cursor = "0".to_string();
 
         loop {
-            let (next_cursor, keys): (u64, Vec<String>) = redis::cmd("SCAN")
-                .arg(cursor)
-                .arg("MATCH")
-                .arg(&pattern)
-                .arg("COUNT")
-                .arg(100)
-                .query_async(conn)
+            let (next_cursor, keys) = conn
+                .scan_page(&cursor, &pattern, 100)
                 .await
                 .map_err(|error| anyhow::anyhow!("External cache SCAN error: {}", error))?;
 
             if !keys.is_empty() {
-                conn.del::<_, ()>(keys)
+                conn.del_many(keys)
                     .await
                     .map_err(|error| anyhow::anyhow!("External cache DEL error: {}", error))?;
             }
 
             cursor = next_cursor;
-            if cursor == 0 {
+            if cursor == "0" {
                 break;
             }
         }

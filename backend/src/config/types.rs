@@ -60,7 +60,7 @@ pub(crate) fn default_max_connections() -> u32 {
 pub struct Config {
     pub server: ServerConfig,
     pub database: DatabaseConfig,
-    #[serde(alias = "redis")]
+    #[serde(alias = "dragonfly")]
     pub cache_backend: CacheBackendConfig,
     pub storage: StorageConfig,
     #[serde(alias = "cache")]
@@ -208,7 +208,7 @@ mod tests {
     use serde_json::{Value, to_value};
 
     #[test]
-    fn config_deserializes_legacy_cache_field_names() {
+    fn config_deserializes_cache_field_aliases() {
         let mut value = to_value(Config::default()).expect("default config should serialize");
         let object = value
             .as_object_mut()
@@ -220,11 +220,11 @@ mod tests {
         let cache_policy = object
             .remove("cache_policy")
             .expect("cache_policy should exist");
-        object.insert("redis".to_string(), cache_backend);
+        object.insert("dragonfly".to_string(), cache_backend);
         object.insert("cache".to_string(), cache_policy);
 
         let parsed: Config =
-            serde_json::from_value(Value::Object(object.clone())).expect("legacy aliases work");
+            serde_json::from_value(Value::Object(object.clone())).expect("cache aliases work");
 
         assert_eq!(parsed.cache_backend.key_prefix, "img:");
         assert_eq!(parsed.cache_policy.list_ttl, 300);
