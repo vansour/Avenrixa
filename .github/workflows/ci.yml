@@ -61,12 +61,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: default-redis8
+          - name: default-dragonfly
             coverage_label: GA
             compose_project_name: avenrixa-ci
             compose_variant: postgres
             smoke_flow: postgres
-            cache_mode: redis8
+            cache_mode: dragonfly
           - name: default-no-cache
             coverage_label: Supplemental
             compose_project_name: avenrixa-ci-nocache
