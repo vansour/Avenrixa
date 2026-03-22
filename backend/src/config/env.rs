@@ -39,9 +39,6 @@ impl Config {
         if let Ok(storage_path) = std::env::var("STORAGE_PATH") {
             config.storage.path = storage_path;
         }
-        if let Ok(enable_file_check) = std::env::var("STORAGE_ENABLE_FILE_CHECK") {
-            config.storage.enable_file_check = enable_file_check.parse().unwrap_or(true);
-        }
         if let Ok(file_check_threshold) = std::env::var("STORAGE_FILE_CHECK_THRESHOLD") {
             config.storage.file_check_concurrent_threshold =
                 file_check_threshold.parse().unwrap_or(50);

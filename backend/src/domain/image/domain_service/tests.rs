@@ -36,7 +36,6 @@ async fn setup_service_with_repository<I: ImageRepository>(
     image_repository: I,
 ) -> TestServiceContext<I> {
     let mut config = Config::default();
-    config.storage.enable_file_check = false;
     let image_processor = ImageProcessor::new(1920, 1080, 80);
 
     let cache = None;

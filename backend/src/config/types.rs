@@ -135,14 +135,8 @@ pub struct CacheBackendConfig {
 pub struct StorageConfig {
     pub path: String,
     pub allowed_extensions: Vec<String>,
-    #[serde(default = "default_enable_file_check")]
-    pub enable_file_check: bool,
     #[serde(default = "default_file_check_concurrent_threshold")]
     pub file_check_concurrent_threshold: usize,
-}
-
-pub(crate) fn default_enable_file_check() -> bool {
-    true
 }
 
 pub(crate) fn default_file_check_concurrent_threshold() -> usize {
