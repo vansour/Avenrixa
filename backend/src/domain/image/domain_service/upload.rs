@@ -27,46 +27,16 @@ impl<I: ImageRepository> ImageDomainService<I> {
         Ok(())
     }
 
-    /// 上传图片（从临时文件）
-    #[tracing::instrument(skip(self, temp_path))]
-    pub async fn upload_image_from_file(
+    async fn persist_processed_upload(
         &self,
         user_id: Uuid,
         actor_email: &str,
-        filename: String,
-        temp_path: std::path::PathBuf,
-        content_type: Option<String>,
+        ext: String,
+        hash: String,
+        compressed: Vec<u8>,
+        streaming_upload: bool,
     ) -> Result<Image, AppError> {
-        self.validate_filename(&filename)?;
-
-        let ext = ImageProcessor::get_extension(&filename);
-        if !self.config.storage.allowed_extensions.contains(&ext) {
-            warn!("Unsupported extension: {}", ext);
-            let _ = tokio::fs::remove_file(&temp_path).await;
-            return Err(AppError::InvalidImageFormat);
-        }
-
-        if !content_type
-            .as_deref()
-            .is_some_and(|ct| ImageProcessor::is_image(Some(ct)))
-        {
-            warn!("Invalid file type: {:?}", content_type);
-            let _ = tokio::fs::remove_file(&temp_path).await;
-            return Err(AppError::InvalidImageFormat);
-        }
-
-        let processor = self.image_processor.clone();
-        let temp_path_clone = temp_path.clone();
-        let ext_clone = ext.clone();
-        let compressed = tokio::task::spawn_blocking(move || {
-            processor.process_from_file(&temp_path_clone, &ext_clone)
-        })
-        .await
-        .map_err(|e| AppError::Internal(e.into()))??;
-
-        let hash = ImageProcessor::calculate_hash(&compressed);
         let compressed_size = compressed.len() as i64;
-
         let dedup_strategy = &self.config.image.dedup_strategy;
         let existing_info = self
             .check_image_hash(&hash, dedup_strategy, user_id)
@@ -79,42 +49,60 @@ impl<I: ImageRepository> ImageDomainService<I> {
                 "Duplicate image detected, returning existing: {} (strategy: {})",
                 info.id, dedup_strategy
             );
-            let _ = tokio::fs::remove_file(&temp_path).await;
-            return Ok(Image {
-                id: info.id,
-                user_id,
-                filename: info.filename,
-                thumbnail: None,
-                size: compressed_size,
-                hash,
-                format: ext.clone(),
-                views: 0,
-                status: ImageStatus::Active,
-                expires_at: None,
-                created_at: Utc::now(),
-                total_count: None,
-            });
+            let existing_image = self
+                .image_repository
+                .find_image_by_id(info.id)
+                .await?
+                .ok_or(AppError::ImageNotFound)?;
+            return Ok(existing_image);
         }
 
         let image_id = Uuid::new_v4();
         let stored_filename = format!("{}.{}", hash, ext);
-        if !self
-            .storage_manager
-            .exists(&stored_filename)
-            .await
-            .unwrap_or(false)
-        {
-            self.storage_manager
-                .write(&stored_filename, &compressed)
+        let thumbnail_key = self.thumbnail_file_key(&hash);
+        let thumbnail_bytes = self.generate_thumbnail_bytes(compressed.clone()).await?;
+        let media_ref_adjustments = vec![(stored_filename.clone(), 1), (thumbnail_key.clone(), 1)];
+        let media_ref_revert_adjustments =
+            vec![(stored_filename.clone(), -1), (thumbnail_key.clone(), -1)];
+        let mut wrote_storage_object = false;
+        let mut wrote_thumbnail_object = false;
+        let mut bumped_media_refs = false;
+        if let Err(error) = async {
+            self.ensure_media_blob_ready(&stored_filename, "original", Some(&hash))
                 .await?;
+            self.ensure_media_blob_ready(&thumbnail_key, "thumbnail", Some(&hash))
+                .await?;
+            wrote_storage_object = self
+                .write_storage_object_if_missing(&stored_filename, &compressed)
+                .await?;
+            wrote_thumbnail_object = self
+                .write_storage_object_if_missing(&thumbnail_key, &thumbnail_bytes)
+                .await?;
+            self.adjust_media_blob_refs(&media_ref_adjustments).await?;
+            bumped_media_refs = true;
+            Ok::<(), AppError>(())
         }
-        let _ = tokio::fs::remove_file(&temp_path).await;
+        .await
+        {
+            if bumped_media_refs {
+                let _ = self
+                    .adjust_media_blob_refs(&media_ref_revert_adjustments)
+                    .await;
+            }
+            if wrote_storage_object {
+                self.compensate_failed_storage_write(&stored_filename).await;
+            }
+            if wrote_thumbnail_object {
+                self.compensate_orphaned_media(&thumbnail_key).await;
+            }
+            return Err(error);
+        }
 
         let image = Image {
             id: image_id,
             user_id,
             filename: stored_filename.clone(),
-            thumbnail: None,
+            thumbnail: Some(thumbnail_key.clone()),
             size: compressed_size,
             hash,
             format: ext.clone(),
@@ -125,7 +113,21 @@ impl<I: ImageRepository> ImageDomainService<I> {
             total_count: None,
         };
 
-        self.image_repository.create_image(&image).await?;
+        if let Err(error) = self.image_repository.create_image(&image).await {
+            if bumped_media_refs {
+                let _ = self
+                    .adjust_media_blob_refs(&media_ref_revert_adjustments)
+                    .await;
+            }
+            if wrote_storage_object {
+                self.compensate_failed_storage_write(&stored_filename).await;
+            }
+            if wrote_thumbnail_object {
+                self.compensate_orphaned_media(&thumbnail_key).await;
+            }
+            return Err(error.into());
+        }
+
         let cache_hint = self.storage_manager.cache_hint(&stored_filename);
         self.cache_image_path(image_id, &cache_hint).await?;
 
@@ -146,12 +148,78 @@ impl<I: ImageRepository> ImageDomainService<I> {
             })),
         )
         .await;
-        info!(
-            "Image uploaded (streaming): {} by {}",
-            image_id, actor_email
-        );
+        if streaming_upload {
+            info!(
+                "Image uploaded (streaming): {} by {}",
+                image_id, actor_email
+            );
+        } else {
+            info!("Image uploaded: {} by {}", image_id, actor_email);
+        }
 
         Ok(image)
+    }
+
+    async fn compensate_failed_storage_write(&self, stored_filename: &str) {
+        self.compensate_orphaned_media(stored_filename).await;
+    }
+
+    async fn cleanup_temp_file(temp_path: &std::path::Path) {
+        if let Err(error) = tokio::fs::remove_file(temp_path).await
+            && error.kind() != std::io::ErrorKind::NotFound
+        {
+            warn!(
+                "Failed to remove temporary upload file {}: {}",
+                temp_path.display(),
+                error
+            );
+        }
+    }
+
+    /// 上传图片（从临时文件）
+    #[tracing::instrument(skip(self, temp_path))]
+    pub async fn upload_image_from_file(
+        &self,
+        user_id: Uuid,
+        actor_email: &str,
+        filename: String,
+        temp_path: std::path::PathBuf,
+        content_type: Option<String>,
+    ) -> Result<Image, AppError> {
+        let upload_result = async {
+            self.validate_filename(&filename)?;
+
+            let ext = ImageProcessor::get_extension(&filename);
+            if !self.config.storage.allowed_extensions.contains(&ext) {
+                warn!("Unsupported extension: {}", ext);
+                return Err(AppError::InvalidImageFormat);
+            }
+
+            if !content_type
+                .as_deref()
+                .is_some_and(|ct| ImageProcessor::is_image(Some(ct)))
+            {
+                warn!("Invalid file type: {:?}", content_type);
+                return Err(AppError::InvalidImageFormat);
+            }
+
+            let processor = self.image_processor.clone();
+            let temp_path_clone = temp_path.clone();
+            let ext_clone = ext.clone();
+            let compressed = tokio::task::spawn_blocking(move || {
+                processor.process_from_file(&temp_path_clone, &ext_clone)
+            })
+            .await
+            .map_err(|e| AppError::Internal(e.into()))??;
+            let hash = ImageProcessor::calculate_hash(&compressed);
+
+            self.persist_processed_upload(user_id, actor_email, ext, hash, compressed, true)
+                .await
+        }
+        .await;
+
+        Self::cleanup_temp_file(&temp_path).await;
+        upload_result
     }
 
     /// 上传图片
@@ -191,89 +259,9 @@ impl<I: ImageRepository> ImageDomainService<I> {
         let compressed = tokio::task::spawn_blocking(move || processor.process(&data, &ext_clone))
             .await
             .map_err(|e| AppError::Internal(e.into()))??;
-
         let hash = ImageProcessor::calculate_hash(&compressed);
-        let compressed_size = compressed.len() as i64;
 
-        let dedup_strategy = &self.config.image.dedup_strategy;
-        let existing_info = self
-            .check_image_hash(&hash, dedup_strategy, user_id)
-            .await?;
-
-        if let Some(info) = existing_info
-            && (dedup_strategy == "user" || info.user_id == user_id)
-        {
-            info!(
-                "Duplicate image detected, returning existing: {} (strategy: {})",
-                info.id, dedup_strategy
-            );
-            return Ok(Image {
-                id: info.id,
-                user_id,
-                filename: info.filename,
-                thumbnail: None,
-                size: compressed_size,
-                hash,
-                format: ext.clone(),
-                views: 0,
-                status: ImageStatus::Active,
-                expires_at: None,
-                created_at: Utc::now(),
-                total_count: None,
-            });
-        }
-
-        let image_id = Uuid::new_v4();
-        let stored_filename = format!("{}.{}", hash, ext);
-        if !self
-            .storage_manager
-            .exists(&stored_filename)
+        self.persist_processed_upload(user_id, actor_email, ext, hash, compressed, false)
             .await
-            .unwrap_or(false)
-        {
-            self.storage_manager
-                .write(&stored_filename, &compressed)
-                .await?;
-        }
-
-        let image = Image {
-            id: image_id,
-            user_id,
-            filename: stored_filename.clone(),
-            thumbnail: None,
-            size: compressed_size,
-            hash,
-            format: ext.clone(),
-            views: 0,
-            status: ImageStatus::Active,
-            expires_at: None,
-            created_at: Utc::now(),
-            total_count: None,
-        };
-
-        self.image_repository.create_image(&image).await?;
-        let cache_hint = self.storage_manager.cache_hint(&stored_filename);
-        self.cache_image_path(image_id, &cache_hint).await?;
-
-        log_audit_db(
-            &self.database,
-            Some(user_id),
-            "image.upload",
-            "image",
-            Some(image_id),
-            None,
-            Some(serde_json::json!({
-                "actor_email": actor_email,
-                "stored_filename": stored_filename,
-                "size_bytes": compressed_size,
-                "format": ext,
-                "result": "completed",
-                "risk_level": "info",
-            })),
-        )
-        .await;
-        info!("Image uploaded: {} by {}", image_id, actor_email);
-
-        Ok(image)
     }
 }

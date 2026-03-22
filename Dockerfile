@@ -3,7 +3,7 @@
 # 阶段 1: 统一构建环境 (Builder)
 # ==========================================
 FROM rust:trixie AS builder
-ARG APP_VERSION=0.1.1
+ARG APP_VERSION=dev
 ARG APP_REVISION=dev
 ARG BUILD_DATE=unknown
 ENV APP_VERSION=${APP_VERSION}
@@ -90,7 +90,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 # 阶段 2: 最终运行时环境 (Runtime)
 # ==========================================
 FROM debian:trixie-slim AS runtime
-ARG APP_VERSION=0.1.1
+ARG APP_VERSION=dev
 ARG APP_REVISION=dev
 ARG BUILD_DATE=unknown
 LABEL org.opencontainers.image.title="Avenrixa" \

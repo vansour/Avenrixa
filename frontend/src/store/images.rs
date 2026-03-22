@@ -14,7 +14,9 @@ pub struct ImageCollectionSnapshot {
     pub images: Vec<ImageItem>,
     pub current_page: u32,
     pub page_size: u32,
-    pub total_items: u64,
+    pub current_cursor: Option<String>,
+    pub next_cursor: Option<String>,
+    pub cursor_stack: Vec<Option<String>>,
     pub selected_ids: HashSet<String>,
     pub is_loading: bool,
     pub is_processing: bool,
@@ -53,6 +55,7 @@ impl ImageStore {
         let mut initial_state = ImageCollectionsState::default();
         initial_state.active.current_page = 1;
         initial_state.active.page_size = 20;
+        initial_state.active.cursor_stack = vec![None];
         initial_state.active.has_more = true;
 
         Self {
@@ -100,6 +103,32 @@ impl ImageStore {
             .current_page = page.max(1);
     }
 
+    pub fn go_to_next_page(&self, kind: ImageCollectionKind) {
+        let mut state = self.state.borrow_mut();
+        let mut state = state.write();
+        let collection = state.collection_mut(kind);
+        let Some(next_cursor) = collection.next_cursor.clone() else {
+            return;
+        };
+
+        collection.current_page += 1;
+        collection.current_cursor = Some(next_cursor.clone());
+        collection.cursor_stack.push(Some(next_cursor));
+    }
+
+    pub fn go_to_previous_page(&self, kind: ImageCollectionKind) {
+        let mut state = self.state.borrow_mut();
+        let mut state = state.write();
+        let collection = state.collection_mut(kind);
+        if collection.current_page <= 1 || collection.cursor_stack.len() <= 1 {
+            return;
+        }
+
+        collection.cursor_stack.pop();
+        collection.current_page -= 1;
+        collection.current_cursor = collection.cursor_stack.last().cloned().unwrap_or(None);
+    }
+
     pub fn set_page_size(&self, kind: ImageCollectionKind, page_size: u32) {
         self.state
             .borrow_mut()
@@ -108,22 +137,30 @@ impl ImageStore {
             .page_size = page_size.clamp(1, 100);
     }
 
+    pub fn reset_pagination(&self, kind: ImageCollectionKind) {
+        let mut state = self.state.borrow_mut();
+        let mut state = state.write();
+        let collection = state.collection_mut(kind);
+        collection.current_page = 1;
+        collection.current_cursor = None;
+        collection.next_cursor = None;
+        collection.cursor_stack = vec![None];
+    }
+
     pub fn replace_page(
         &self,
         kind: ImageCollectionKind,
         images: Vec<ImageItem>,
-        current_page: u32,
         page_size: u32,
-        total_items: u64,
+        next_cursor: Option<String>,
         has_more: bool,
     ) {
         let mut state = self.state.borrow_mut();
         let mut state = state.write();
         let collection = state.collection_mut(kind);
         collection.images = images;
-        collection.current_page = current_page.max(1);
         collection.page_size = page_size.clamp(1, 100);
-        collection.total_items = total_items;
+        collection.next_cursor = next_cursor;
         collection.has_more = has_more;
         collection.selected_ids.clear();
     }
@@ -233,6 +270,7 @@ mod tests {
 
         assert_eq!(active.current_page, 1);
         assert_eq!(active.page_size, 20);
+        assert_eq!(active.cursor_stack, vec![None]);
         assert!(active.has_more);
     }
 
@@ -245,16 +283,15 @@ mod tests {
         store.replace_page(
             ImageCollectionKind::Active,
             vec![sample_image("first", "first.png")],
-            0,
             500,
-            12,
+            Some("next-cursor".to_string()),
             false,
         );
 
         let snapshot = store.collection(ImageCollectionKind::Active);
         assert_eq!(snapshot.current_page, 1);
         assert_eq!(snapshot.page_size, 100);
-        assert_eq!(snapshot.total_items, 12);
+        assert_eq!(snapshot.next_cursor.as_deref(), Some("next-cursor"));
         assert!(!snapshot.has_more);
         assert!(snapshot.selected_ids.is_empty());
     }
@@ -269,9 +306,8 @@ mod tests {
                 sample_image("first", "first.png"),
                 sample_image("second", "second.png"),
             ],
-            1,
             20,
-            2,
+            None,
             false,
         );
         store.toggle_selection(ImageCollectionKind::Active, "off-page");
@@ -310,5 +346,35 @@ mod tests {
         assert_eq!(snapshot.page_size, 1);
         assert_eq!(snapshot.reload_token, 2);
         assert!(snapshot.error_message.is_empty());
+    }
+
+    #[test]
+    fn next_and_previous_page_track_cursor_stack() {
+        let harness = TestImageStoreHarness::new();
+        let store = &harness.store;
+
+        store.replace_page(
+            ImageCollectionKind::Active,
+            vec![sample_image("first", "first.png")],
+            20,
+            Some("cursor-2".to_string()),
+            true,
+        );
+        store.go_to_next_page(ImageCollectionKind::Active);
+
+        let second_page = store.collection(ImageCollectionKind::Active);
+        assert_eq!(second_page.current_page, 2);
+        assert_eq!(second_page.current_cursor.as_deref(), Some("cursor-2"));
+        assert_eq!(
+            second_page.cursor_stack,
+            vec![None, Some("cursor-2".to_string())]
+        );
+
+        store.go_to_previous_page(ImageCollectionKind::Active);
+
+        let first_page = store.collection(ImageCollectionKind::Active);
+        assert_eq!(first_page.current_page, 1);
+        assert_eq!(first_page.current_cursor, None);
+        assert_eq!(first_page.cursor_stack, vec![None]);
     }
 }

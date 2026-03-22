@@ -22,9 +22,6 @@ pub(super) fn render_backup_files_section(
     rsx! {
         div { class: "settings-subcard",
             h3 { "备份文件" }
-            p { class: "settings-section-copy",
-                "这里展示后台生成的数据库级备份。SQLite 数据库快照仍可从当前页面写入恢复计划，但这条能力在 1.0 范围内按 Experimental 保留；MySQL / MariaDB 逻辑导出与 PostgreSQL 导出当前仅支持下载或运维侧恢复。"
-            }
 
             div { class: "settings-list-toolbar",
                 div { class: "settings-toolbar-meta",
@@ -73,8 +70,6 @@ pub(super) fn render_backup_files_section(
                             .as_deref()
                             .is_some_and(|value| value == backup.filename.as_str());
                         let supports_restore = backup_supports_restore(&backup.semantics);
-                        let is_experimental_page_restore =
-                            backup.semantics.is_sqlite_database_snapshot();
                         rsx! {
                             article { class: "settings-entity-card",
                                 div { class: "settings-entity-main",
@@ -83,18 +78,11 @@ pub(super) fn render_backup_files_section(
                                             h3 { "{backup.filename}" }
                                             div { class: "settings-kv-badges",
                                                 span { class: "settings-kv-badge", "{kind_label}" }
-                                                if is_experimental_page_restore {
-                                                    span { class: "settings-kv-badge is-warning", "Experimental" }
-                                                }
                                             }
                                         }
                                         p { class: "settings-entity-meta", "{backup_meta}" }
-                                        if is_experimental_page_restore {
-                                            p { class: "settings-action-note",
-                                                "当前页面内的 SQLite 恢复在 1.0 范围内按 Experimental 保留，适合受控环境验证，不属于默认 GA 发布承诺。"
-                                            }
-                                        } else if !supports_restore {
-                                            p { class: "settings-action-note", "当前这类备份仅支持下载或运维侧恢复，不支持当前页面恢复。" }
+                                        if !supports_restore {
+                                            p { class: "settings-action-note", "仅支持下载或运维恢复。" }
                                         }
                                     }
 

@@ -12,9 +12,7 @@ pub mod mock_repository;
 // 导出领域层类型
 pub use claims::Claims;
 use domain_service::AuthDomainService;
-pub use repository::{
-    DatabaseAuthRepository, MySqlAuthRepository, PostgresAuthRepository, SqliteAuthRepository,
-};
+pub use repository::{DatabaseAuthRepository, PostgresAuthRepository};
 pub use service::AuthService;
 
 // 创建具体类型别名用于 AppState

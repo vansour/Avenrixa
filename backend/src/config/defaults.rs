@@ -36,7 +36,6 @@ impl Default for Config {
                     "webp".to_string(),
                     "svg".to_string(),
                 ],
-                enable_file_check: true,
                 file_check_concurrent_threshold: 50,
             },
             cache_policy: CachePolicyConfig {

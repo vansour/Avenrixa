@@ -2,11 +2,11 @@
 
 本文档对应当前项目默认的 PostgreSQL 部署栈，重点说明企业主路径运维备份、当前页面能力边界，以及仓库里已经落地和暂未落地的部分。
 
-按 [`release-0.1-scope.md`](release-0.1-scope.md) 当前定义，`PostgreSQL + Redis 8 + 本地存储` 是 `0.1` 的默认 GA 推荐栈；如果你要优先建设正式版发布路径，应先覆盖这里描述的主链路。
+按 [`release-0.1-scope.md`](release-0.1-scope.md) 当前定义，`PostgreSQL + Dragonfly + 本地存储` 是 `0.1` 的默认 GA 推荐栈；如果你要优先建设正式版发布路径，应先覆盖这里描述的主链路。
 
 ## 1. 当前定位
 
-仓库默认 `compose.yml` 入口就是 `PostgreSQL + Redis 8`。
+仓库默认 `compose.yml` 入口就是 `PostgreSQL + Dragonfly`。
 
 当前 PostgreSQL 相关能力分成两条线：
 
@@ -25,7 +25,7 @@
 
 这条默认 smoke 现在会覆盖：
 
-- `PostgreSQL + Redis 8 + 本地存储` 运行时健康检查
+- `PostgreSQL + Dragonfly + 本地存储` 运行时健康检查
 - 安装向导与管理员会话初始化
 - 管理员登录、刷新、登出、改密
 - 图片上传、过期时间写入、永久删除

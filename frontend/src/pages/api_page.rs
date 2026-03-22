@@ -42,7 +42,9 @@ fn ApiSidebarLink(href: &'static str, label: &'static str, detail: &'static str)
     rsx! {
         a { class: "api-nav-link", href: "{href}",
             strong { "{label}" }
-            span { "{detail}" }
+            if !detail.is_empty() {
+                span { "{detail}" }
+            }
         }
     }
 }
@@ -61,9 +63,26 @@ fn ApiQuickStat(label: &'static str, value: String) -> Element {
 fn ApiEndpointRow(method: &'static str, path: &'static str, detail: &'static str) -> Element {
     rsx! {
         div { class: "api-endpoint-row",
-            span { class: format!("api-method api-method-{}", method.to_ascii_lowercase()), "{method}" }
-            code { class: "api-endpoint-path", "{path}" }
+            div { class: "api-endpoint-head",
+                span { class: format!("api-method api-method-{}", method.to_ascii_lowercase()), "{method}" }
+                code { class: "api-endpoint-path", "{path}" }
+            }
             p { class: "api-endpoint-copy", "{detail}" }
+        }
+    }
+}
+
+#[component]
+fn ApiExampleCard(title: &'static str, code: String) -> Element {
+    rsx! {
+        article { class: "api-example-card",
+            div { class: "api-example-head",
+                p { class: "api-section-kicker", "Example" }
+                h3 { "{title}" }
+            }
+            pre { class: "api-code-block api-code-block-compact",
+                code { "{code}" }
+            }
         }
     }
 }
@@ -73,10 +92,7 @@ pub fn ApiPage() -> Element {
     let api_base = api_base_label();
     let login_endpoint = format!("{}/api/v1/auth/login", api_base.trim_end_matches('/'));
     let upload_endpoint = format!("{}/api/v1/upload", api_base.trim_end_matches('/'));
-    let images_endpoint = format!(
-        "{}/api/v1/images?page=1&page_size=20",
-        api_base.trim_end_matches('/')
-    );
+    let images_endpoint = format!("{}/api/v1/images?limit=20", api_base.trim_end_matches('/'));
     let media_endpoint = format!("{}/images/{{filename}}", api_base.trim_end_matches('/'));
 
     let login_curl = format!(
@@ -85,7 +101,7 @@ pub fn ApiPage() -> Element {
     let upload_curl =
         format!("curl -X POST '{upload_endpoint}' \\\n  -b cookies.txt \\\n  -F 'file=@demo.png'");
     let browser_fetch = format!(
-        "const form = new FormData();\nform.append('file', fileInput.files[0]);\n\nconst response = await fetch('{upload_endpoint}', {{\n  method: 'POST',\n  body: form,\n  credentials: 'include',\n}});"
+        "const form = new FormData();\nform.append('file', fileInput.files[0]);\nconst response = await fetch('{upload_endpoint}', {{\n  method: 'POST',\n  body: form,\n  credentials: 'include',\n}});"
     );
 
     rsx! {
@@ -94,37 +110,34 @@ pub fn ApiPage() -> Element {
                 aside { class: "api-sidebar",
                     div { class: "api-sidebar-card",
                         p { class: "api-sidebar-eyebrow", "API" }
-                        h1 { "接入指南" }
-                        p { class: "api-sidebar-copy",
-                            "保留登录、上传、列表和媒体访问四块核心信息，够前端和脚本接入直接开工。"
-                        }
+                        h1 { "接入速查" }
                     }
 
                     nav { class: "api-nav",
                         ApiSidebarLink {
                             href: "#api-overview",
                             label: "概览",
-                            detail: "Base URL 与认证方式"
+                            detail: ""
                         }
                         ApiSidebarLink {
                             href: "#api-auth",
                             label: "认证",
-                            detail: "登录获取 Cookie 会话"
+                            detail: ""
                         }
                         ApiSidebarLink {
                             href: "#api-upload",
                             label: "上传",
-                            detail: "multipart/form-data"
+                            detail: ""
                         }
                         ApiSidebarLink {
                             href: "#api-images",
-                            label: "图片接口",
-                            detail: "列表、详情、删除"
+                            label: "图片",
+                            detail: ""
                         }
                         ApiSidebarLink {
                             href: "#api-media",
-                            label: "媒体地址",
-                            detail: "原图与缩略图访问"
+                            label: "媒体",
+                            detail: ""
                         }
                     }
                 }
@@ -134,12 +147,7 @@ pub fn ApiPage() -> Element {
                         div { class: "api-section-head api-section-head-compact",
                             div {
                                 p { class: "api-section-kicker", "Overview" }
-                                h2 { "先记住这 4 个约定" }
-                            }
-                            p {
-                                "接口默认用 Cookie 会话认证。受保护接口基本都在 "
-                                code { "/api/v1" }
-                                " 下，原图与缩略图走根路径。"
+                                h2 { "接入约定" }
                             }
                         }
 
@@ -155,29 +163,31 @@ pub fn ApiPage() -> Element {
                         div { class: "api-section-head api-section-head-compact",
                             div {
                                 p { class: "api-section-kicker", "Auth" }
-                                h2 { "1. 先登录，拿到 Cookie 会话" }
+                                h2 { "认证" }
                             }
-                            p { "脚本侧把 Cookie 持久化到文件即可；浏览器侧请求记得带上 credentials: 'include'。" }
                         }
 
                         ApiEndpointRow {
                             method: "POST",
                             path: "/api/v1/auth/login",
-                            detail: "邮箱 + 密码登录，成功后服务端写入 HttpOnly Cookie。"
+                            detail: "登录并写入 HttpOnly Cookie。"
                         }
                         ApiEndpointRow {
                             method: "GET",
                             path: "/api/v1/auth/me",
-                            detail: "读取当前登录用户，适合页面启动时恢复登录态。"
+                            detail: "读取当前会话。"
                         }
                         ApiEndpointRow {
                             method: "POST",
                             path: "/api/v1/auth/refresh",
-                            detail: "刷新会话；前端部分 401 场景会自动尝试一次。"
+                            detail: "刷新会话。"
                         }
 
-                        pre { class: "api-code-block",
-                            code { "{login_curl}" }
+                        div { class: "api-examples-grid",
+                            ApiExampleCard {
+                                title: "cURL 登录",
+                                code: login_curl.clone(),
+                            }
                         }
                     }
 
@@ -185,23 +195,24 @@ pub fn ApiPage() -> Element {
                         div { class: "api-section-head api-section-head-compact",
                             div {
                                 p { class: "api-section-kicker", "Upload" }
-                                h2 { "2. 上传接口只认 file 字段" }
+                                h2 { "上传" }
                             }
-                            p { "不要手动设置 multipart 的 Content-Type，交给浏览器或客户端自动带 boundary。" }
                         }
 
                         ApiEndpointRow {
                             method: "POST",
                             path: "/api/v1/upload",
-                            detail: "上传单张图片，字段名固定为 file，返回图片元信息。"
+                            detail: "上传单图，字段名固定为 file。"
                         }
 
-                        div { class: "api-example-stack",
-                            pre { class: "api-code-block",
-                                code { "{upload_curl}" }
+                        div { class: "api-examples-grid",
+                            ApiExampleCard {
+                                title: "cURL 上传",
+                                code: upload_curl.clone(),
                             }
-                            pre { class: "api-code-block",
-                                code { "{browser_fetch}" }
+                            ApiExampleCard {
+                                title: "Browser fetch",
+                                code: browser_fetch.clone(),
                             }
                         }
                     }
@@ -210,31 +221,30 @@ pub fn ApiPage() -> Element {
                         div { class: "api-section-head api-section-head-compact",
                             div {
                                 p { class: "api-section-kicker", "Images" }
-                                h2 { "3. 图片管理就看这 4 个接口" }
+                                h2 { "图片管理" }
                             }
-                            p { "列表页、上传历史、删除动作基本都围绕这组接口展开。" }
                         }
 
                         div { class: "api-endpoint-list",
                             ApiEndpointRow {
                                 method: "GET",
-                                path: "/api/v1/images?page=1&page_size=20",
-                                detail: "按上传时间倒序返回图片列表。"
+                                path: "/api/v1/images?limit=20&cursor={{opaque_cursor}}",
+                                detail: "按时间倒序返回游标分页列表。"
                             }
                             ApiEndpointRow {
                                 method: "GET",
                                 path: "/api/v1/images/{{image_key}}",
-                                detail: "获取单张图片详情。"
+                                detail: "读取单图详情。"
                             }
                             ApiEndpointRow {
                                 method: "DELETE",
                                 path: "/api/v1/images",
-                                detail: "批量永久删除，请求体使用 image_keys 数组。"
+                                detail: "批量删除，使用 image_keys 数组。"
                             }
                             ApiEndpointRow {
                                 method: "PUT",
                                 path: "/api/v1/images/{{image_key}}/expiry",
-                                detail: "设置或清空单张图片的过期时间。"
+                                detail: "设置或清空过期时间。"
                             }
                         }
 
@@ -248,28 +258,20 @@ pub fn ApiPage() -> Element {
                         div { class: "api-section-head api-section-head-compact",
                             div {
                                 p { class: "api-section-kicker", "Media" }
-                                h2 { "4. 原图和缩略图不在 /api/v1 下" }
+                                h2 { "媒体访问" }
                             }
-                            p { "上传成功后的 filename 和 image_key 可以直接拼媒体访问地址。" }
                         }
 
                         div { class: "api-endpoint-list",
                             ApiEndpointRow {
                                 method: "GET",
                                 path: "/images/{{filename}}",
-                                detail: "原图直链。"
+                                detail: "原图地址。"
                             }
                             ApiEndpointRow {
                                 method: "GET",
                                 path: "/thumbnails/{{image_key}}.webp",
-                                detail: "缩略图地址，适合图库和历史页预览。"
-                            }
-                        }
-
-                        div { class: "api-callout" ,
-                            strong { "接入建议" }
-                            p {
-                                "浏览器项目优先复用站点会话；脚本项目优先走登录 + Cookie 文件。这样不需要单独维护 Bearer Token。"
+                                detail: "缩略图地址。"
                             }
                         }
                     }

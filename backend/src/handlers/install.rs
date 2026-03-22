@@ -1,3 +1,5 @@
+mod transactions;
+
 use axum::{
     Json,
     extract::{Query, State},
@@ -6,30 +8,50 @@ use axum::{
 use base64::Engine;
 use shared_types::auth::UserResponse as SharedUserResponse;
 
+use self::transactions::{
+    InstallPersistenceInput, InstallRollbackInput, persist_installation,
+    rollback_failed_installation,
+};
 use crate::audit::log_audit_db;
-use crate::config::DatabaseKind;
 use crate::db::{
-    AppState, SITE_FAVICON_DATA_URL_SETTING_KEY, acquire_installation_lock,
-    create_admin_account_mysql_tx, create_admin_account_sqlite_tx, create_admin_account_tx,
-    delete_setting_mysql_tx, delete_setting_sqlite_tx, delete_setting_tx, get_setting_value,
-    has_admin_account, has_admin_account_mysql_tx, has_admin_account_sqlite_tx,
-    has_admin_account_tx, is_app_installed, is_app_installed_mysql_tx, is_app_installed_sqlite_tx,
-    is_app_installed_tx, mark_app_installed_mysql_tx, mark_app_installed_sqlite_tx,
-    mark_app_installed_tx, upsert_setting_mysql_tx, upsert_setting_sqlite_tx, upsert_setting_tx,
-    validate_admin_bootstrap_config,
+    AppState, INSTALL_STATE_SETTING_KEY, SITE_FAVICON_DATA_URL_SETTING_KEY, get_setting_value,
+    has_admin_account, is_app_installed, validate_admin_bootstrap_config,
 };
 use crate::error::AppError;
 use crate::handlers::auth::common::{append_session_cookies, issue_session_tokens};
-use crate::handlers::s3_test::{build_s3_test_settings, s3_test_success_response};
 use crate::handlers::storage_browser::{BrowseStorageDirectoriesQuery, browse_storage_directories};
+use crate::models::storage_backend_kind_from_runtime;
 use crate::models::{
     AdminSettingsConfig, InstallBootstrapRequest, InstallBootstrapResponse, InstallStatusResponse,
-    StorageDirectoryBrowseResponse, TestS3StorageConfigRequest, TestS3StorageConfigResponse,
+    StorageDirectoryBrowseResponse,
 };
+use crate::runtime_settings::RuntimeSettings;
 use crate::runtime_settings::validate_and_merge;
-use crate::runtime_settings::{
-    RuntimeSettings, persist_settings_mysql_tx, persist_settings_sqlite_tx, persist_settings_tx,
-};
+
+fn runtime_settings_to_admin_config(
+    settings: &RuntimeSettings,
+    restart_required: bool,
+) -> AdminSettingsConfig {
+    AdminSettingsConfig {
+        site_name: settings.site_name.clone(),
+        storage_backend: storage_backend_kind_from_runtime(settings.storage_backend),
+        local_storage_path: settings.local_storage_path.clone(),
+        mail_enabled: settings.mail_enabled,
+        mail_smtp_host: settings.mail_smtp_host.clone(),
+        mail_smtp_port: settings.mail_smtp_port,
+        mail_smtp_user: settings.mail_smtp_user.clone(),
+        mail_smtp_password_set: settings
+            .mail_smtp_password
+            .as_ref()
+            .map(|v| !v.trim().is_empty())
+            .unwrap_or(false),
+        mail_from_email: settings.mail_from_email.clone(),
+        mail_from_name: settings.mail_from_name.clone(),
+        mail_link_base_url: settings.mail_link_base_url.clone(),
+        restart_required,
+        settings_version: settings.settings_version(),
+    }
+}
 
 const MAX_FAVICON_BYTES: usize = 256 * 1024;
 
@@ -69,28 +91,11 @@ pub async fn browse_install_storage_directories(
     ))
 }
 
-pub async fn test_install_s3_storage(
-    State(state): State<AppState>,
-    Json(req): Json<TestS3StorageConfigRequest>,
-) -> Result<Json<TestS3StorageConfigResponse>, AppError> {
-    if is_app_installed(&state.database).await? {
-        return Err(AppError::AppAlreadyInstalled);
-    }
-
-    let current_settings = state.runtime_settings.get_runtime_settings().await?;
-    let test_settings = build_s3_test_settings(current_settings, req)?;
-    state
-        .storage_manager
-        .test_s3_settings(&test_settings)
-        .await?;
-
-    Ok(Json(s3_test_success_response()))
-}
-
 pub async fn bootstrap_installation(
     State(state): State<AppState>,
     Json(req): Json<InstallBootstrapRequest>,
 ) -> Result<(HeaderMap, Json<InstallBootstrapResponse>), AppError> {
+    let _install_guard = state.installation_lock.lock().await;
     let InstallBootstrapRequest {
         admin_email,
         admin_password,
@@ -102,98 +107,67 @@ pub async fn bootstrap_installation(
         .map_err(|error| AppError::ValidationError(error.to_string()))?;
     let favicon_data_url = validate_favicon_data_url(favicon_data_url)?;
     let current_settings = state.runtime_settings.get_runtime_settings().await?;
-    let validated_settings = validate_and_merge(current_settings, config)?;
-
-    let user = match state.database_kind() {
-        DatabaseKind::Postgres => {
-            let pool = state.postgres_pool()?;
-            let mut tx = pool.begin().await?;
-            acquire_installation_lock(&mut tx).await?;
-
-            if is_app_installed_tx(&mut tx).await? || has_admin_account_tx(&mut tx).await? {
-                return Err(AppError::AppAlreadyInstalled);
-            }
-
-            persist_settings_tx(&mut tx, &validated_settings).await?;
-            if let Some(value) = favicon_data_url.as_deref() {
-                upsert_setting_tx(&mut tx, SITE_FAVICON_DATA_URL_SETTING_KEY, value).await?;
-            } else {
-                delete_setting_tx(&mut tx, SITE_FAVICON_DATA_URL_SETTING_KEY).await?;
-            }
-
-            let user = create_admin_account_tx(&mut tx, &admin.email, &admin.password)
-                .await
-                .map_err(AppError::Internal)?;
-            mark_app_installed_tx(&mut tx).await?;
-            tx.commit().await?;
-            user
-        }
-        DatabaseKind::MySql => {
-            let pool = match &state.database {
-                crate::db::DatabasePool::MySql(pool) => pool,
-                crate::db::DatabasePool::Postgres(_) | crate::db::DatabasePool::Sqlite(_) => {
-                    unreachable!()
-                }
-            };
-            let mut tx = pool.begin().await?;
-
-            if is_app_installed_mysql_tx(&mut tx).await?
-                || has_admin_account_mysql_tx(&mut tx).await?
-            {
-                return Err(AppError::AppAlreadyInstalled);
-            }
-
-            persist_settings_mysql_tx(&mut tx, &validated_settings).await?;
-            if let Some(value) = favicon_data_url.as_deref() {
-                upsert_setting_mysql_tx(&mut tx, SITE_FAVICON_DATA_URL_SETTING_KEY, value).await?;
-            } else {
-                delete_setting_mysql_tx(&mut tx, SITE_FAVICON_DATA_URL_SETTING_KEY).await?;
-            }
-
-            let user: crate::models::User =
-                create_admin_account_mysql_tx(&mut tx, &admin.email, &admin.password)
-                    .await
-                    .map_err(AppError::Internal)?;
-            mark_app_installed_mysql_tx(&mut tx).await?;
-            tx.commit().await?;
-            user
-        }
-        DatabaseKind::Sqlite => {
-            let pool = match &state.database {
-                crate::db::DatabasePool::Sqlite(pool) => pool,
-                crate::db::DatabasePool::Postgres(_) | crate::db::DatabasePool::MySql(_) => {
-                    unreachable!()
-                }
-            };
-            let mut tx = pool.begin().await?;
-
-            if is_app_installed_sqlite_tx(&mut tx).await?
-                || has_admin_account_sqlite_tx(&mut tx).await?
-            {
-                return Err(AppError::AppAlreadyInstalled);
-            };
-
-            persist_settings_sqlite_tx(&mut tx, &validated_settings).await?;
-            if let Some(value) = favicon_data_url.as_deref() {
-                upsert_setting_sqlite_tx(&mut tx, SITE_FAVICON_DATA_URL_SETTING_KEY, value).await?;
-            } else {
-                delete_setting_sqlite_tx(&mut tx, SITE_FAVICON_DATA_URL_SETTING_KEY).await?;
-            }
-
-            let user: crate::models::User =
-                create_admin_account_sqlite_tx(&mut tx, &admin.email, &admin.password)
-                    .await
-                    .map_err(AppError::Internal)?;
-            mark_app_installed_sqlite_tx(&mut tx).await?;
-            tx.commit().await?;
-            user
-        }
-    };
-
+    let previous_install_state =
+        get_setting_value(&state.database, INSTALL_STATE_SETTING_KEY).await?;
+    let previous_favicon =
+        get_setting_value(&state.database, SITE_FAVICON_DATA_URL_SETTING_KEY).await?;
+    let validated_settings = validate_and_merge(current_settings.clone(), config)?;
     state
         .storage_manager
-        .apply_runtime_settings(validated_settings.clone())
+        .validate_runtime_settings(&validated_settings)
         .await?;
+
+    let user = persist_installation(
+        &state,
+        &InstallPersistenceInput {
+            validated_settings: &validated_settings,
+            admin_email: &admin.email,
+            admin_password: &admin.password,
+            favicon_data_url: favicon_data_url.as_deref(),
+        },
+    )
+    .await?;
+
+    if let Err(apply_error) = state
+        .storage_manager
+        .apply_runtime_settings(validated_settings.clone())
+        .await
+    {
+        let rollback_result = rollback_failed_installation(
+            &state,
+            &InstallRollbackInput {
+                previous_settings: &current_settings,
+                previous_install_state: previous_install_state.as_deref(),
+                previous_favicon: previous_favicon.as_deref(),
+            },
+        )
+        .await;
+        state.runtime_settings.invalidate_cache().await;
+
+        return match rollback_result {
+            Ok(()) => {
+                if let Err(runtime_rollback_error) = state
+                    .storage_manager
+                    .apply_runtime_settings(current_settings.clone())
+                    .await
+                {
+                    Err(AppError::Internal(anyhow::anyhow!(
+                        "安装配置应用失败，数据库已回滚，但运行态回滚失败: apply={}, runtime_rollback={}",
+                        apply_error,
+                        runtime_rollback_error
+                    )))
+                } else {
+                    Err(apply_error)
+                }
+            }
+            Err(rollback_error) => Err(AppError::Internal(anyhow::anyhow!(
+                "安装配置应用失败，且数据库回滚失败: apply={}, rollback={}",
+                apply_error,
+                rollback_error
+            ))),
+        };
+    }
+
     state.runtime_settings.invalidate_cache().await;
     let settings = validated_settings;
     let user_response = crate::models::UserResponse::from(user);
@@ -242,7 +216,10 @@ pub async fn bootstrap_installation(
                 created_at: user_response.created_at,
             },
             favicon_configured: favicon_data_url.is_some(),
-            config: settings.to_admin_config(state.storage_manager.restart_required(&settings)),
+            config: runtime_settings_to_admin_config(
+                &settings,
+                state.storage_manager.restart_required(&settings),
+            ),
         }),
     ))
 }
@@ -303,26 +280,23 @@ fn public_install_status_config(
     installed: bool,
     restart_required: bool,
 ) -> AdminSettingsConfig {
-    let mut config = settings.to_admin_config(if installed { false } else { restart_required });
+    let mut config = runtime_settings_to_admin_config(
+        settings,
+        if installed { false } else { restart_required },
+    );
 
     // `install/status` is intentionally public because the login shell and first-run flow
     // need basic bootstrap state. Do not expose runtime connection details or secret-bearing
     // config here.
     config.mail_smtp_user = None;
     config.mail_smtp_password_set = false;
-    config.s3_access_key = None;
-    config.s3_secret_key_set = false;
     config.local_storage_path.clear();
     config.mail_smtp_host.clear();
     config.mail_smtp_port = 0;
     config.mail_from_email.clear();
     config.mail_from_name.clear();
     config.mail_link_base_url.clear();
-    config.s3_endpoint = None;
-    config.s3_region = None;
-    config.s3_bucket = None;
-    config.s3_prefix = None;
-    config.s3_force_path_style = false;
+    config.settings_version.clear();
 
     config
 }
@@ -336,7 +310,7 @@ mod tests {
     fn sample_runtime_settings() -> RuntimeSettings {
         RuntimeSettings {
             site_name: "Avenrixa".to_string(),
-            storage_backend: StorageBackend::S3,
+            storage_backend: StorageBackend::Local,
             local_storage_path: "/data/images".to_string(),
             mail_enabled: true,
             mail_smtp_host: "smtp.example.com".to_string(),
@@ -346,13 +320,6 @@ mod tests {
             mail_from_email: "noreply@example.com".to_string(),
             mail_from_name: "Avenrixa".to_string(),
             mail_link_base_url: "https://img.example.com/reset".to_string(),
-            s3_endpoint: Some("https://minio.example.com".to_string()),
-            s3_region: Some("us-east-1".to_string()),
-            s3_bucket: Some("bucket".to_string()),
-            s3_prefix: Some("images".to_string()),
-            s3_access_key: Some("access-key".to_string()),
-            s3_secret_key: Some("secret-key".to_string()),
-            s3_force_path_style: true,
         }
     }
 
@@ -367,10 +334,7 @@ mod tests {
         assert!(config.mail_enabled);
         assert_eq!(config.mail_smtp_user, None);
         assert!(!config.mail_smtp_password_set);
-        assert_eq!(config.s3_endpoint, None);
-        assert_eq!(config.s3_bucket, None);
-        assert_eq!(config.s3_access_key, None);
-        assert!(!config.s3_secret_key_set);
+        assert!(config.settings_version.is_empty());
     }
 
     #[test]
@@ -378,15 +342,13 @@ mod tests {
         let config = public_install_status_config(&sample_runtime_settings(), true, true);
 
         assert_eq!(config.site_name, "Avenrixa");
-        assert_eq!(config.storage_backend, StorageBackendKind::S3);
+        assert_eq!(config.storage_backend, StorageBackendKind::Local);
         assert!(config.mail_enabled);
         assert!(config.local_storage_path.is_empty());
         assert!(config.mail_smtp_host.is_empty());
         assert_eq!(config.mail_smtp_port, 0);
         assert!(config.mail_from_email.is_empty());
-        assert_eq!(config.s3_endpoint, None);
-        assert_eq!(config.s3_bucket, None);
-        assert_eq!(config.s3_access_key, None);
         assert!(!config.restart_required);
+        assert!(config.settings_version.is_empty());
     }
 }

@@ -2,15 +2,6 @@ use crate::db::AppState;
 use crate::handlers::{admin, auth, bootstrap, images, install};
 use axum::{Router, routing};
 
-#[cfg(test)]
-pub fn create_api_routes() -> Router<AppState> {
-    Router::new()
-        .merge(boot_public_routes())
-        .merge(throttled_public_routes())
-        .merge(protected_routes())
-        .merge(admin_routes())
-}
-
 pub fn create_boot_public_routes() -> Router<AppState> {
     boot_public_routes()
 }
@@ -41,10 +32,6 @@ fn throttled_public_routes() -> Router<AppState> {
         .route(
             "/install/storage-directories",
             routing::get(install::browse_install_storage_directories),
-        )
-        .route(
-            "/install/storage/s3/test",
-            routing::post(install::test_install_s3_storage),
         )
         .route(
             "/install/bootstrap",
@@ -106,10 +93,6 @@ fn admin_routes() -> Router<AppState> {
         .route(
             "/settings/storage-directories",
             routing::get(admin::browse_admin_storage_directories),
-        )
-        .route(
-            "/settings/storage/s3/test",
-            routing::post(admin::test_admin_s3_storage),
         )
         .route("/settings", routing::get(admin::get_settings_admin))
         .route("/settings/{key}", routing::put(admin::update_setting))

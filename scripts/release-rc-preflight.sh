@@ -190,7 +190,7 @@ run_version_smoke() {
     COMPOSE_PROJECT_NAME="avenrixa-release-rc-preflight-smoke" \
     COMPOSE_VARIANT=postgres \
     SMOKE_FLOW=health \
-    CACHE_MODE=redis8 \
+    CACHE_MODE=dragonfly \
     SMOKE_EXPECT_APP_VERSION_LABEL="${expected_version_label}" \
     PRESERVE_STACK_ON_FAILURE="${PRESERVE_STACK_ON_FAILURE}" \
     ./scripts/compose-smoke.sh

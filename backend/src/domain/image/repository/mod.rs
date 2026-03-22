@@ -8,8 +8,7 @@ mod image_queries;
 mod sql;
 mod traits;
 
-use sqlx::{MySqlPool, PgPool, SqlitePool};
-
+use sqlx::PgPool;
 pub use traits::ImageRepository;
 
 /// PostgreSQL 图片仓库实现
@@ -23,30 +22,6 @@ impl PostgresImageRepository {
     }
 }
 
-/// MySQL 图片仓库实现
-pub struct MySqlImageRepository {
-    pub(super) pool: MySqlPool,
-}
-
-impl MySqlImageRepository {
-    pub fn new(pool: MySqlPool) -> Self {
-        Self { pool }
-    }
-}
-
-/// SQLite 图片仓库实现
-pub struct SqliteImageRepository {
-    pub(super) pool: SqlitePool,
-}
-
-impl SqliteImageRepository {
-    pub fn new(pool: SqlitePool) -> Self {
-        Self { pool }
-    }
-}
-
 pub enum DatabaseImageRepository {
     Postgres(PostgresImageRepository),
-    MySql(MySqlImageRepository),
-    Sqlite(SqliteImageRepository),
 }

@@ -29,7 +29,7 @@ impl Config {
             }
             config.database.url = db_url;
         }
-        if let Ok(cache_url) = std::env::var("REDIS_URL") {
+        if let Ok(cache_url) = std::env::var("CACHE_URL") {
             config.cache_backend.url = if cache_url.trim().is_empty() {
                 None
             } else {
@@ -38,9 +38,6 @@ impl Config {
         }
         if let Ok(storage_path) = std::env::var("STORAGE_PATH") {
             config.storage.path = storage_path;
-        }
-        if let Ok(enable_file_check) = std::env::var("STORAGE_ENABLE_FILE_CHECK") {
-            config.storage.enable_file_check = enable_file_check.parse().unwrap_or(true);
         }
         if let Ok(file_check_threshold) = std::env::var("STORAGE_FILE_CHECK_THRESHOLD") {
             config.storage.file_check_concurrent_threshold =

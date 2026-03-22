@@ -7,7 +7,6 @@ pub fn SecuritySettingsSection(
     confirm_password: Signal<String>,
     error_message: String,
     success_message: String,
-    helper_text: String,
     is_submitting: bool,
     #[props(default)] on_submit: EventHandler<MouseEvent>,
 ) -> Element {
@@ -51,10 +50,6 @@ pub fn SecuritySettingsSection(
                         disabled: is_submitting,
                     }
                 }
-            }
-
-            if !helper_text.is_empty() {
-                p { class: "settings-section-copy", "{helper_text}" }
             }
 
             div { class: "settings-actions",

@@ -41,10 +41,6 @@ pub fn UsersSettingsSection(
                 div { class: "settings-banner settings-banner-success", "{success_message}" }
             }
 
-            div { class: "settings-banner settings-banner-neutral",
-                "用户角色变更属于权限操作：普通提升会要求二次确认，管理员降级会升级为高风险确认。"
-            }
-
             if is_loading && users.is_empty() {
                 div { class: "settings-placeholder settings-placeholder-compact",
                     h3 { "正在加载用户列表" }

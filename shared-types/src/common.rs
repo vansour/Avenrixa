@@ -128,7 +128,6 @@ impl From<HealthState> for String {
 #[serde(from = "String", into = "String")]
 pub enum StorageBackendKind {
     Local,
-    S3,
     Unknown,
 }
 
@@ -136,7 +135,6 @@ impl StorageBackendKind {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Local => "local",
-            Self::S3 => "s3",
             Self::Unknown => "unknown",
         }
     }
@@ -144,7 +142,6 @@ impl StorageBackendKind {
     pub fn parse(value: &str) -> Self {
         match value.trim().to_ascii_lowercase().as_str() {
             "local" => Self::Local,
-            "s3" => Self::S3,
             _ => Self::Unknown,
         }
     }
@@ -152,13 +149,8 @@ impl StorageBackendKind {
     pub fn label(self) -> &'static str {
         match self {
             Self::Local => "本地目录",
-            Self::S3 => "对象存储",
             Self::Unknown => "未知后端",
         }
-    }
-
-    pub fn is_s3(self) -> bool {
-        matches!(self, Self::S3)
     }
 }
 

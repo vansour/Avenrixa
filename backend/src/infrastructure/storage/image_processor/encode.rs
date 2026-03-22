@@ -47,6 +47,17 @@ impl ImageProcessor {
         Ok(buf)
     }
 
+    pub(super) fn generate_thumbnail_from_image(
+        &self,
+        img: &DynamicImage,
+        thumbnail_size: u32,
+    ) -> Result<Vec<u8>> {
+        let thumb = Self::resize_if_needed(img, thumbnail_size, thumbnail_size);
+        let mut cursor = std::io::Cursor::new(Vec::new());
+        thumb.write_to(&mut cursor, ImageFormat::WebP)?;
+        Ok(cursor.into_inner())
+    }
+
     fn resize_if_needed(img: &DynamicImage, max_width: u32, max_height: u32) -> DynamicImage {
         use image::GenericImageView;
 

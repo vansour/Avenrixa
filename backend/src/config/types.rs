@@ -10,10 +10,6 @@ pub enum ConfigError {
     InvalidDatabaseKind(String),
     #[error("PostgreSQL 数据库 URL 必须以 postgresql:// 或 postgres:// 开头")]
     InvalidPostgresDatabaseUrl,
-    #[error("MySQL / MariaDB 数据库 URL 必须以 mysql:// 或 mariadb:// 开头")]
-    InvalidMySqlDatabaseUrl,
-    #[error("SQLite 数据库地址必须是 sqlite: 前缀或文件路径")]
-    InvalidSqliteDatabaseUrl,
     #[error("存储路径不能为空")]
     StoragePathEmpty,
     #[error("允许的扩展名列表不能为空")]
@@ -64,7 +60,7 @@ pub(crate) fn default_max_connections() -> u32 {
 pub struct Config {
     pub server: ServerConfig,
     pub database: DatabaseConfig,
-    #[serde(alias = "redis")]
+    #[serde(alias = "dragonfly")]
     pub cache_backend: CacheBackendConfig,
     pub storage: StorageConfig,
     #[serde(alias = "cache")]
@@ -105,26 +101,12 @@ pub enum DatabaseKind {
     #[serde(rename = "postgresql")]
     #[default]
     Postgres,
-    #[serde(rename = "mysql")]
-    MySql,
-    #[serde(rename = "sqlite")]
-    Sqlite,
 }
 
 impl DatabaseKind {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Postgres => "postgresql",
-            Self::MySql => "mysql",
-            Self::Sqlite => "sqlite",
-        }
-    }
-
     pub fn parse(value: &str) -> Result<Self, ConfigError> {
         match value.trim().to_ascii_lowercase().as_str() {
             "postgresql" | "postgres" => Ok(Self::Postgres),
-            "mysql" => Ok(Self::MySql),
-            "sqlite" => Ok(Self::Sqlite),
             other => Err(ConfigError::InvalidDatabaseKind(other.to_string())),
         }
     }
@@ -136,31 +118,9 @@ impl DatabaseKind {
             Some("postgresql") | Some("postgres")
         ) {
             Some(Self::Postgres)
-        } else if is_mysql_compatible_scheme(&trimmed) {
-            Some(Self::MySql)
-        } else if trimmed.starts_with("sqlite:") {
-            Some(Self::Sqlite)
         } else {
             None
         }
-    }
-}
-
-pub fn is_mysql_compatible_scheme(value: &str) -> bool {
-    matches!(
-        value.trim().to_ascii_lowercase().split(':').next(),
-        Some("mysql") | Some("mariadb")
-    )
-}
-
-pub fn normalize_mysql_compatible_url(value: &str) -> String {
-    let trimmed = value.trim();
-    if trimmed.len() >= "mariadb://".len()
-        && trimmed[.."mariadb://".len()].eq_ignore_ascii_case("mariadb://")
-    {
-        format!("mysql://{}", &trimmed["mariadb://".len()..])
-    } else {
-        trimmed.to_string()
     }
 }
 
@@ -175,14 +135,8 @@ pub struct CacheBackendConfig {
 pub struct StorageConfig {
     pub path: String,
     pub allowed_extensions: Vec<String>,
-    #[serde(default = "default_enable_file_check")]
-    pub enable_file_check: bool,
     #[serde(default = "default_file_check_concurrent_threshold")]
     pub file_check_concurrent_threshold: usize,
-}
-
-pub(crate) fn default_enable_file_check() -> bool {
-    true
 }
 
 pub(crate) fn default_file_check_concurrent_threshold() -> usize {
@@ -248,7 +202,7 @@ mod tests {
     use serde_json::{Value, to_value};
 
     #[test]
-    fn config_deserializes_legacy_cache_field_names() {
+    fn config_deserializes_cache_field_aliases() {
         let mut value = to_value(Config::default()).expect("default config should serialize");
         let object = value
             .as_object_mut()
@@ -260,11 +214,11 @@ mod tests {
         let cache_policy = object
             .remove("cache_policy")
             .expect("cache_policy should exist");
-        object.insert("redis".to_string(), cache_backend);
+        object.insert("dragonfly".to_string(), cache_backend);
         object.insert("cache".to_string(), cache_policy);
 
         let parsed: Config =
-            serde_json::from_value(Value::Object(object.clone())).expect("legacy aliases work");
+            serde_json::from_value(Value::Object(object.clone())).expect("cache aliases work");
 
         assert_eq!(parsed.cache_backend.key_prefix, "img:");
         assert_eq!(parsed.cache_policy.list_ttl, 300);

@@ -35,15 +35,8 @@ pub async fn bootstrap_health_check(
     State(state): State<BootstrapAppState>,
 ) -> Result<Json<HealthStatus>, AppError> {
     let file = state.store.load().await.map_err(AppError::Internal)?;
-    let configured_database_kind = file
-        .as_ref()
-        .map(|file| file.database_kind)
-        .unwrap_or(state.config.database.kind);
     let database_message = match (&file, &state.runtime_error) {
         (_, Some(error)) => Some(format!("数据库连接失败: {}", error)),
-        (Some(_), None) if configured_database_kind == crate::config::DatabaseKind::Sqlite => {
-            Some("SQLite 配置已保存，重启服务后会自动执行迁移并进入安装向导".to_string())
-        }
         (Some(_), None) => Some("数据库配置已保存，重启服务后继续安装".to_string()),
         (None, None) => Some("尚未配置数据库".to_string()),
     };

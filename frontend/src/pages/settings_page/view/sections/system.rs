@@ -30,13 +30,13 @@ pub fn SystemStatusSection(
 
             if let Some(health) = health.clone() {
                 div { class: "settings-status-summary",
-                    article { class: format!("settings-summary-card {}", health.status.surface_class()),
-                        p { class: "settings-summary-label", "系统状态" }
-                        h3 { "{health.status.label()}" }
+                    article { class: format!("settings-summary-card settings-summary-card-inline {}", health.status.surface_class()),
+                        p { class: "settings-summary-label", "状态" }
+                        h3 { class: "settings-summary-value", "{health.status.label()}" }
                     }
-                    article { class: "settings-summary-card",
-                        p { class: "settings-summary-label", "运行版本" }
-                        h3 { {health.version.unwrap_or_else(|| "未提供".to_string())} }
+                    article { class: "settings-summary-card settings-summary-card-inline",
+                        p { class: "settings-summary-label", "版本" }
+                        h3 { class: "settings-summary-value", {health.version.unwrap_or_else(|| "未提供".to_string())} }
                     }
                 }
 
@@ -48,9 +48,9 @@ pub fn SystemStatusSection(
 
                 if let Some(metrics) = health.metrics {
                     div { class: "settings-metric-grid",
-                        {render_metric_card("健康检查图片数", metrics.images_count.to_string())}
-                        {render_metric_card("健康检查用户数", metrics.users_count.to_string())}
-                        {render_metric_card("估算存储用量", format_storage_mb(metrics.storage_used_mb))}
+                        {render_metric_card("图片数", metrics.images_count.to_string())}
+                        {render_metric_card("用户数", metrics.users_count.to_string())}
+                        {render_metric_card("估算用量", format_storage_mb(metrics.storage_used_mb))}
                     }
                 }
             } else if is_loading {

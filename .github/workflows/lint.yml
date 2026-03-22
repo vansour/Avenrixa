@@ -1,0 +1,225 @@
+name: Avenrixa Lint
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  CARGO_TERM_COLOR: always
+  ACTIONLINT_VERSION: v1.7.11
+  REVIEWDOG_VERSION: v0.21.0
+
+jobs:
+  cargo-clippy:
+    name: Cargo Clippy
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev pkg-config
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2.9.1
+
+      - name: Setup Go
+        if: github.event_name == 'pull_request'
+        uses: actions/setup-go@v6.3.0
+        with:
+          go-version: "1.25"
+
+      - name: Add Go tools to PATH
+        if: github.event_name == 'pull_request'
+        run: echo "${RUNNER_TEMP}/bin" >> "${GITHUB_PATH}"
+
+      - name: Install reviewdog
+        if: github.event_name == 'pull_request'
+        env:
+          GOBIN: ${{ runner.temp }}/bin
+        run: go install "github.com/reviewdog/reviewdog/cmd/reviewdog@${REVIEWDOG_VERSION}"
+
+      - name: Run cargo clippy
+        id: clippy
+        run: |
+          set +e
+          cargo clippy --workspace --all-targets --message-format=short -- -D warnings 2>&1 | tee clippy.out
+          status=${PIPESTATUS[0]}
+          echo "status=${status}" >> "${GITHUB_OUTPUT}"
+          exit 0
+
+      - name: Report cargo clippy on PR
+        if: always() && github.event_name == 'pull_request'
+        env:
+          REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [[ "$(jq -r '.pull_request.head.repo.full_name // empty' "${GITHUB_EVENT_PATH}")" != "${GITHUB_REPOSITORY}" ]]; then
+            echo "Skipping reviewdog PR comments for fork pull request."
+            exit 0
+          fi
+          if [[ ! -s clippy.out ]]; then
+            exit 0
+          fi
+          reviewdog \
+            -f=clippy \
+            -name="cargo clippy" \
+            -reporter=github-pr-review \
+            -filter-mode=added \
+            -fail-level=warning \
+            < clippy.out || true
+
+      - name: Fail on cargo clippy findings
+        if: steps.clippy.outputs.status != '0'
+        run: exit 1
+
+  actionlint:
+    name: Actionlint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+
+      - name: Install shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+
+      - name: Setup Go
+        uses: actions/setup-go@v6.3.0
+        with:
+          go-version: "1.25"
+
+      - name: Add Go tools to PATH
+        run: echo "${RUNNER_TEMP}/bin" >> "${GITHUB_PATH}"
+
+      - name: Install actionlint and reviewdog
+        env:
+          GOBIN: ${{ runner.temp }}/bin
+        run: |
+          go install "github.com/rhysd/actionlint/cmd/actionlint@${ACTIONLINT_VERSION}"
+          go install "github.com/reviewdog/reviewdog/cmd/reviewdog@${REVIEWDOG_VERSION}"
+
+      - name: Run actionlint
+        id: actionlint
+        run: |
+          set +e
+          actionlint -oneline 2>&1 | tee actionlint.out
+          status=${PIPESTATUS[0]}
+          echo "status=${status}" >> "${GITHUB_OUTPUT}"
+          exit 0
+
+      - name: Report actionlint on PR
+        if: always() && github.event_name == 'pull_request'
+        env:
+          REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [[ "$(jq -r '.pull_request.head.repo.full_name // empty' "${GITHUB_EVENT_PATH}")" != "${GITHUB_REPOSITORY}" ]]; then
+            echo "Skipping reviewdog PR comments for fork pull request."
+            exit 0
+          fi
+          if [[ ! -s actionlint.out ]]; then
+            exit 0
+          fi
+          reviewdog \
+            -efm="%f:%l:%c: %m" \
+            -name="actionlint" \
+            -reporter=github-pr-review \
+            -filter-mode=added \
+            -fail-level=warning \
+            < actionlint.out || true
+
+      - name: Fail on actionlint findings
+        if: steps.actionlint.outputs.status != '0'
+        run: exit 1
+
+  shellcheck:
+    name: Shellcheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+
+      - name: Install shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+
+      - name: Setup Go
+        if: github.event_name == 'pull_request'
+        uses: actions/setup-go@v6.3.0
+        with:
+          go-version: "1.25"
+
+      - name: Add Go tools to PATH
+        if: github.event_name == 'pull_request'
+        run: echo "${RUNNER_TEMP}/bin" >> "${GITHUB_PATH}"
+
+      - name: Install reviewdog
+        if: github.event_name == 'pull_request'
+        env:
+          GOBIN: ${{ runner.temp }}/bin
+        run: go install "github.com/reviewdog/reviewdog/cmd/reviewdog@${REVIEWDOG_VERSION}"
+
+      - name: Run shellcheck
+        id: shellcheck
+        run: |
+          mapfile -d '' files < <(find scripts -maxdepth 1 -type f -name '*.sh' -print0)
+          if [[ ${#files[@]} -eq 0 ]]; then
+            echo "status=0" >> "${GITHUB_OUTPUT}"
+            printf '<checkstyle version="4.3"/>\n' > shellcheck.xml
+            exit 0
+          fi
+
+          set +e
+          shellcheck -x -S warning -f checkstyle "${files[@]}" > shellcheck.xml
+          status=$?
+          set -e
+
+          echo "status=${status}" >> "${GITHUB_OUTPUT}"
+          exit 0
+
+      - name: Report shellcheck on PR
+        if: always() && github.event_name == 'pull_request'
+        env:
+          REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [[ "$(jq -r '.pull_request.head.repo.full_name // empty' "${GITHUB_EVENT_PATH}")" != "${GITHUB_REPOSITORY}" ]]; then
+            echo "Skipping reviewdog PR comments for fork pull request."
+            exit 0
+          fi
+          if [[ ! -s shellcheck.xml ]]; then
+            exit 0
+          fi
+          reviewdog \
+            -f=checkstyle \
+            -name="shellcheck" \
+            -reporter=github-pr-review \
+            -filter-mode=added \
+            -fail-level=warning \
+            < shellcheck.xml || true
+
+      - name: Fail on shellcheck findings
+        if: steps.shellcheck.outputs.status != '0'
+        run: exit 1

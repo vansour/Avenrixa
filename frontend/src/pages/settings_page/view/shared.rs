@@ -17,14 +17,17 @@ pub(super) fn render_component_status_card(title: &str, status: &ComponentStatus
         .message
         .as_deref()
         .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or("运行正常");
+        .filter(|value| !value.is_empty());
 
     rsx! {
-        article { class: format!("settings-status-card {}", status.status.surface_class()),
+        article { class: format!("settings-status-card settings-status-card-compact {}", status.status.surface_class()),
             p { class: "settings-summary-label", "{title}" }
-            h3 { "{status.status.label()}" }
-            p { class: "settings-status-message", "{message}" }
+            div { class: "settings-status-inline",
+                h3 { "{status.status.label()}" }
+                if let Some(message) = message {
+                    p { class: "settings-status-message", "{message}" }
+                }
+            }
         }
     }
 }

@@ -4,6 +4,7 @@
 
 mod common;
 mod delete_restore;
+mod media;
 mod queries;
 mod update;
 mod upload;
@@ -24,7 +25,7 @@ use crate::config::Config;
 use crate::db::DatabasePool;
 use crate::error::AppError;
 use crate::image_processor::ImageProcessor;
-use crate::models::{Image, Paginated};
+use crate::models::{CursorPaginated, Image};
 use crate::storage_backend::StorageManager;
 use tracing::{info, warn};
 
@@ -34,6 +35,12 @@ pub struct ImageInfo {
     pub id: Uuid,
     pub filename: String,
     pub user_id: Uuid,
+}
+
+pub struct MediaAsset {
+    pub content_type: String,
+    pub data: Vec<u8>,
+    pub etag: String,
 }
 
 pub struct ImageDomainServiceDependencies {
