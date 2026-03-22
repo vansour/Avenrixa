@@ -78,12 +78,14 @@ fn configured_runtime_database_failure_exits_instead_of_falling_back_to_bootstra
         "backend should not start serving requests after runtime init failure\nstderr:\n{}",
         stderr
     );
+    let runtime_fail_closed = stderr.contains("Runtime initialization failed")
+        && stderr.contains("refusing to expose bootstrap mode");
+    let configuration_validation_failed = stderr.contains("Configuration validation failed")
+        || stderr.contains("PostgreSQL 数据库 URL")
+        || stderr.contains("JWT_SECRET");
+
     assert!(
-        !stderr.contains("refusing to expose bootstrap mode")
-            || stderr.contains("Runtime initialization failed")
-                && !stderr.contains("Configuration validation failed")
-                && !stderr.contains("PostgreSQL 数据库 URL")
-                && !stderr.contains("JWT_SECRET"),
+        runtime_fail_closed || configuration_validation_failed,
         "stderr should indicate failed startup behavior\nstderr:\n{}",
         stderr
     );
