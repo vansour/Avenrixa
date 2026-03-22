@@ -152,7 +152,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           tag="v${{ steps.release-meta.outputs.release_version }}"
-          title="Avenrixa ${{ steps.release-meta.outputs.release_version }}"
+          title="${tag}"
           notes_file="dist/release/${{ steps.release-meta.outputs.release_version }}/release-notes.md"
 
           if gh release view "${tag}" >/dev/null 2>&1; then
