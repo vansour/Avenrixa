@@ -46,6 +46,10 @@ fn storage_status_message(
     }
 }
 
+fn cache_disabled_status() -> ComponentStatus {
+    ComponentStatus::disabled("未配置外部缓存，当前以无缓存模式运行")
+}
+
 impl AdminDomainService {
     #[tracing::instrument(skip(self))]
     pub async fn health_check(&self, uptime_seconds: u64) -> Result<HealthStatus, AppError> {
@@ -72,7 +76,7 @@ impl AdminDomainService {
                 }
             }
         } else {
-            ComponentStatus::healthy()
+            cache_disabled_status()
         };
 
         let storage_settings = self.storage_manager.active_settings();
@@ -165,7 +169,11 @@ impl AdminDomainService {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_version_label, describe_storage_backend, storage_status_message};
+    use super::{
+        build_version_label, cache_disabled_status, describe_storage_backend,
+        storage_status_message,
+    };
+    use crate::models::HealthState;
     use crate::runtime_settings::{RuntimeSettings, StorageBackend};
 
     const PACKAGE_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -235,6 +243,17 @@ mod tests {
         assert_eq!(
             describe_storage_backend(&settings),
             "本地存储 · /data/images"
+        );
+    }
+
+    #[test]
+    fn cache_disabled_status_reports_disabled_component() {
+        let status = cache_disabled_status();
+
+        assert_eq!(status.status, HealthState::Disabled);
+        assert_eq!(
+            status.message.as_deref(),
+            Some("未配置外部缓存，当前以无缓存模式运行")
         );
     }
 }
