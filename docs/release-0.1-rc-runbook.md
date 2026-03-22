@@ -14,8 +14,9 @@ GitHub Actions 触发方式：
 
 - `.github/workflows/release-rc-preflight.yml`
 - 推送 RC tag 时会自动触发，例如 `v0.1.2-rc.2`
-- 手动触发时必须位于 `release/*` 分支
+- 手动触发时必须位于 `main`
 - 默认发布到 `ghcr.io/<repository_owner>/avenrixa:<version>`，并追加 `ghcr.io/<repository_owner>/avenrixa:rc`
+- workflow 成功后会自动创建或更新对应的 GitHub Pre-release
 - 可通过 workflow input `image_repository` 覆盖目标仓库
 
 ## 阶段 2 关注点

@@ -16,6 +16,7 @@ GitHub Actions 入口：
 - 推送 `v*` tag 时会自动触发，例如 `v0.1.0`
 - 手动触发时必须位于 `main`
 - 默认发布到 `ghcr.io/<repository_owner>/avenrixa:<version>`，并追加 `:latest`
+- workflow 成功后会自动创建或更新对应的 GitHub Release，并上传 `dist/release/<version>` 下的产物
 - 也可继续手动触发，并通过 workflow input `image_repository` 覆盖目标仓库
 
 ## 阶段 3 关注点

@@ -260,9 +260,8 @@ cargo test --workspace
 - `CHANGELOG.md` 是否有对应版本条目
 - Docker 镜像 labels 是否写入 version / revision / created
 - `/health` 返回的运行版本是否和候选版一致
-- `dev` 分支推送会触发 `preview-dev`，默认发布到 `ghcr.io/<repository_owner>/avenrixa:dev`
-- 同一构建还会追加提交级标签 `ghcr.io/<repository_owner>/avenrixa:sha-<shortsha>`
-- `release/*` 分支上的 RC tag 会触发 `release-rc-preflight`，默认发布到 `ghcr.io/<repository_owner>/avenrixa:<version>` 并追加 `:rc`
+- `main` 上推送 RC tag 会触发 `release-rc-preflight`，默认发布到 `ghcr.io/<repository_owner>/avenrixa:<version>` 并追加 `:rc`
+- 同一 workflow 会自动创建或更新对应的 GitHub Pre-release
 
 当前 RC runbook 见 [`docs/release-0.1-rc-runbook.md`](docs/release-0.1-rc-runbook.md)，完整规则见 [`docs/release-policy.md`](docs/release-policy.md)。
 
@@ -281,6 +280,7 @@ cargo test --workspace
 - 推送 `v*` tag 时会自动触发对应的 GitHub Actions 正式发布 workflow
 - `main` 分支上的稳定 tag 会触发对应的 GitHub Actions 正式发布 workflow
 - GitHub Actions 工作流会默认发布到 `ghcr.io/<repository_owner>/avenrixa:<version>` 并追加 `:latest`
+- GitHub Actions 工作流会自动创建或更新对应的 GitHub Release，并上传 `dist/release/<version>` 下的正式版资产
 - 生成正式版 `release-notes.md`
 - 导出镜像元数据、发布 bundle、`release-manifest.json` 与 `SHA256SUMS`
 

@@ -12,7 +12,7 @@ on:
         default: ""
 
 permissions:
-  contents: read
+  contents: write
   packages: write
 
 env:
@@ -45,25 +45,19 @@ jobs:
               exit 1
             fi
 
-            base_version="${release_version%%-rc.*}"
-            expected_branch="origin/release/${base_version}"
-            if ! git show-ref --verify --quiet "refs/remotes/${expected_branch}"; then
-              echo "Expected release branch ${expected_branch} to exist." >&2
-              exit 1
-            fi
-            if ! git branch -r --contains "${GITHUB_SHA}" | sed 's/^ *//' | grep -Fx "${expected_branch}" >/dev/null; then
-              echo "Tag ${GITHUB_REF_NAME} must point to a commit contained in ${expected_branch}." >&2
+            if ! git branch -r --contains "${GITHUB_SHA}" | sed 's/^ *//' | grep -Fx "origin/main" >/dev/null; then
+              echo "RC tag ${GITHUB_REF_NAME} must point to a commit contained in origin/main." >&2
               exit 1
             fi
           else
-            if [[ "${GITHUB_REF_NAME}" != release/* ]]; then
-              echo "Manual RC preflight must run from a release/* branch." >&2
+            if [[ "${GITHUB_REF_NAME}" != "main" ]]; then
+              echo "Manual RC preflight must run from main." >&2
               exit 1
             fi
 
             workspace_version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)"
             if [[ "${workspace_version}" != *-rc.* ]]; then
-              echo "Release branch workspace version must already be an RC version." >&2
+              echo "Main branch workspace version must already be an RC version." >&2
               exit 1
             fi
           fi
@@ -129,3 +123,29 @@ jobs:
           DOCKER_BUILDKIT: "1"
           COMPOSE_DOCKER_CLI_BUILD: "1"
         run: ./scripts/release-rc-preflight.sh
+
+      - name: Render RC release notes
+        run: |
+          ./scripts/release-notes-from-changelog.sh "${{ steps.release-meta.outputs.release_version }}" > "${RUNNER_TEMP}/release-notes.md"
+
+      - name: Upsert RC GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="v${{ steps.release-meta.outputs.release_version }}"
+          title="Avenrixa ${{ steps.release-meta.outputs.release_version }}"
+          notes_file="${RUNNER_TEMP}/release-notes.md"
+
+          if gh release view "${tag}" >/dev/null 2>&1; then
+            gh release edit "${tag}" \
+              --title "${title}" \
+              --notes-file "${notes_file}" \
+              --prerelease \
+              --verify-tag
+          else
+            gh release create "${tag}" \
+              --title "${title}" \
+              --notes-file "${notes_file}" \
+              --prerelease \
+              --verify-tag
+          fi
