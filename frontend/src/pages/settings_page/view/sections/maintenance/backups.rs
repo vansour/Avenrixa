@@ -1,27 +1,20 @@
 use crate::types::api::BackupFileSummary;
 use dioxus::prelude::*;
 
-use super::super::super::shared::{
-    backup_kind_label, backup_supports_restore, format_storage_bytes_u64, format_timestamp,
-};
+use super::super::super::shared::{backup_kind_label, format_storage_bytes_u64, format_timestamp};
 
-#[allow(clippy::too_many_arguments)]
 pub(super) fn render_backup_files_section(
     backup_files: Vec<(BackupFileSummary, String)>,
-    pending_restore_filename: Option<String>,
     deleting_backup_filename: Option<String>,
-    processing_restore_filename: Option<String>,
     is_loading_backups: bool,
-    is_loading_restore_status: bool,
     maintenance_busy: bool,
-    has_pending_restore: bool,
     on_refresh_backups: EventHandler<MouseEvent>,
     on_delete_backup: EventHandler<String>,
-    on_restore_backup: EventHandler<BackupFileSummary>,
 ) -> Element {
     rsx! {
         div { class: "settings-subcard",
             h3 { "备份文件" }
+            p { class: "settings-action-note", "页面恢复入口已移除；如需恢复，请先下载备份，再使用运维脚本执行恢复。" }
 
             div { class: "settings-list-toolbar",
                 div { class: "settings-toolbar-meta",
@@ -53,7 +46,6 @@ pub(super) fn render_backup_files_section(
                     {backup_files.into_iter().map(|(backup, download_url)| {
                         let filename_for_download = backup.filename.clone();
                         let filename_for_delete = backup.filename.clone();
-                        let backup_for_restore = backup.clone();
                         let kind_label = backup_kind_label(&backup.semantics);
                         let backup_meta = format!(
                             "{} · {}",
@@ -63,13 +55,6 @@ pub(super) fn render_backup_files_section(
                         let is_row_deleting = deleting_backup_filename
                             .as_deref()
                             .is_some_and(|value| value == backup.filename.as_str());
-                        let is_row_restoring = processing_restore_filename
-                            .as_deref()
-                            .is_some_and(|value| value == backup.filename.as_str());
-                        let is_pending_target = pending_restore_filename
-                            .as_deref()
-                            .is_some_and(|value| value == backup.filename.as_str());
-                        let supports_restore = backup_supports_restore(&backup.semantics);
                         rsx! {
                             article { class: "settings-entity-card",
                                 div { class: "settings-entity-main",
@@ -81,9 +66,7 @@ pub(super) fn render_backup_files_section(
                                             }
                                         }
                                         p { class: "settings-entity-meta", "{backup_meta}" }
-                                        if !supports_restore {
-                                            p { class: "settings-action-note", "仅支持下载或运维恢复。" }
-                                        }
+                                        p { class: "settings-action-note", "逻辑备份仅供下载；恢复统一走运维脚本。" }
                                     }
 
                                     div { class: "settings-entity-controls",
@@ -95,21 +78,7 @@ pub(super) fn render_backup_files_section(
                                         }
                                         button {
                                             class: "btn btn-danger",
-                                            disabled: !supports_restore || maintenance_busy || is_loading_restore_status || has_pending_restore,
-                                            onclick: move |_| on_restore_backup.call(backup_for_restore.clone()),
-                                            if is_row_restoring {
-                                                "处理中..."
-                                            } else if is_pending_target {
-                                                "已计划恢复"
-                                            } else if !supports_restore {
-                                                "不支持页面恢复"
-                                            } else {
-                                                "恢复到此备份"
-                                            }
-                                        }
-                                        button {
-                                            class: "btn btn-danger",
-                                            disabled: maintenance_busy || is_loading_backups || has_pending_restore,
+                                            disabled: maintenance_busy || is_loading_backups,
                                             onclick: move |_| on_delete_backup.call(filename_for_delete.clone()),
                                             if is_row_deleting { "删除中..." } else { "删除备份" }
                                         }

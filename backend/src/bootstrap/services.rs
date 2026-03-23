@@ -11,6 +11,7 @@ use crate::domain::image::{
     PostgresImageRepository,
 };
 use crate::image_processor::ImageProcessor;
+use crate::observability::RuntimeObservability;
 use crate::runtime_settings::RuntimeSettingsService;
 use crate::storage_backend::StorageManager;
 use std::sync::Arc;
@@ -29,6 +30,7 @@ pub async fn build_services(
     database: &DatabasePool,
     cache_connections: &CacheConnections,
     config: &Config,
+    observability: Arc<RuntimeObservability>,
 ) -> anyhow::Result<ServiceBundle> {
     let auth = AuthService::new(config)
         .map_err(|error| anyhow::anyhow!("Failed to initialize auth service: {}", error))?;
@@ -63,6 +65,7 @@ pub async fn build_services(
                 config.clone(),
                 image_processor.clone(),
                 storage_manager.clone(),
+                observability.clone(),
             );
             Arc::new(DefaultImageDomainService::new(
                 image_dependencies,
@@ -77,6 +80,7 @@ pub async fn build_services(
         cache_connections.app.clone(),
         config.clone(),
         storage_manager.clone(),
+        observability,
     ));
     info!("Admin domain service initialized");
 

@@ -1,4 +1,5 @@
 use super::*;
+use crate::audit::{AuditEvent, record_audit_best_effort};
 use base64::Engine;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -142,20 +143,13 @@ impl<I: ImageRepository> ImageDomainService<I> {
         image.views += 1;
         self.image_repository.update_image(&image).await?;
 
-        // 记录审计日志 (改为异步执行，避免阻塞主流程)
-        let database = self.database.clone();
-        tokio::spawn(async move {
-            log_audit_db(
-                &database,
-                Some(user_id),
-                "image.view",
-                "image",
-                Some(id),
-                None,
-                None,
-            )
-            .await;
-        });
+        record_audit_best_effort(
+            self.database.clone(),
+            self.observability.clone(),
+            AuditEvent::new("image.view", "image")
+                .with_user_id(user_id)
+                .with_target_id(id),
+        );
 
         Ok(image)
     }

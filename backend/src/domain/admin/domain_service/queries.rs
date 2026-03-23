@@ -6,7 +6,8 @@ use super::AdminDomainService;
 use crate::db::DatabasePool;
 use crate::error::AppError;
 use crate::models::{
-    AdminUserRecord, AdminUserSummary, AuditLogRecord, AuditLogResponse, SystemStats, UserRole,
+    AdminUserRecord, AdminUserSummary, AuditLogRecord, AuditLogResponse, RuntimeBacklogMetrics,
+    RuntimeObservabilitySnapshot, SystemStats, UserRole,
 };
 
 const LAST_ADMIN_ROLE_CHANGE_ERROR: &str = "系统至少需要保留一个管理员账户";
@@ -146,6 +147,7 @@ impl AdminDomainService {
         let now = Utc::now();
         let day_ago = now - chrono::Duration::days(1);
         let week_ago = now - chrono::Duration::days(7);
+        let runtime = self.collect_runtime_observability().await?;
 
         match &self.database {
             DatabasePool::Postgres(pool) => Ok(SystemStats {
@@ -179,6 +181,31 @@ impl AdminDomainService {
                     .bind(week_ago)
                     .fetch_one(pool)
                     .await?,
+                runtime,
+            }),
+        }
+    }
+
+    pub(super) async fn collect_runtime_observability(
+        &self,
+    ) -> Result<RuntimeObservabilitySnapshot, AppError> {
+        let backlog = self.storage_cleanup_backlog().await?;
+        Ok(self.observability.snapshot(backlog))
+    }
+
+    async fn storage_cleanup_backlog(&self) -> Result<RuntimeBacklogMetrics, AppError> {
+        match &self.database {
+            DatabasePool::Postgres(pool) => Ok(RuntimeBacklogMetrics {
+                storage_cleanup_pending: sqlx::query_scalar(
+                    "SELECT COUNT(*) FROM storage_cleanup_jobs",
+                )
+                .fetch_one(pool)
+                .await?,
+                storage_cleanup_retrying: sqlx::query_scalar(
+                    "SELECT COUNT(*) FROM storage_cleanup_jobs WHERE attempts > 0 OR last_error IS NOT NULL",
+                )
+                .fetch_one(pool)
+                .await?,
             }),
         }
     }

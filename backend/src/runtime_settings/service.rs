@@ -122,3 +122,69 @@ impl RuntimeSettingsService {
         ))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+    use crate::db::DatabasePool;
+
+    fn test_service() -> RuntimeSettingsService {
+        let pool = sqlx::PgPool::connect_lazy("postgres://localhost/test")
+            .expect("lazy postgres pool should be created");
+        RuntimeSettingsService::new(DatabasePool::Postgres(pool), &Config::default())
+    }
+
+    #[tokio::test]
+    async fn ensure_expected_settings_version_accepts_missing_expected_version() {
+        let service = test_service();
+        let current = RuntimeSettings::from_defaults(&Config::default());
+
+        assert!(
+            service
+                .ensure_expected_settings_version(None, &current)
+                .is_ok()
+        );
+        assert!(
+            service
+                .ensure_expected_settings_version(Some(""), &current)
+                .is_ok()
+        );
+        assert!(
+            service
+                .ensure_expected_settings_version(Some("   "), &current)
+                .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn ensure_expected_settings_version_accepts_current_version() {
+        let service = test_service();
+        let current = RuntimeSettings::from_defaults(&Config::default());
+        let expected = current.settings_version();
+
+        assert!(
+            service
+                .ensure_expected_settings_version(Some(&expected), &current)
+                .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn ensure_expected_settings_version_rejects_stale_version() {
+        let service = test_service();
+        let mut current = RuntimeSettings::from_defaults(&Config::default());
+        current.site_name = "Avenrixa Console".to_string();
+
+        let err = service
+            .ensure_expected_settings_version(Some("stale-version"), &current)
+            .expect_err("stale settings version should be rejected");
+
+        match err {
+            AppError::Conflict(message) => {
+                assert!(message.contains("设置已被其他管理员更新"));
+            }
+            other => panic!("expected conflict error, got {other:?}"),
+        }
+    }
+}

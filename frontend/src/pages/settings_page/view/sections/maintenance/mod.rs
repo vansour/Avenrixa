@@ -1,11 +1,9 @@
 mod backups;
-mod restore;
 
-use crate::types::api::{BackupFileSummary, BackupResponse, BackupRestoreStatusResponse};
+use crate::types::api::{BackupFileSummary, BackupResponse};
 use dioxus::prelude::*;
 
 use self::backups::render_backup_files_section;
-use self::restore::render_restore_section;
 use super::super::shared::{format_timestamp, render_metric_card};
 
 #[component]
@@ -14,20 +12,15 @@ pub fn MaintenanceSettingsSection(
     success_message: String,
     last_backup: Option<BackupResponse>,
     backup_files: Vec<(BackupFileSummary, String)>,
-    restore_status: Option<BackupRestoreStatusResponse>,
     last_expired_cleanup_count: Option<i64>,
     is_cleaning_expired: bool,
     is_backing_up: bool,
     deleting_backup_filename: Option<String>,
-    processing_restore_filename: Option<String>,
     is_loading_backups: bool,
-    is_loading_restore_status: bool,
     #[props(default)] on_cleanup_expired: EventHandler<MouseEvent>,
     #[props(default)] on_backup: EventHandler<MouseEvent>,
     #[props(default)] on_refresh_backups: EventHandler<MouseEvent>,
-    #[props(default)] on_refresh_restore_status: EventHandler<MouseEvent>,
     #[props(default)] on_delete_backup: EventHandler<String>,
-    #[props(default)] on_restore_backup: EventHandler<BackupFileSummary>,
 ) -> Element {
     let last_backup_name = last_backup
         .as_ref()
@@ -40,15 +33,8 @@ pub fn MaintenanceSettingsSection(
     let expired_cleanup_summary = last_expired_cleanup_count
         .map(|count| format!("{} 张图片", count))
         .unwrap_or_else(|| "未执行".to_string());
-    let pending_restore_filename = restore_status
-        .as_ref()
-        .and_then(|status| status.pending.as_ref())
-        .map(|item| item.filename.clone());
-    let maintenance_busy = is_cleaning_expired
-        || is_backing_up
-        || deleting_backup_filename.is_some()
-        || processing_restore_filename.is_some();
-    let has_pending_restore = pending_restore_filename.is_some();
+    let maintenance_busy =
+        is_cleaning_expired || is_backing_up || deleting_backup_filename.is_some();
 
     rsx! {
         div { class: "settings-stack",
@@ -98,25 +84,13 @@ pub fn MaintenanceSettingsSection(
                 }
             }
 
-            {render_restore_section(
-                restore_status,
-                is_loading_restore_status,
-                maintenance_busy,
-                on_refresh_restore_status,
-            )}
-
             {render_backup_files_section(
                 backup_files,
-                pending_restore_filename,
                 deleting_backup_filename,
-                processing_restore_filename,
                 is_loading_backups,
-                is_loading_restore_status,
                 maintenance_busy,
-                has_pending_restore,
                 on_refresh_backups,
                 on_delete_backup,
-                on_restore_backup,
             )}
         }
     }

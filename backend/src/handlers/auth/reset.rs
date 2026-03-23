@@ -2,7 +2,7 @@ use super::common::{
     append_cleared_session_cookies, append_query_params, auth_domain_service, ensure_app_installed,
     load_mail_runtime_config, send_text_mail_with_config,
 };
-use crate::audit::log_audit_db;
+use crate::audit::{AuditEvent, record_audit_sync};
 use crate::db::AppState;
 use crate::domain::auth::state_repository::AuthStateRepository;
 use crate::error::AppError;
@@ -50,14 +50,12 @@ pub async fn request_password_reset(
 
     send_password_reset_mail(&state, &dispatch.email, &dispatch.email, &dispatch.token).await?;
 
-    log_audit_db(
+    record_audit_sync(
         &state.database,
-        Some(dispatch.user_id),
-        "user.password_reset_requested",
-        "user",
-        Some(dispatch.user_id),
-        None,
-        None,
+        state.observability.as_ref(),
+        AuditEvent::new("user.password_reset_requested", "user")
+            .with_user_id(dispatch.user_id)
+            .with_target_id(dispatch.user_id),
     )
     .await;
 
@@ -79,14 +77,12 @@ pub async fn confirm_password_reset(
         .bump_user_token_version(user.id)
         .await?;
 
-    log_audit_db(
+    record_audit_sync(
         &state.database,
-        Some(user.id),
-        "user.password_reset_completed",
-        "user",
-        Some(user.id),
-        None,
-        None,
+        state.observability.as_ref(),
+        AuditEvent::new("user.password_reset_completed", "user")
+            .with_user_id(user.id)
+            .with_target_id(user.id),
     )
     .await;
 

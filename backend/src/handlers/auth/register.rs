@@ -2,7 +2,7 @@ use super::common::{
     append_query_params, auth_domain_service, ensure_app_installed, load_mail_runtime_config,
     send_text_mail_with_config,
 };
-use crate::audit::log_audit_db;
+use crate::audit::{AuditEvent, record_audit_sync};
 use crate::db::AppState;
 use crate::error::AppError;
 use crate::models::{EmailVerificationConfirmRequest, RegisterRequest};
@@ -43,14 +43,12 @@ pub async fn register(
     let dispatch = auth_domain_service.register(req).await?;
     send_verification_mail(&state, &dispatch.email, &dispatch.email, &dispatch.token).await?;
 
-    log_audit_db(
+    record_audit_sync(
         &state.database,
-        Some(dispatch.user_id),
-        "user.register_requested",
-        "user",
-        Some(dispatch.user_id),
-        None,
-        None,
+        state.observability.as_ref(),
+        AuditEvent::new("user.register_requested", "user")
+            .with_user_id(dispatch.user_id)
+            .with_target_id(dispatch.user_id),
     )
     .await;
 
@@ -65,14 +63,12 @@ pub async fn verify_registration_email(
     let auth_domain_service = auth_domain_service(&state)?;
     let user = auth_domain_service.verify_email(&req.token).await?;
 
-    log_audit_db(
+    record_audit_sync(
         &state.database,
-        Some(user.id),
-        "user.email_verified",
-        "user",
-        Some(user.id),
-        None,
-        None,
+        state.observability.as_ref(),
+        AuditEvent::new("user.email_verified", "user")
+            .with_user_id(user.id)
+            .with_target_id(user.id),
     )
     .await;
 

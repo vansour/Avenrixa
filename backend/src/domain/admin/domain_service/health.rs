@@ -3,8 +3,15 @@ use chrono::Utc;
 use super::AdminDomainService;
 use crate::db::DatabasePool;
 use crate::error::AppError;
-use crate::models::{ComponentStatus, HealthMetrics, HealthState, HealthStatus};
+use crate::models::{
+    ComponentStatus, HealthMetrics, HealthState, HealthStatus, RuntimeObservabilitySnapshot,
+};
 use crate::runtime_settings::StorageBackend;
+
+struct HealthMetricsCollection {
+    metrics: HealthMetrics,
+    warnings: Vec<String>,
+}
 
 fn build_version_label(
     app_version: Option<&str>,
@@ -100,7 +107,34 @@ impl AdminDomainService {
             }
         };
 
-        let metrics = self.collect_health_metrics().await.ok();
+        let metrics = self.collect_health_metrics().await;
+        let observability_snapshot = match self.collect_runtime_observability().await {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                let mut warnings = metrics.warnings.clone();
+                warnings.push(format!("运行态指标查询失败: {}", error));
+                let observability = observability_status(None, &warnings);
+                if overall_status == HealthState::Healthy {
+                    overall_status = observability.status;
+                }
+                return Ok(HealthStatus {
+                    status: overall_status,
+                    timestamp,
+                    database: db_status,
+                    cache: cache_status,
+                    storage: storage_status,
+                    observability,
+                    version: Some(app_version_label()),
+                    uptime_seconds: Some(uptime_seconds),
+                    metrics: Some(metrics.metrics),
+                });
+            }
+        };
+
+        let observability = observability_status(Some(&observability_snapshot), &metrics.warnings);
+        if overall_status == HealthState::Healthy && observability.status == HealthState::Degraded {
+            overall_status = HealthState::Degraded;
+        }
 
         Ok(HealthStatus {
             status: overall_status,
@@ -108,38 +142,64 @@ impl AdminDomainService {
             database: db_status,
             cache: cache_status,
             storage: storage_status,
+            observability,
             version: Some(app_version_label()),
             uptime_seconds: Some(uptime_seconds),
-            metrics,
+            metrics: Some(metrics.metrics),
         })
     }
 
-    async fn collect_health_metrics(&self) -> Result<HealthMetrics, AppError> {
-        let images_count: i64 = match &self.database {
+    async fn collect_health_metrics(&self) -> HealthMetricsCollection {
+        let mut warnings = Vec::new();
+
+        let images_count = match &self.database {
             DatabasePool::Postgres(pool) => {
-                sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM images WHERE status = 'active'")
-                    .fetch_one(pool)
-                    .await
-                    .unwrap_or(0)
+                match sqlx::query_scalar::<_, i64>(
+                    "SELECT COUNT(*) FROM images WHERE status = 'active'",
+                )
+                .fetch_one(pool)
+                .await
+                {
+                    Ok(value) => Some(value),
+                    Err(error) => {
+                        warnings.push(format!("活动图片统计查询失败: {}", error));
+                        None
+                    }
+                }
             }
         };
 
-        let users_count: i64 = match &self.database {
+        let users_count = match &self.database {
             DatabasePool::Postgres(pool) => {
-                sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM users")
+                match sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM users")
                     .fetch_one(pool)
                     .await
-                    .unwrap_or(0)
+                {
+                    Ok(value) => Some(value),
+                    Err(error) => {
+                        warnings.push(format!("用户统计查询失败: {}", error));
+                        None
+                    }
+                }
             }
         };
 
-        let storage_used_mb = self.storage_used_mb().await;
+        let storage_used_mb = match self.storage_used_mb().await {
+            Ok(value) => value,
+            Err(error) => {
+                warnings.push(format!("存储占用统计查询失败: {}", error));
+                None
+            }
+        };
 
-        Ok(HealthMetrics {
-            images_count,
-            users_count,
-            storage_used_mb,
-        })
+        HealthMetricsCollection {
+            metrics: HealthMetrics {
+                images_count,
+                users_count,
+                storage_used_mb,
+            },
+            warnings,
+        }
     }
 
     async fn database_ping(&self) -> Result<(), sqlx::Error> {
@@ -153,17 +213,70 @@ impl AdminDomainService {
         Ok(())
     }
 
-    async fn storage_used_mb(&self) -> Option<f64> {
+    async fn storage_used_mb(&self) -> Result<Option<f64>, sqlx::Error> {
         match &self.database {
-            DatabasePool::Postgres(pool) => sqlx::query_scalar::<_, Option<i64>>(
-                "SELECT CAST(SUM(size) AS BIGINT) FROM images WHERE status = 'active'",
-            )
-            .fetch_one(pool)
-            .await
-            .ok()
-            .flatten()
-            .map(|size| size as f64 / 1024.0 / 1024.0),
+            DatabasePool::Postgres(pool) => {
+                let size = sqlx::query_scalar::<_, Option<i64>>(
+                    "SELECT CAST(SUM(size) AS BIGINT) FROM images WHERE status = 'active'",
+                )
+                .fetch_one(pool)
+                .await?;
+                Ok(size.map(|value| value as f64 / 1024.0 / 1024.0))
+            }
         }
+    }
+}
+
+fn observability_status(
+    snapshot: Option<&RuntimeObservabilitySnapshot>,
+    warnings: &[String],
+) -> ComponentStatus {
+    let mut degraded_reasons = warnings.to_vec();
+    let mut summary = Vec::new();
+
+    if let Some(snapshot) = snapshot {
+        let failing_tasks = snapshot
+            .background_tasks
+            .iter()
+            .filter(|task| task.consecutive_failures > 0)
+            .map(|task| {
+                format!(
+                    "{} 连续失败 {} 次",
+                    task.task_name, task.consecutive_failures
+                )
+            })
+            .collect::<Vec<_>>();
+        degraded_reasons.extend(failing_tasks);
+
+        if snapshot.backlog.storage_cleanup_retrying > 0 {
+            degraded_reasons.push(format!(
+                "存储清理重试队列 {} 项",
+                snapshot.backlog.storage_cleanup_retrying
+            ));
+        }
+
+        summary.push(format!(
+            "存储清理积压 {} 项",
+            snapshot.backlog.storage_cleanup_pending
+        ));
+        summary.push(format!("后台任务 {} 个", snapshot.background_tasks.len()));
+        summary.push(format!(
+            "审计失败 {} 次",
+            snapshot.audit_writes.total_failures
+        ));
+    }
+
+    if !degraded_reasons.is_empty() {
+        return ComponentStatus::degraded(degraded_reasons.join("；"));
+    }
+
+    ComponentStatus {
+        status: HealthState::Healthy,
+        message: Some(if summary.is_empty() {
+            "关键运行态指标已启用".to_string()
+        } else {
+            summary.join("；")
+        }),
     }
 }
 
@@ -197,8 +310,8 @@ mod tests {
     #[test]
     fn build_version_label_ignores_revision_when_present() {
         assert_eq!(
-            build_version_label(Some("0.1.2-rc.2"), "ignored", Some("abc123def456")),
-            "0.1.2-rc.2"
+            build_version_label(Some("0.1.2-rc.3"), "ignored", Some("abc123def456")),
+            "0.1.2-rc.3"
         );
     }
 

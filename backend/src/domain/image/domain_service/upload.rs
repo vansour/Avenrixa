@@ -1,5 +1,7 @@
 use super::*;
+use crate::audit::{AuditEvent, record_audit_sync};
 use crate::models::ImageStatus;
+use std::time::Instant;
 
 impl<I: ImageRepository> ImageDomainService<I> {
     /// 验证文件名安全性
@@ -131,21 +133,20 @@ impl<I: ImageRepository> ImageDomainService<I> {
         let cache_hint = self.storage_manager.cache_hint(&stored_filename);
         self.cache_image_path(image_id, &cache_hint).await?;
 
-        log_audit_db(
+        record_audit_sync(
             &self.database,
-            Some(user_id),
-            "image.upload",
-            "image",
-            Some(image_id),
-            None,
-            Some(serde_json::json!({
-                "actor_email": actor_email,
-                "stored_filename": stored_filename,
-                "size_bytes": compressed_size,
-                "format": ext,
-                "result": "completed",
-                "risk_level": "info",
-            })),
+            self.observability.as_ref(),
+            AuditEvent::new("image.upload", "image")
+                .with_user_id(user_id)
+                .with_target_id(image_id)
+                .with_details(serde_json::json!({
+                    "actor_email": actor_email,
+                    "stored_filename": stored_filename,
+                    "size_bytes": compressed_size,
+                    "format": ext,
+                    "result": "completed",
+                    "risk_level": "info",
+                })),
         )
         .await;
         if streaming_upload {
@@ -186,6 +187,7 @@ impl<I: ImageRepository> ImageDomainService<I> {
         temp_path: std::path::PathBuf,
         content_type: Option<String>,
     ) -> Result<Image, AppError> {
+        let processing_started_at = Instant::now();
         let upload_result = async {
             self.validate_filename(&filename)?;
 
@@ -218,6 +220,16 @@ impl<I: ImageRepository> ImageDomainService<I> {
         }
         .await;
 
+        match &upload_result {
+            Ok(_) => self
+                .observability
+                .record_image_processing_success(processing_started_at.elapsed()),
+            Err(error) => self.observability.record_image_processing_failure(
+                processing_started_at.elapsed(),
+                error.to_string(),
+            ),
+        }
+
         Self::cleanup_temp_file(&temp_path).await;
         upload_result
     }
@@ -233,6 +245,7 @@ impl<I: ImageRepository> ImageDomainService<I> {
         data: Vec<u8>,
         content_type: Option<String>,
     ) -> Result<Image, AppError> {
+        let processing_started_at = Instant::now();
         self.validate_filename(&filename)?;
 
         let ext = ImageProcessor::get_extension(&filename);
@@ -261,7 +274,20 @@ impl<I: ImageRepository> ImageDomainService<I> {
             .map_err(|e| AppError::Internal(e.into()))??;
         let hash = ImageProcessor::calculate_hash(&compressed);
 
-        self.persist_processed_upload(user_id, actor_email, ext, hash, compressed, false)
-            .await
+        let upload_result = self
+            .persist_processed_upload(user_id, actor_email, ext, hash, compressed, false)
+            .await;
+
+        match &upload_result {
+            Ok(_) => self
+                .observability
+                .record_image_processing_success(processing_started_at.elapsed()),
+            Err(error) => self.observability.record_image_processing_failure(
+                processing_started_at.elapsed(),
+                error.to_string(),
+            ),
+        }
+
+        upload_result
     }
 }

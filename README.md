@@ -21,6 +21,7 @@
 协作和发布治理文档见：
 
 - [`CONTRIBUTING.md`](CONTRIBUTING.md)
+- [`docs/engineering-optimization-roadmap.md`](docs/engineering-optimization-roadmap.md)
 - [`docs/release-policy.md`](docs/release-policy.md)
 - [`docs/tag-history.md`](docs/tag-history.md)
 
@@ -305,7 +306,7 @@ cargo test --workspace
 CACHE_MODE=none ./scripts/compose-smoke.sh
 ```
 
-默认 `COMPOSE_VARIANT=postgres CACHE_MODE=dragonfly` 现在会跑 `0.1` GA 主链路：运行时检查、安装向导、管理员登录/刷新/登出/改密、图片上传/删除、结构化设置持久化、系统统计、审计日志，以及 PostgreSQL 逻辑备份"仅下载、不支持页面恢复"的语义校验。
+默认 `COMPOSE_VARIANT=postgres CACHE_MODE=dragonfly` 现在会跑 `0.1` GA 主链路：运行时检查、安装向导、管理员登录/刷新/登出/改密、图片上传/删除、结构化设置持久化、系统统计、审计日志，以及 PostgreSQL 逻辑备份下载链路与“页面恢复接口未暴露”的边界校验。
 
 默认情况下，这条脚本会重建当前 Compose 入口对应的数据目录；当前 PostgreSQL 主链路对应 `./data`。如果你确实要复用已有目录，可以显式传入 `SMOKE_RESET_DATA_DIR=0`。
 

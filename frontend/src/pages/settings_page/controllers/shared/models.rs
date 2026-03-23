@@ -17,7 +17,6 @@ pub(crate) struct ConfirmationPlan {
 pub(crate) enum MaintenanceAction {
     CleanupExpired,
     DeleteBackup(String),
-    RestoreBackup(String),
 }
 
 #[derive(Clone, PartialEq, Eq)]

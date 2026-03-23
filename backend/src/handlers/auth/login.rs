@@ -1,7 +1,7 @@
 use super::common::{
     append_session_cookies, auth_domain_service, ensure_app_installed, issue_session_tokens,
 };
-use crate::audit::log_audit_db;
+use crate::audit::{AuditEvent, record_audit_sync};
 use crate::db::AppState;
 use crate::error::AppError;
 use crate::models::{LoginRequest, UserResponse};
@@ -29,19 +29,18 @@ pub async fn login(
         state.auth.session_ttl_seconds(),
     )?;
 
-    log_audit_db(
+    record_audit_sync(
         &state.database,
-        Some(user.id),
-        "user.login",
-        "user",
-        Some(user.id),
-        None,
-        Some(serde_json::json!({
-            "email": user.email,
-            "role": user.role,
-            "result": "completed",
-            "risk_level": "info",
-        })),
+        state.observability.as_ref(),
+        AuditEvent::new("user.login", "user")
+            .with_user_id(user.id)
+            .with_target_id(user.id)
+            .with_details(serde_json::json!({
+                "email": user.email,
+                "role": user.role,
+                "result": "completed",
+                "risk_level": "info",
+            })),
     )
     .await;
 

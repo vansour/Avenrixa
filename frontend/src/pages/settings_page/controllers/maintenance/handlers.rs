@@ -1,13 +1,9 @@
 use crate::services::AdminService;
 use crate::store::{AuthStore, ToastStore};
-use crate::types::api::BackupFileSummary;
 use dioxus::prelude::*;
 
 use super::super::MaintenanceAction;
-use super::actions::{
-    backup_database, delete_backup, precheck_restore, schedule_restore, trigger_cleanup_expired,
-};
-use super::helpers::restore_blocking_message;
+use super::actions::{backup_database, delete_backup, trigger_cleanup_expired};
 use super::state::MaintenanceState;
 
 pub(super) fn handle_cleanup_expired(state: MaintenanceState) -> impl FnMut(MouseEvent) + 'static {
@@ -70,56 +66,6 @@ pub(super) fn handle_refresh_backups(state: MaintenanceState) -> impl FnMut(Mous
     }
 }
 
-pub(super) fn handle_refresh_restore_status(
-    state: MaintenanceState,
-) -> impl FnMut(MouseEvent) + 'static {
-    move |_| {
-        if state.is_busy() || state.is_loading_restore_status() {
-            return;
-        }
-
-        state.refresh_restore_status();
-    }
-}
-
-pub(super) fn handle_restore_backup(
-    admin_service: AdminService,
-    auth_store: AuthStore,
-    toast_store: ToastStore,
-    state: MaintenanceState,
-) -> impl FnMut(BackupFileSummary) + 'static {
-    move |backup| {
-        if state.is_busy() {
-            return;
-        }
-
-        if let Some(message) = restore_blocking_message(&backup, state.restore_status().as_ref()) {
-            let mut error_message = state.error_message;
-            error_message.set(message.clone());
-            toast_store.show_error(message);
-            return;
-        }
-
-        let filename = backup.filename.clone();
-        let admin_service = admin_service.clone();
-        let auth_store = auth_store.clone();
-        let toast_store = toast_store.clone();
-        spawn(async move {
-            precheck_restore(
-                admin_service,
-                auth_store,
-                toast_store,
-                filename,
-                state.processing_restore_filename,
-                state.error_message,
-                state.success_message,
-                state.pending_action,
-            )
-            .await;
-        });
-    }
-}
-
 pub(super) fn confirm_pending_action(
     admin_service: AdminService,
     auth_store: AuthStore,
@@ -135,9 +81,6 @@ pub(super) fn confirm_pending_action(
         }
         MaintenanceAction::DeleteBackup(filename) => {
             spawn_delete_backup(admin_service, auth_store, toast_store, state, filename)
-        }
-        MaintenanceAction::RestoreBackup(filename) => {
-            spawn_schedule_restore(admin_service, auth_store, toast_store, state, filename)
         }
     }
 }
@@ -179,28 +122,6 @@ fn spawn_delete_backup(
             state.error_message,
             state.success_message,
             state.reload_backups_tick,
-        )
-        .await;
-    });
-}
-
-fn spawn_schedule_restore(
-    admin_service: AdminService,
-    auth_store: AuthStore,
-    toast_store: ToastStore,
-    state: MaintenanceState,
-    filename: String,
-) {
-    spawn(async move {
-        schedule_restore(
-            admin_service,
-            auth_store,
-            toast_store,
-            filename,
-            state.processing_restore_filename,
-            state.error_message,
-            state.success_message,
-            state.reload_restore_status_tick,
         )
         .await;
     });

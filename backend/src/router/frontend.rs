@@ -76,6 +76,10 @@ async fn serve_frontend_path(
 ) -> Result<Response, StatusCode> {
     let request_path = uri.path().trim_start_matches('/');
 
+    if is_reserved_backend_path(request_path) {
+        return Err(StatusCode::NOT_FOUND);
+    }
+
     if request_path.is_empty() {
         return serve_static_file(frontend_files.index_html.as_ref(), true).await;
     }
@@ -122,6 +126,13 @@ fn resolve_frontend_candidate(root: &Path, request_path: &str) -> Option<PathBuf
 
 fn is_spa_route(request_path: &str) -> bool {
     Path::new(request_path).extension().is_none()
+}
+
+fn is_reserved_backend_path(request_path: &str) -> bool {
+    matches!(request_path, "api" | "health" | "images" | "thumbnails")
+        || request_path.starts_with("api/")
+        || request_path.starts_with("images/")
+        || request_path.starts_with("thumbnails/")
 }
 
 async fn serve_static_file(path: &Path, disable_cache: bool) -> Result<Response, StatusCode> {
@@ -271,6 +282,23 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .uri("/missing-asset.js")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn unknown_api_route_does_not_fall_back_to_index_html() {
+        let (_temp_dir, app) = test_router().await;
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/backup-restore/status")
                     .body(Body::empty())
                     .expect("request should build"),
             )

@@ -1,16 +1,15 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 pub use shared_types::admin::{
-    AdminSettingsConfig, AuditLog, AuditLogResponse, ComponentStatus, HealthMetrics, HealthStatus,
-    InstallBootstrapRequest, InstallBootstrapResponse, InstallStatusResponse, Setting,
-    StorageDirectoryBrowseResponse, StorageDirectoryEntry, SystemStats,
-    UpdateAdminSettingsConfigRequest, UpdateSettingRequest,
+    AdminSettingsConfig, AuditLog, AuditLogResponse, BackgroundTaskMetrics, ComponentStatus,
+    HealthMetrics, HealthStatus, InstallBootstrapRequest, InstallBootstrapResponse,
+    InstallStatusResponse, RuntimeBacklogMetrics, RuntimeObservabilitySnapshot,
+    RuntimeOperationMetrics, Setting, StorageDirectoryBrowseResponse, StorageDirectoryEntry,
+    SystemStats, UpdateAdminSettingsConfigRequest, UpdateSettingRequest,
 };
 pub use shared_types::backup::{
     BackupDatabaseFamily, BackupFileSummary, BackupObjectRollbackAnchor,
-    BackupObjectRollbackStrategy, BackupResponse, BackupRestorePrecheckResponse,
-    BackupRestoreScheduleResponse, BackupRestoreStatusResponse, BackupRestoreStorageSummary,
-    BackupSemantics,
+    BackupObjectRollbackStrategy, BackupResponse, BackupRestoreStorageSummary, BackupSemantics,
 };
 pub use shared_types::common::{HealthState, StorageBackendKind};
 use uuid::Uuid;

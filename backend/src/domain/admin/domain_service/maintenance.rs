@@ -4,28 +4,24 @@ use tracing::{error, info};
 use uuid::Uuid;
 
 use super::AdminDomainService;
-use crate::audit::log_audit_db;
+use crate::audit::{AuditEvent, record_audit_best_effort};
 use crate::db::DatabasePool;
 use crate::error::AppError;
 
-fn spawn_maintenance_audit(
+fn dispatch_maintenance_audit(
     database: DatabasePool,
+    observability: std::sync::Arc<crate::observability::RuntimeObservability>,
     admin_user_id: Uuid,
     action: &'static str,
     details: serde_json::Value,
 ) {
-    tokio::spawn(async move {
-        log_audit_db(
-            &database,
-            Some(admin_user_id),
-            action,
-            "maintenance",
-            None,
-            None,
-            Some(details),
-        )
-        .await;
-    });
+    record_audit_best_effort(
+        database,
+        observability,
+        AuditEvent::new(action, "maintenance")
+            .with_user_id(admin_user_id)
+            .with_details(details),
+    );
 }
 
 impl AdminDomainService {
@@ -52,8 +48,9 @@ impl AdminDomainService {
         }
         .map_err(|e: sqlx::Error| {
             error!("Failed to expire images: {}", e);
-            spawn_maintenance_audit(
+            dispatch_maintenance_audit(
                 database.clone(),
+                self.observability.clone(),
                 admin_user_id,
                 "admin.maintenance.expired_images_cleanup.failed",
                 serde_json::json!({
@@ -128,8 +125,9 @@ impl AdminDomainService {
             info!("Expired images permanently deleted: {}", removed_rows);
         }
 
-        spawn_maintenance_audit(
+        dispatch_maintenance_audit(
             database,
+            self.observability.clone(),
             admin_user_id,
             "admin.maintenance.expired_images_cleanup.completed",
             serde_json::json!({

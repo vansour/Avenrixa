@@ -650,80 +650,54 @@ delete_postgres_backup() {
     "backup list should not contain deleted PostgreSQL backup"
 }
 
-assert_postgres_restore_download_only() {
+assert_postgres_page_restore_routes_removed() {
   local backup_filename="$1"
-  local restore_status
+  local restore_status_http_code
   local precheck_http_code
-  local precheck_response
-  local schedule_response
   local schedule_http_code
-  local restore_error_message="页面恢复功能已移除；请改为下载备份后使用运维脚本恢复。"
 
-  restore_status="$(curl -fsS -b "${ADMIN_COOKIE_JAR}" "${api_base}/backup-restore/status")"
+  log_step "Verifying PostgreSQL page restore routes are not exposed"
+  restore_status_http_code="$(
+    curl -sS \
+      -o /dev/null \
+      -w '%{http_code}' \
+      -b "${ADMIN_COOKIE_JAR}" \
+      "${api_base}/backup-restore/status"
+  )"
   expect_eq \
-    "$(printf '%s' "${restore_status}" | jq -r '.pending == null')" \
-    "true" \
-    "PostgreSQL logical backup smoke should not start with a pending restore plan"
-  expect_eq \
-    "$(printf '%s' "${restore_status}" | jq -r '.last_result == null')" \
-    "true" \
-    "PostgreSQL logical backup smoke should not rely on previous restore results"
+    "${restore_status_http_code}" \
+    "404" \
+    "PostgreSQL logical backup smoke should not expose restore status route"
 
-  log_step "Verifying PostgreSQL logical backup is download-only"
   precheck_http_code="$(
     curl -sS \
-      -o "${TMP_ROOT}/restore-precheck-response.json" \
+      -o /dev/null \
       -w '%{http_code}' \
       -b "${ADMIN_COOKIE_JAR}" \
       -X POST "${api_base}/backups/${backup_filename}/restore/precheck"
   )"
   expect_eq \
     "${precheck_http_code}" \
-    "400" \
-    "PostgreSQL logical backup precheck should be rejected in the page flow"
-  precheck_response="$(cat "${TMP_ROOT}/restore-precheck-response.json")"
-
-  expect_eq \
-    "$(printf '%s' "${precheck_response}" | jq -r '.code')" \
-    "VALIDATION_ERROR" \
-    "PostgreSQL logical backup precheck should surface validation error semantics"
-  expect_eq \
-    "$(printf '%s' "${precheck_response}" | jq -r '.error')" \
-    "${restore_error_message}" \
-    "PostgreSQL logical backup precheck should explain the removed page restore flow"
+    "404" \
+    "PostgreSQL logical backup smoke should not expose restore precheck route"
 
   schedule_http_code="$(
     curl -sS \
-      -o "${TMP_ROOT}/restore-schedule-response.json" \
+      -o /dev/null \
       -w '%{http_code}' \
       -b "${ADMIN_COOKIE_JAR}" \
       -X POST "${api_base}/backups/${backup_filename}/restore"
   )"
   expect_eq \
     "${schedule_http_code}" \
-    "400" \
-    "PostgreSQL logical backup scheduling should be rejected in the page flow"
-  schedule_response="$(cat "${TMP_ROOT}/restore-schedule-response.json")"
-  expect_eq \
-    "$(printf '%s' "${schedule_response}" | jq -r '.code')" \
-    "VALIDATION_ERROR" \
-    "PostgreSQL logical backup scheduling should surface validation error semantics"
-  expect_eq \
-    "$(printf '%s' "${schedule_response}" | jq -r '.error')" \
-    "${restore_error_message}" \
-    "PostgreSQL logical backup scheduling should explain the removed page restore flow"
-
-  restore_status="$(curl -fsS -b "${ADMIN_COOKIE_JAR}" "${api_base}/backup-restore/status")"
-  expect_eq \
-    "$(printf '%s' "${restore_status}" | jq -r '.pending == null')" \
-    "true" \
-    "PostgreSQL logical backup rejection should not create a pending restore plan"
+    "404" \
+    "PostgreSQL logical backup smoke should not expose restore scheduling route"
 }
 
 run_postgres_backup_smoke() {
   POSTGRES_BACKUP_FILENAME="$(create_postgres_backup)"
   download_postgres_backup "${POSTGRES_BACKUP_FILENAME}"
-  assert_postgres_restore_download_only "${POSTGRES_BACKUP_FILENAME}"
+  assert_postgres_page_restore_routes_removed "${POSTGRES_BACKUP_FILENAME}"
   delete_postgres_backup "${POSTGRES_BACKUP_FILENAME}"
 }
 
@@ -751,14 +725,6 @@ run_postgres_audit_smoke() {
     "$(printf '%s' "${audit_page}" | jq -r --arg filename "${POSTGRES_BACKUP_FILENAME}" '[.data[] | select(.action == "admin.maintenance.database_backup.created" and (.details.filename // "") == $filename and (.details.database_kind // "") == "postgresql" and (.details.restore_mode // "") == "download-only" and (.details.ui_restore_supported == false))] | length > 0')" \
     "true" \
     "audit logs should contain the PostgreSQL logical backup creation event"
-  expect_eq \
-    "$(printf '%s' "${audit_page}" | jq -r --arg filename "${POSTGRES_BACKUP_FILENAME}" '[.data[] | select(.action == "admin.maintenance.database_restore.precheck_failed" and (.details.filename // "") == $filename and (.details.restore_mode // "") == "download-only")] | length > 0')" \
-    "true" \
-    "audit logs should contain the PostgreSQL restore precheck rejection event"
-  expect_eq \
-    "$(printf '%s' "${audit_page}" | jq -r --arg filename "${POSTGRES_BACKUP_FILENAME}" '[.data[] | select(.action == "admin.maintenance.database_restore.schedule_failed" and (.details.filename // "") == $filename and (.details.reason // "") == "ui_restore_removed")] | length > 0')" \
-    "true" \
-    "audit logs should contain the PostgreSQL restore scheduling rejection event"
 }
 
 run_postgres_logout_smoke() {

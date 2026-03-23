@@ -1,5 +1,6 @@
 mod audit;
 mod auth;
+mod background_tasks;
 mod backup_manifest;
 mod bootstrap;
 mod cache;
@@ -12,16 +13,18 @@ mod image_processor;
 mod infrastructure;
 mod middleware;
 mod models;
+mod observability;
 mod router;
 mod routes;
 mod runtime_settings;
 mod server;
 mod storage_backend;
 
+use background_tasks::BackgroundTaskManager;
 use bootstrap::{BootstrapAppState, BootstrapConfigStore, build_app_state, init_logging};
 use config::Config;
 use router::{create_app_with_middleware, create_bootstrap_app};
-use server::{bind_listener, spawn_cleanup_tasks, start_server};
+use server::{bind_listener, start_server};
 use tower_http::trace::TraceLayer;
 use tracing::{error, info};
 
@@ -52,8 +55,9 @@ async fn build_application(
         return Err(validation_error.into());
     }
     match build_app_state(runtime_config.clone()).await {
-        Ok(state) => {
-            spawn_cleanup_tasks(&state);
+        Ok(mut state) => {
+            state.background_tasks =
+                std::sync::Arc::new(BackgroundTaskManager::spawn_cleanup_tasks(&state));
             Ok(create_app_with_middleware(
                 state.clone(),
                 &runtime_config,
