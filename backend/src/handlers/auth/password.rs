@@ -1,5 +1,5 @@
 use super::common::{append_cleared_session_cookies, auth_domain_service, revoke_token};
-use crate::audit::log_audit_db;
+use crate::audit::{AuditEvent, record_audit_sync};
 use crate::db::AppState;
 use crate::domain::auth::state_repository::AuthStateRepository;
 use crate::error::AppError;
@@ -24,14 +24,12 @@ pub async fn change_password(
         .bump_user_token_version(auth_user.id)
         .await?;
 
-    log_audit_db(
+    record_audit_sync(
         &state.database,
-        Some(auth_user.id),
-        "user.password_changed",
-        "user",
-        Some(auth_user.id),
-        None,
-        None,
+        state.observability.as_ref(),
+        AuditEvent::new("user.password_changed", "user")
+            .with_user_id(auth_user.id)
+            .with_target_id(auth_user.id),
     )
     .await;
 

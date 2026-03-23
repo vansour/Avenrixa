@@ -1,8 +1,9 @@
 pub use shared_types::admin::{
-    AdminSettingsConfig, AdminUserSummary, AuditLog, AuditLogResponse, ComponentStatus,
-    HealthMetrics, HealthStatus, InstallBootstrapRequest, InstallBootstrapResponse,
-    InstallStatusResponse, Setting, StorageDirectoryBrowseResponse, StorageDirectoryEntry,
-    SystemStats, UpdateAdminSettingsConfigRequest, UpdateSettingRequest,
+    AdminSettingsConfig, AdminUserSummary, AuditLog, AuditLogResponse, BackgroundTaskMetrics,
+    ComponentStatus, HealthMetrics, HealthStatus, InstallBootstrapRequest,
+    InstallBootstrapResponse, InstallStatusResponse, RuntimeBacklogMetrics,
+    RuntimeObservabilitySnapshot, RuntimeOperationMetrics, Setting, StorageDirectoryBrowseResponse,
+    StorageDirectoryEntry, SystemStats, UpdateAdminSettingsConfigRequest, UpdateSettingRequest,
 };
 pub use shared_types::auth::{
     EmailVerificationConfirmRequest, LoginRequest, PasswordResetConfirmRequest,

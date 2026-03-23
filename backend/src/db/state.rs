@@ -1,11 +1,13 @@
 use super::DatabasePool;
 use crate::auth::AuthService;
+use crate::background_tasks::BackgroundTaskManager;
 use crate::cache::{Cache, CacheConnection};
 use crate::config::Config;
 use crate::domain::admin::AdminDomainService;
 use crate::domain::auth::DefaultAuthDomainService;
 use crate::domain::auth::state_repository::DatabaseAuthStateRepository;
 use crate::domain::image::DefaultImageDomainService;
+use crate::observability::RuntimeObservability;
 use crate::runtime_settings::RuntimeSettingsService;
 use crate::storage_backend::StorageManager;
 use std::sync::Arc;
@@ -25,6 +27,8 @@ pub struct AppState {
     pub admin_domain_service: Arc<AdminDomainService>,
     pub runtime_settings: Arc<RuntimeSettingsService>,
     pub storage_manager: Arc<StorageManager>,
+    pub observability: Arc<RuntimeObservability>,
+    pub background_tasks: Arc<BackgroundTaskManager>,
     pub installation_lock: Arc<Mutex<()>>,
     pub started_at: Instant,
 }

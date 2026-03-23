@@ -1,5 +1,5 @@
 use super::common::admin_service;
-use crate::audit::log_audit_db;
+use crate::audit::{AuditEvent, record_audit_sync};
 use crate::db::AppState;
 use crate::db::get_setting_value;
 use crate::error::AppError;
@@ -89,19 +89,17 @@ pub async fn update_admin_settings_config(
     let has_high_risk_change = changed_keys.iter().any(|key| raw_setting_is_high_risk(key));
 
     if !changed_keys.is_empty() {
-        log_audit_db(
+        record_audit_sync(
             &state.database,
-            Some(admin_user.id),
-            "admin.settings.config_updated",
-            "settings",
-            None,
-            None,
-            Some(serde_json::json!({
-                "admin_email": admin_user.email,
-                "changed_keys": changed_keys,
-                "restart_required": restart_required,
-                "risk_level": if has_high_risk_change { "danger" } else { "warning" },
-            })),
+            state.observability.as_ref(),
+            AuditEvent::new("admin.settings.config_updated", "settings")
+                .with_user_id(admin_user.id)
+                .with_details(serde_json::json!({
+                    "admin_email": admin_user.email,
+                    "changed_keys": changed_keys,
+                    "restart_required": restart_required,
+                    "risk_level": if has_high_risk_change { "danger" } else { "warning" },
+                })),
         )
         .await;
     }
@@ -135,22 +133,20 @@ pub async fn update_setting(
         "info"
     };
 
-    log_audit_db(
+    record_audit_sync(
         &state.database,
-        Some(admin_user.id),
-        "admin.settings.raw_setting_updated",
-        "setting",
-        None,
-        None,
-        Some(serde_json::json!({
-            "admin_email": admin_user.email,
-            "setting_key": key,
-            "previous_value": previous_value_masked,
-            "new_value": next_value_masked,
-            "requires_confirmation": policy.requires_confirmation,
-            "risk_level": risk_level,
-            "restart_required": false,
-        })),
+        state.observability.as_ref(),
+        AuditEvent::new("admin.settings.raw_setting_updated", "setting")
+            .with_user_id(admin_user.id)
+            .with_details(serde_json::json!({
+                "admin_email": admin_user.email,
+                "setting_key": key,
+                "previous_value": previous_value_masked,
+                "new_value": next_value_masked,
+                "requires_confirmation": policy.requires_confirmation,
+                "risk_level": risk_level,
+                "restart_required": false,
+            })),
     )
     .await;
 

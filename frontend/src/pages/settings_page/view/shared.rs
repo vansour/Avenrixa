@@ -45,6 +45,24 @@ pub(super) fn format_timestamp(timestamp: DateTime<Utc>) -> String {
     timestamp.format("%Y-%m-%d %H:%M UTC").to_string()
 }
 
+pub(super) fn format_optional_timestamp(timestamp: Option<DateTime<Utc>>) -> String {
+    timestamp
+        .map(format_timestamp)
+        .unwrap_or_else(|| "未记录".to_string())
+}
+
+pub(super) fn format_count_option(value: Option<i64>) -> String {
+    value
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "未知".to_string())
+}
+
+pub(super) fn format_duration_ms(value: Option<u64>) -> String {
+    value
+        .map(|value| format!("{value} ms"))
+        .unwrap_or_else(|| "未记录".to_string())
+}
+
 pub(super) fn format_storage_bytes(bytes: i64) -> String {
     const KB: i64 = 1024;
     const MB: i64 = KB * 1024;
@@ -71,10 +89,6 @@ pub(super) fn format_storage_bytes_u64(bytes: u64) -> String {
 
 pub(super) fn backup_kind_label(semantics: &BackupSemantics) -> &'static str {
     semantics.kind_label()
-}
-
-pub(super) fn backup_supports_restore(semantics: &BackupSemantics) -> bool {
-    semantics.supports_restore()
 }
 
 pub(super) fn format_storage_mb(storage_used_mb: Option<f64>) -> String {

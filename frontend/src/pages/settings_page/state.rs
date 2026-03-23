@@ -133,3 +133,96 @@ fn optional_trimmed(value: String) -> Option<String> {
 fn optional_u16(value: String) -> Option<u16> {
     value.trim().parse::<u16>().ok()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dioxus::prelude::{ScopeId, Signal, VirtualDom, rsx};
+
+    struct TestSettingsFormHarness {
+        _dom: VirtualDom,
+        form: SettingsFormState,
+    }
+
+    impl TestSettingsFormHarness {
+        fn new(form: impl FnOnce() -> SettingsFormState) -> Self {
+            let dom = VirtualDom::new(|| rsx! {});
+            let form = dom.in_scope(ScopeId::ROOT, form);
+            Self { _dom: dom, form }
+        }
+    }
+
+    fn sample_form_harness() -> TestSettingsFormHarness {
+        TestSettingsFormHarness::new(|| SettingsFormState {
+            site_name: Signal::new("  Avenrixa Console  ".to_string()),
+            storage_backend: Signal::new(StorageBackendKind::Local),
+            local_storage_path: Signal::new(" /data/images ".to_string()),
+            mail_enabled: Signal::new(true),
+            mail_smtp_host: Signal::new(" smtp.example.com ".to_string()),
+            mail_smtp_port: Signal::new(" 587 ".to_string()),
+            mail_smtp_user: Signal::new(" mailer ".to_string()),
+            mail_smtp_password: Signal::new(" ".to_string()),
+            mail_smtp_password_set: Signal::new(true),
+            mail_from_email: Signal::new(" noreply@example.com ".to_string()),
+            mail_from_name: Signal::new(" Avenrixa ".to_string()),
+            mail_link_base_url: Signal::new(" https://img.example.com ".to_string()),
+        })
+    }
+
+    #[test]
+    fn validate_allows_reusing_existing_smtp_password_when_user_is_present() {
+        let harness = sample_form_harness();
+        let form = harness.form;
+
+        assert!(form.validate().is_ok());
+    }
+
+    #[test]
+    fn build_update_request_trims_values_and_preserves_expected_version() {
+        let harness = sample_form_harness();
+        let form = harness.form;
+
+        let request = form.build_update_request(Some("version-123".to_string()));
+
+        assert_eq!(
+            request.expected_settings_version.as_deref(),
+            Some("version-123")
+        );
+        assert_eq!(request.site_name, "Avenrixa Console");
+        assert_eq!(request.storage_backend, StorageBackendKind::Local);
+        assert_eq!(request.local_storage_path, "/data/images");
+        assert_eq!(request.mail_smtp_host, "smtp.example.com");
+        assert_eq!(request.mail_smtp_port, Some(587));
+        assert_eq!(request.mail_smtp_user.as_deref(), Some("mailer"));
+        assert_eq!(request.mail_smtp_password, None);
+        assert_eq!(request.mail_from_email, "noreply@example.com");
+        assert_eq!(request.mail_from_name, "Avenrixa");
+        assert_eq!(request.mail_link_base_url, "https://img.example.com");
+    }
+
+    #[test]
+    fn build_update_request_omits_blank_optional_mail_fields() {
+        let harness = TestSettingsFormHarness::new(|| SettingsFormState {
+            site_name: Signal::new("Avenrixa".to_string()),
+            storage_backend: Signal::new(StorageBackendKind::Local),
+            local_storage_path: Signal::new("/data/images".to_string()),
+            mail_enabled: Signal::new(false),
+            mail_smtp_host: Signal::new(String::new()),
+            mail_smtp_port: Signal::new("".to_string()),
+            mail_smtp_user: Signal::new("   ".to_string()),
+            mail_smtp_password: Signal::new("   ".to_string()),
+            mail_smtp_password_set: Signal::new(false),
+            mail_from_email: Signal::new(String::new()),
+            mail_from_name: Signal::new("".to_string()),
+            mail_link_base_url: Signal::new(String::new()),
+        });
+        let form = harness.form;
+
+        let request = form.build_update_request(None);
+
+        assert_eq!(request.expected_settings_version, None);
+        assert_eq!(request.mail_smtp_port, None);
+        assert_eq!(request.mail_smtp_user, None);
+        assert_eq!(request.mail_smtp_password, None);
+    }
+}

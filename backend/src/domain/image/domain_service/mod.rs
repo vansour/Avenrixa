@@ -19,13 +19,13 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use super::repository::ImageRepository;
-use crate::audit::log_audit_db;
 use crate::cache::{Cache, CacheConnection, HashCache, ImageCache};
 use crate::config::Config;
 use crate::db::DatabasePool;
 use crate::error::AppError;
 use crate::image_processor::ImageProcessor;
 use crate::models::{CursorPaginated, Image};
+use crate::observability::RuntimeObservability;
 use crate::storage_backend::StorageManager;
 use tracing::{info, warn};
 
@@ -49,6 +49,7 @@ pub struct ImageDomainServiceDependencies {
     pub config: Config,
     pub image_processor: ImageProcessor,
     pub storage_manager: Arc<StorageManager>,
+    pub observability: Arc<RuntimeObservability>,
 }
 
 impl ImageDomainServiceDependencies {
@@ -58,6 +59,7 @@ impl ImageDomainServiceDependencies {
         config: Config,
         image_processor: ImageProcessor,
         storage_manager: Arc<StorageManager>,
+        observability: Arc<RuntimeObservability>,
     ) -> Self {
         Self {
             database,
@@ -65,6 +67,7 @@ impl ImageDomainServiceDependencies {
             config,
             image_processor,
             storage_manager,
+            observability,
         }
     }
 }
@@ -77,4 +80,5 @@ pub struct ImageDomainService<I: ImageRepository> {
     image_repository: I,
     image_processor: ImageProcessor,
     storage_manager: Arc<StorageManager>,
+    observability: Arc<RuntimeObservability>,
 }

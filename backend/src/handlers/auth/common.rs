@@ -250,6 +250,8 @@ pub(super) async fn ensure_app_installed(state: &AppState) -> Result<(), AppErro
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::Config;
+    use axum::http::header::SET_COOKIE;
 
     #[test]
     fn read_cookie_returns_named_cookie_value() {
@@ -271,5 +273,60 @@ mod tests {
         headers.insert(header::COOKIE, HeaderValue::from_static("foo=bar"));
 
         assert_eq!(read_cookie(&headers, AUTH_TOKEN_COOKIE_NAME), None);
+    }
+
+    #[test]
+    fn append_session_cookies_writes_auth_and_refresh_headers() {
+        let mut headers = HeaderMap::new();
+        let cookie_config = Config::default().cookie;
+
+        append_session_cookies(&mut headers, &cookie_config, "access", 60, "refresh", 120)
+            .expect("session cookies should be written");
+
+        let cookies = headers.get_all(SET_COOKIE).iter().collect::<Vec<_>>();
+        assert_eq!(cookies.len(), 2);
+
+        let auth_cookie = cookies[0]
+            .to_str()
+            .expect("auth cookie header should be valid");
+        let refresh_cookie = cookies[1]
+            .to_str()
+            .expect("refresh cookie header should be valid");
+
+        assert!(auth_cookie.starts_with("auth_token=access;"));
+        assert!(auth_cookie.contains("HttpOnly"));
+        assert!(auth_cookie.contains("SameSite=Strict"));
+        assert!(auth_cookie.contains("Path=/"));
+        assert!(auth_cookie.contains("Max-Age=60"));
+
+        assert!(refresh_cookie.starts_with("refresh_token=refresh;"));
+        assert!(refresh_cookie.contains("HttpOnly"));
+        assert!(refresh_cookie.contains("SameSite=Strict"));
+        assert!(refresh_cookie.contains("Max-Age=120"));
+    }
+
+    #[test]
+    fn append_cleared_session_cookies_sets_zero_max_age() {
+        let mut headers = HeaderMap::new();
+        let cookie_config = Config::default().cookie;
+
+        append_cleared_session_cookies(&mut headers, &cookie_config)
+            .expect("cleared cookies should be written");
+
+        let cookies = headers
+            .get_all(SET_COOKIE)
+            .iter()
+            .map(|value| value.to_str().expect("cookie header should be valid"))
+            .collect::<Vec<_>>();
+
+        assert_eq!(cookies.len(), 2);
+        assert!(
+            cookies.iter().any(|cookie| {
+                cookie.starts_with("auth_token=;") && cookie.contains("Max-Age=0")
+            })
+        );
+        assert!(cookies.iter().any(|cookie| {
+            cookie.starts_with("refresh_token=;") && cookie.contains("Max-Age=0")
+        }));
     }
 }

@@ -53,6 +53,10 @@ pub async fn bootstrap_health_check(
             message: Some("Bootstrap 模式未启用外部缓存".to_string()),
         },
         storage: ComponentStatus::healthy(),
+        observability: ComponentStatus {
+            status: HealthState::Disabled,
+            message: Some("Bootstrap 模式尚未启用运行态指标".to_string()),
+        },
         version: None,
         uptime_seconds: Some(state.started_at.elapsed().as_secs()),
         metrics: None,

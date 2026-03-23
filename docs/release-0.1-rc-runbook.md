@@ -13,7 +13,7 @@
 GitHub Actions 触发方式：
 
 - `.github/workflows/release-rc-preflight.yml`
-- 推送 RC tag 时会自动触发，例如 `v0.1.2-rc.2`
+- 推送 RC tag 时会自动触发，例如 `v0.1.2-rc.3`
 - 手动触发时必须位于 `main`
 - 默认发布到 `ghcr.io/<repository_owner>/avenrixa:<version>`，并追加 `ghcr.io/<repository_owner>/avenrixa:rc`
 - workflow 成功后会自动创建或更新对应的 GitHub Pre-release
@@ -30,9 +30,9 @@ GitHub Actions 触发方式：
 
 ## 当前候选版
 
-- 版本示例：`0.1.2-rc.2`
-- 本地默认镜像引用：`ghcr.io/vansour/avenrixa:0.1.2-rc.2`
-- GitHub Actions 默认发布引用：`ghcr.io/<repository_owner>/avenrixa:0.1.2-rc.2`
+- 版本示例：`0.1.2-rc.3`
+- 本地默认镜像引用：`ghcr.io/vansour/avenrixa:0.1.2-rc.3`
+- GitHub Actions 默认发布引用：`ghcr.io/<repository_owner>/avenrixa:0.1.2-rc.3`
 - GitHub Actions 默认滚动 RC 标签：`ghcr.io/<repository_owner>/avenrixa:rc`
 
 ## 常用参数

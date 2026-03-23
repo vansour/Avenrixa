@@ -13,7 +13,7 @@
 - 后台页面里的 `backup_*.sql`：继续作为下载型逻辑导出
 - `scripts/postgres-ops-backup.sh` / `scripts/postgres-ops-restore.sh`：企业主路径物理备份、恢复与 PITR
 
-页面内恢复当前仍不支持 PostgreSQL；企业主路径恢复统一走运维脚本。
+页面内恢复当前仍不支持 PostgreSQL，且页面恢复接口不再暴露；企业主路径恢复统一走运维脚本。
 
 ### 1.1 GA 发布 smoke
 
@@ -31,7 +31,7 @@
 - 图片上传、过期时间写入、永久删除
 - `settings/config` 结构化设置更新与持久化
 - `/stats`、`/health`、`/audit-logs` 基本验收
-- PostgreSQL 逻辑备份下载链路，以及“仅下载、不支持页面恢复”的语义校验
+- PostgreSQL 逻辑备份下载链路，以及“页面恢复接口未暴露”的边界校验
 
 默认情况下它会重建 `./data`。如果你要复用现有目录，再显式加上：
 

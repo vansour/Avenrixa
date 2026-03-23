@@ -3,6 +3,7 @@ mod files;
 
 use chrono::Utc;
 use std::process::Stdio;
+use std::time::Instant;
 use tokio::process::Command;
 use tracing::{error, info};
 use uuid::Uuid;
@@ -13,7 +14,7 @@ use self::files::{
     persist_backup_manifest,
 };
 use super::AdminDomainService;
-use crate::audit::log_audit_db;
+use crate::audit::{AuditEvent, record_audit_best_effort};
 use crate::backup_manifest::backup_directory;
 use crate::config::DatabaseKind;
 use crate::db::DatabasePool;
@@ -22,24 +23,20 @@ use crate::models::{
     BackupFileSummary, BackupResponse, backup_semantics_from_database_kind, infer_backup_semantics,
 };
 
-fn spawn_backup_audit(
+fn dispatch_backup_audit(
     database: DatabasePool,
+    observability: std::sync::Arc<crate::observability::RuntimeObservability>,
     admin_user_id: Uuid,
     action: &'static str,
     details: serde_json::Value,
 ) {
-    tokio::spawn(async move {
-        log_audit_db(
-            &database,
-            Some(admin_user_id),
-            action,
-            "maintenance",
-            None,
-            None,
-            Some(details),
-        )
-        .await;
-    });
+    record_audit_best_effort(
+        database,
+        observability,
+        AuditEvent::new(action, "maintenance")
+            .with_user_id(admin_user_id)
+            .with_details(details),
+    );
 }
 
 impl AdminDomainService {
@@ -96,38 +93,64 @@ impl AdminDomainService {
         admin_user_id: Uuid,
         admin_email: &str,
     ) -> Result<BackupResponse, AppError> {
-        tokio::fs::create_dir_all(backup_directory()).await?;
-        let storage_settings = self.storage_manager.active_settings().storage_settings();
+        let started_at = Instant::now();
+        let result = async {
+            tokio::fs::create_dir_all(backup_directory()).await?;
+            let storage_settings = self.storage_manager.active_settings().storage_settings();
 
-        match &self.database {
-            DatabasePool::Postgres(_) => {
-                let semantics = backup_semantics_from_database_kind(DatabaseKind::Postgres);
-                let filename = format!("backup_{}.sql", Uuid::new_v4());
-                let backup_path = backup_path(&filename)?;
-                let database = self.database.clone();
-                let database_url = &self.config.database.url;
-                let dump_bin = pg_dump_binary().map_err(AppError::Internal)?;
-                let mut command = Command::new(&dump_bin);
-                command
-                    .arg("--dbname")
-                    .arg(database_url)
-                    .arg("--format=plain")
-                    .arg("--no-owner")
-                    .arg("--no-acl")
-                    .stdout(Stdio::piped())
-                    .stderr(Stdio::piped());
+            match &self.database {
+                DatabasePool::Postgres(_) => {
+                    let semantics = backup_semantics_from_database_kind(DatabaseKind::Postgres);
+                    let filename = format!("backup_{}.sql", Uuid::new_v4());
+                    let backup_path = backup_path(&filename)?;
+                    let database = self.database.clone();
+                    let observability = self.observability.clone();
+                    let database_url = &self.config.database.url;
+                    let dump_bin = pg_dump_binary().map_err(AppError::Internal)?;
+                    let mut command = Command::new(&dump_bin);
+                    command
+                        .arg("--dbname")
+                        .arg(database_url)
+                        .arg("--format=plain")
+                        .arg("--no-owner")
+                        .arg("--no-acl")
+                        .stdout(Stdio::piped())
+                        .stderr(Stdio::piped());
 
-                let warning_excerpt =
-                    match run_streaming_dump_command("pg_dump", command, &backup_path).await {
-                        Ok(outcome) => outcome.stderr_excerpt,
+                    let warning_excerpt =
+                        match run_streaming_dump_command("pg_dump", command, &backup_path).await {
+                            Ok(outcome) => outcome.stderr_excerpt,
+                            Err(error) => {
+                                error!("pg_dump backup failed: {}", error);
+                                dispatch_backup_audit(
+                                    database,
+                                    observability,
+                                    admin_user_id,
+                                    "admin.maintenance.database_backup.failed",
+                                    serde_json::json!({
+                                        "admin_email": admin_email,
+                                        "error": error.to_string(),
+                                        "result": "failed",
+                                        "risk_level": "info",
+                                        "database_kind": "postgresql",
+                                    }),
+                                );
+                                return Err(AppError::Internal(error));
+                            }
+                        };
+
+                    let backup_size_bytes = match ensure_nonempty_backup_file(&backup_path).await {
+                        Ok(size) => size,
                         Err(error) => {
-                            error!("pg_dump backup failed: {}", error);
-                            spawn_backup_audit(
-                                database,
+                            let _ = tokio::fs::remove_file(&backup_path).await;
+                            dispatch_backup_audit(
+                                self.database.clone(),
+                                self.observability.clone(),
                                 admin_user_id,
                                 "admin.maintenance.database_backup.failed",
                                 serde_json::json!({
                                     "admin_email": admin_email,
+                                    "filename": filename,
                                     "error": error.to_string(),
                                     "result": "failed",
                                     "risk_level": "info",
@@ -138,12 +161,20 @@ impl AdminDomainService {
                         }
                     };
 
-                let backup_size_bytes = match ensure_nonempty_backup_file(&backup_path).await {
-                    Ok(size) => size,
-                    Err(error) => {
+                    let created_at = Utc::now();
+                    if let Err(error) = persist_backup_manifest(
+                        &filename,
+                        DatabaseKind::Postgres,
+                        semantics.clone(),
+                        created_at,
+                        &storage_settings,
+                    )
+                    .await
+                    {
                         let _ = tokio::fs::remove_file(&backup_path).await;
-                        spawn_backup_audit(
+                        dispatch_backup_audit(
                             self.database.clone(),
+                            self.observability.clone(),
                             admin_user_id,
                             "admin.maintenance.database_backup.failed",
                             serde_json::json!({
@@ -157,62 +188,48 @@ impl AdminDomainService {
                         );
                         return Err(AppError::Internal(error));
                     }
-                };
 
-                let created_at = Utc::now();
-                if let Err(error) = persist_backup_manifest(
-                    &filename,
-                    DatabaseKind::Postgres,
-                    semantics.clone(),
-                    created_at,
-                    &storage_settings,
-                )
-                .await
-                {
-                    let _ = tokio::fs::remove_file(&backup_path).await;
-                    spawn_backup_audit(
+                    info!("Database backup created: {} by {}", filename, admin_email);
+                    dispatch_backup_audit(
                         self.database.clone(),
+                        self.observability.clone(),
                         admin_user_id,
-                        "admin.maintenance.database_backup.failed",
+                        "admin.maintenance.database_backup.created",
                         serde_json::json!({
                             "admin_email": admin_email,
                             "filename": filename,
-                            "error": error.to_string(),
-                            "result": "failed",
+                            "result": "completed",
                             "risk_level": "info",
                             "database_kind": "postgresql",
+                            "backup_kind": semantics.backup_kind.clone(),
+                            "backup_scope": semantics.backup_scope.clone(),
+                            "restore_mode": semantics.restore_mode.clone(),
+                            "ui_restore_supported": semantics.ui_restore_supported,
+                            "backup_size_bytes": backup_size_bytes,
+                            "warning_excerpt": warning_excerpt,
                         }),
                     );
-                    return Err(AppError::Internal(error));
+
+                    Ok(BackupResponse {
+                        filename,
+                        created_at,
+                        semantics,
+                    })
                 }
-
-                info!("Database backup created: {} by {}", filename, admin_email);
-                spawn_backup_audit(
-                    self.database.clone(),
-                    admin_user_id,
-                    "admin.maintenance.database_backup.created",
-                    serde_json::json!({
-                        "admin_email": admin_email,
-                        "filename": filename,
-                        "result": "completed",
-                        "risk_level": "info",
-                        "database_kind": "postgresql",
-                        "backup_kind": semantics.backup_kind.clone(),
-                        "backup_scope": semantics.backup_scope.clone(),
-                        "restore_mode": semantics.restore_mode.clone(),
-                        "ui_restore_supported": semantics.ui_restore_supported,
-                        "backup_size_bytes": backup_size_bytes,
-                        "warning_excerpt": warning_excerpt,
-                    }),
-                );
-
-                Ok(BackupResponse {
-                    filename,
-                    created_at,
-                    semantics,
-                })
             }
         }
+        .await;
+
+        match &result {
+            Ok(_) => self
+                .observability
+                .record_backup_success(started_at.elapsed()),
+            Err(error) => self
+                .observability
+                .record_backup_failure(started_at.elapsed(), error.to_string()),
+        }
+
+        result
     }
 
     pub async fn download_backup(
@@ -230,8 +247,9 @@ impl AdminDomainService {
             Err(error) => return Err(AppError::IoError(error)),
         };
 
-        spawn_backup_audit(
+        dispatch_backup_audit(
             self.database.clone(),
+            self.observability.clone(),
             admin_user_id,
             "admin.maintenance.database_backup.downloaded",
             serde_json::json!({
@@ -256,8 +274,9 @@ impl AdminDomainService {
         let size_bytes = match tokio::fs::metadata(&backup_path).await {
             Ok(metadata) => metadata.len(),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                spawn_backup_audit(
+                dispatch_backup_audit(
                     self.database.clone(),
+                    self.observability.clone(),
                     admin_user_id,
                     "admin.maintenance.database_backup.delete_failed",
                     serde_json::json!({
@@ -271,8 +290,9 @@ impl AdminDomainService {
                 return Err(AppError::BackupNotFound);
             }
             Err(error) => {
-                spawn_backup_audit(
+                dispatch_backup_audit(
                     self.database.clone(),
+                    self.observability.clone(),
                     admin_user_id,
                     "admin.maintenance.database_backup.delete_failed",
                     serde_json::json!({
@@ -289,8 +309,9 @@ impl AdminDomainService {
 
         match tokio::fs::remove_file(&backup_path).await {
             Ok(()) => {
-                spawn_backup_audit(
+                dispatch_backup_audit(
                     self.database.clone(),
+                    self.observability.clone(),
                     admin_user_id,
                     "admin.maintenance.database_backup.deleted",
                     serde_json::json!({
@@ -304,8 +325,9 @@ impl AdminDomainService {
                 Ok(())
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                spawn_backup_audit(
+                dispatch_backup_audit(
                     self.database.clone(),
+                    self.observability.clone(),
                     admin_user_id,
                     "admin.maintenance.database_backup.delete_failed",
                     serde_json::json!({
@@ -319,8 +341,9 @@ impl AdminDomainService {
                 Err(AppError::BackupNotFound)
             }
             Err(error) => {
-                spawn_backup_audit(
+                dispatch_backup_audit(
                     self.database.clone(),
+                    self.observability.clone(),
                     admin_user_id,
                     "admin.maintenance.database_backup.delete_failed",
                     serde_json::json!({
@@ -341,6 +364,7 @@ impl AdminDomainService {
 mod tests {
     use super::*;
     use crate::config::{Config, DatabaseKind};
+    use crate::observability::RuntimeObservability;
     use crate::runtime_settings::{RuntimeSettings, StorageBackend};
     use crate::storage_backend::StorageManager;
     use std::ffi::OsString;
@@ -431,7 +455,13 @@ mod tests {
             config.storage.path.clone(),
         )));
 
-        AdminDomainService::new(database, None, config, storage_manager)
+        AdminDomainService::new(
+            database,
+            None,
+            config,
+            storage_manager,
+            Arc::new(RuntimeObservability::new()),
+        )
     }
 
     fn write_script(path: &Path, body: &str) {

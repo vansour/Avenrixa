@@ -18,6 +18,7 @@ impl<I: ImageRepository> ImageDomainService<I> {
             image_repository,
             image_processor: deps.image_processor,
             storage_manager: deps.storage_manager,
+            observability: deps.observability,
         }
     }
 

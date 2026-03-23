@@ -32,7 +32,6 @@ pub(crate) fn maintenance_confirmation_plan(action: MaintenanceAction) -> Confir
             confirm_phrase: Some(filename.clone()),
             confirm_hint: Some(format!("请输入 {} 以确认删除", filename)),
         },
-        MaintenanceAction::RestoreBackup(_) => unreachable!("restore confirmation uses precheck"),
     }
 }
 

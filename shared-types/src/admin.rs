@@ -155,9 +155,49 @@ impl ComponentStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RuntimeOperationMetrics {
+    pub total_successes: u64,
+    pub total_failures: u64,
+    pub last_duration_ms: Option<u64>,
+    pub average_duration_ms: Option<u64>,
+    pub max_duration_ms: Option<u64>,
+    pub last_success_at: Option<DateTime<Utc>>,
+    pub last_failure_at: Option<DateTime<Utc>>,
+    pub last_error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BackgroundTaskMetrics {
+    pub task_name: String,
+    pub total_runs: u64,
+    pub total_failures: u64,
+    pub consecutive_failures: u64,
+    pub last_duration_ms: Option<u64>,
+    pub last_success_at: Option<DateTime<Utc>>,
+    pub last_failure_at: Option<DateTime<Utc>>,
+    pub last_error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RuntimeBacklogMetrics {
+    pub storage_cleanup_pending: i64,
+    pub storage_cleanup_retrying: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RuntimeObservabilitySnapshot {
+    pub audit_writes: RuntimeOperationMetrics,
+    pub auth_refresh: RuntimeOperationMetrics,
+    pub image_processing: RuntimeOperationMetrics,
+    pub backups: RuntimeOperationMetrics,
+    pub background_tasks: Vec<BackgroundTaskMetrics>,
+    pub backlog: RuntimeBacklogMetrics,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HealthMetrics {
-    pub images_count: i64,
-    pub users_count: i64,
+    pub images_count: Option<i64>,
+    pub users_count: Option<i64>,
     pub storage_used_mb: Option<f64>,
 }
 
@@ -168,6 +208,7 @@ pub struct HealthStatus {
     pub database: ComponentStatus,
     pub cache: ComponentStatus,
     pub storage: ComponentStatus,
+    pub observability: ComponentStatus,
     pub version: Option<String>,
     pub uptime_seconds: Option<u64>,
     pub metrics: Option<HealthMetrics>,
@@ -181,4 +222,5 @@ pub struct SystemStats {
     pub total_views: i64,
     pub images_last_24h: i64,
     pub images_last_7d: i64,
+    pub runtime: RuntimeObservabilitySnapshot,
 }

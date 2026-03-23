@@ -12,7 +12,7 @@ use self::transactions::{
     InstallPersistenceInput, InstallRollbackInput, persist_installation,
     rollback_failed_installation,
 };
-use crate::audit::log_audit_db;
+use crate::audit::{AuditEvent, record_audit_sync};
 use crate::db::{
     AppState, INSTALL_STATE_SETTING_KEY, SITE_FAVICON_DATA_URL_SETTING_KEY, get_setting_value,
     has_admin_account, is_app_installed, validate_admin_bootstrap_config,
@@ -190,20 +190,19 @@ pub async fn bootstrap_installation(
         state.auth.session_ttl_seconds(),
     )?;
 
-    log_audit_db(
+    record_audit_sync(
         &state.database,
-        Some(user_response.id),
-        "system.install_completed",
-        "system",
-        Some(user_response.id),
-        None,
-        Some(serde_json::json!({
-            "admin_email": user_response.email,
-            "site_name": settings.site_name,
-            "storage_backend": settings.storage_backend.as_str(),
-            "mail_enabled": settings.mail_enabled,
-            "favicon_configured": favicon_data_url.is_some(),
-        })),
+        state.observability.as_ref(),
+        AuditEvent::new("system.install_completed", "system")
+            .with_user_id(user_response.id)
+            .with_target_id(user_response.id)
+            .with_details(serde_json::json!({
+                "admin_email": user_response.email,
+                "site_name": settings.site_name,
+                "storage_backend": settings.storage_backend.as_str(),
+                "mail_enabled": settings.mail_enabled,
+                "favicon_configured": favicon_data_url.is_some(),
+            })),
     )
     .await;
 
@@ -306,6 +305,7 @@ mod tests {
     use super::*;
     use crate::models::StorageBackendKind;
     use crate::runtime_settings::StorageBackend;
+    use base64::Engine;
 
     fn sample_runtime_settings() -> RuntimeSettings {
         RuntimeSettings {
@@ -350,5 +350,45 @@ mod tests {
         assert!(config.mail_from_email.is_empty());
         assert!(!config.restart_required);
         assert!(config.settings_version.is_empty());
+    }
+
+    #[test]
+    fn validate_favicon_data_url_accepts_supported_payload_and_normalizes_output() {
+        let payload = base64::engine::general_purpose::STANDARD.encode([0_u8, 1, 2, 3]);
+        let normalized =
+            validate_favicon_data_url(Some(format!("data:image/png;base64,{payload}")))
+                .expect("favicon should validate")
+                .expect("favicon should be preserved");
+
+        assert_eq!(normalized, format!("data:image/png;base64,{payload}"));
+    }
+
+    #[test]
+    fn validate_favicon_data_url_rejects_unsupported_mime() {
+        let payload = base64::engine::general_purpose::STANDARD.encode([0_u8, 1, 2, 3]);
+        let err = validate_favicon_data_url(Some(format!("data:text/plain;base64,{payload}")))
+            .expect_err("unsupported mime should fail");
+
+        match err {
+            AppError::ValidationError(message) => {
+                assert!(message.contains("仅支持 ico/png/svg/jpeg/webp"));
+            }
+            other => panic!("expected validation error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn validate_favicon_data_url_rejects_oversized_payload() {
+        let payload =
+            base64::engine::general_purpose::STANDARD.encode(vec![7_u8; MAX_FAVICON_BYTES + 1]);
+        let err = validate_favicon_data_url(Some(format!("data:image/png;base64,{payload}")))
+            .expect_err("oversized favicon should fail");
+
+        match err {
+            AppError::ValidationError(message) => {
+                assert!(message.contains("网站图标不能超过"));
+            }
+            other => panic!("expected validation error, got {other:?}"),
+        }
     }
 }

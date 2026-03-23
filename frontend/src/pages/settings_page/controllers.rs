@@ -15,7 +15,6 @@ pub use users::UsersSectionController;
 
 pub(super) use shared::{
     MaintenanceAction, PendingMaintenanceAction, PendingUserRoleChange,
-    maintenance_confirmation_plan, merge_messages, restore_confirmation_plan,
-    restore_precheck_error_message, role_change_confirmation_plan, set_settings_action_error,
-    set_settings_load_error,
+    maintenance_confirmation_plan, merge_messages, role_change_confirmation_plan,
+    set_settings_action_error, set_settings_load_error,
 };

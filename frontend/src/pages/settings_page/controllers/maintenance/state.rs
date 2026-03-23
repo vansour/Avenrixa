@@ -1,5 +1,5 @@
 use crate::services::AdminService;
-use crate::types::api::{BackupFileSummary, BackupResponse, BackupRestoreStatusResponse};
+use crate::types::api::{BackupFileSummary, BackupResponse};
 use dioxus::prelude::*;
 
 use super::super::{MaintenanceAction, PendingMaintenanceAction, maintenance_confirmation_plan};
@@ -9,20 +9,15 @@ use super::helpers::{build_backup_downloads, combined_error_message, is_maintena
 pub(super) struct MaintenanceState {
     pub(super) error_message: Signal<String>,
     pub(super) backup_list_error_message: Signal<String>,
-    pub(super) restore_status_error_message: Signal<String>,
     pub(super) success_message: Signal<String>,
     pub(super) last_backup: Signal<Option<BackupResponse>>,
     pub(super) backup_files: Signal<Vec<BackupFileSummary>>,
-    pub(super) restore_status: Signal<Option<BackupRestoreStatusResponse>>,
     pub(super) last_expired_cleanup_count: Signal<Option<i64>>,
     pub(super) is_cleaning_expired: Signal<bool>,
     pub(super) is_backing_up: Signal<bool>,
     pub(super) deleting_backup_filename: Signal<Option<String>>,
-    pub(super) processing_restore_filename: Signal<Option<String>>,
     pub(super) is_loading_backups: Signal<bool>,
-    pub(super) is_loading_restore_status: Signal<bool>,
     pub(super) reload_backups_tick: Signal<u64>,
-    pub(super) reload_restore_status_tick: Signal<u64>,
     pub(super) pending_action: Signal<Option<PendingMaintenanceAction>>,
 }
 
@@ -30,20 +25,15 @@ pub(super) fn use_maintenance_state() -> MaintenanceState {
     MaintenanceState {
         error_message: use_signal(String::new),
         backup_list_error_message: use_signal(String::new),
-        restore_status_error_message: use_signal(String::new),
         success_message: use_signal(String::new),
         last_backup: use_signal(|| None::<BackupResponse>),
         backup_files: use_signal(Vec::<BackupFileSummary>::new),
-        restore_status: use_signal(|| None::<BackupRestoreStatusResponse>),
         last_expired_cleanup_count: use_signal(|| None::<i64>),
         is_cleaning_expired: use_signal(|| false),
         is_backing_up: use_signal(|| false),
         deleting_backup_filename: use_signal(|| None::<String>),
-        processing_restore_filename: use_signal(|| None::<String>),
         is_loading_backups: use_signal(|| false),
-        is_loading_restore_status: use_signal(|| false),
         reload_backups_tick: use_signal(|| 0_u64),
-        reload_restore_status_tick: use_signal(|| 0_u64),
         pending_action: use_signal(|| None::<PendingMaintenanceAction>),
     }
 }
@@ -54,16 +44,11 @@ impl MaintenanceState {
             self.is_cleaning_expired,
             self.is_backing_up,
             self.deleting_backup_filename,
-            self.processing_restore_filename,
         )
     }
 
     pub(super) fn combined_error_message(self) -> String {
-        combined_error_message(
-            self.error_message,
-            self.backup_list_error_message,
-            self.restore_status_error_message,
-        )
+        combined_error_message(self.error_message, self.backup_list_error_message)
     }
 
     pub(super) fn backup_downloads(
@@ -81,11 +66,6 @@ impl MaintenanceState {
     pub(super) fn last_backup(self) -> Option<BackupResponse> {
         let last_backup = self.last_backup;
         last_backup()
-    }
-
-    pub(super) fn restore_status(self) -> Option<BackupRestoreStatusResponse> {
-        let restore_status = self.restore_status;
-        restore_status()
     }
 
     pub(super) fn last_expired_cleanup_count(self) -> Option<i64> {
@@ -108,19 +88,9 @@ impl MaintenanceState {
         deleting_backup_filename()
     }
 
-    pub(super) fn processing_restore_filename(self) -> Option<String> {
-        let processing_restore_filename = self.processing_restore_filename;
-        processing_restore_filename()
-    }
-
     pub(super) fn is_loading_backups(self) -> bool {
         let is_loading_backups = self.is_loading_backups;
         is_loading_backups()
-    }
-
-    pub(super) fn is_loading_restore_status(self) -> bool {
-        let is_loading_restore_status = self.is_loading_restore_status;
-        is_loading_restore_status()
     }
 
     pub(super) fn request_cleanup_confirmation(self) {
@@ -143,11 +113,6 @@ impl MaintenanceState {
     pub(super) fn refresh_backups(self) {
         let mut reload_backups_tick = self.reload_backups_tick;
         reload_backups_tick.set(reload_backups_tick().wrapping_add(1));
-    }
-
-    pub(super) fn refresh_restore_status(self) {
-        let mut reload_restore_status_tick = self.reload_restore_status_tick;
-        reload_restore_status_tick.set(reload_restore_status_tick().wrapping_add(1));
     }
 
     pub(super) fn clear_pending_action(self) {

@@ -1,5 +1,5 @@
 use super::common::admin_service;
-use crate::audit::log_audit_db;
+use crate::audit::{AuditEvent, record_audit_sync};
 use crate::db::AppState;
 use crate::error::AppError;
 use crate::middleware::AdminUser;
@@ -35,20 +35,19 @@ pub async fn update_user_role(
             } else {
                 "warning"
             };
-            log_audit_db(
+            record_audit_sync(
                 &state.database,
-                Some(admin_user.id),
-                "admin.user.role_updated",
-                "user",
-                Some(id),
-                None,
-                Some(serde_json::json!({
-                    "admin_email": admin_user.email,
-                    "user_email": result.email,
-                    "previous_role": result.previous_role,
-                    "new_role": result.new_role,
-                    "risk_level": risk_level,
-                })),
+                state.observability.as_ref(),
+                AuditEvent::new("admin.user.role_updated", "user")
+                    .with_user_id(admin_user.id)
+                    .with_target_id(id)
+                    .with_details(serde_json::json!({
+                        "admin_email": admin_user.email,
+                        "user_email": result.email,
+                        "previous_role": result.previous_role,
+                        "new_role": result.new_role,
+                        "risk_level": risk_level,
+                    })),
             )
             .await;
         }

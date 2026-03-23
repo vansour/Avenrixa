@@ -2,7 +2,7 @@ use super::common::{
     REFRESH_TOKEN_COOKIE_NAME, append_cleared_session_cookies, auth_domain_service, read_cookie,
     revoke_token,
 };
-use crate::audit::log_audit_db;
+use crate::audit::{AuditEvent, record_audit_sync};
 use crate::db::AppState;
 use crate::error::AppError;
 use crate::middleware::AuthUser;
@@ -30,14 +30,12 @@ pub async fn logout(
         revoke_token(&state, &refresh_token).await?;
     }
 
-    log_audit_db(
+    record_audit_sync(
         &state.database,
-        Some(auth_user.id),
-        "user.logout",
-        "user",
-        Some(auth_user.id),
-        None,
-        None,
+        state.observability.as_ref(),
+        AuditEvent::new("user.logout", "user")
+            .with_user_id(auth_user.id)
+            .with_target_id(auth_user.id),
     )
     .await;
 

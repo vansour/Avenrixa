@@ -4,6 +4,7 @@ use crate::db::DatabasePool;
 use crate::domain::image::mock_repository::MockImageRepository;
 use crate::image_processor::ImageProcessor;
 use crate::models::{ImageStatus, MediaBlob};
+use crate::observability::RuntimeObservability;
 use crate::runtime_settings::{RuntimeSettings, StorageBackend};
 use crate::storage_backend::StorageManager;
 use async_trait::async_trait;
@@ -52,6 +53,7 @@ async fn setup_service_with_repository<I: ImageRepository>(
         config,
         image_processor,
         storage_manager,
+        Arc::new(RuntimeObservability::new()),
     );
 
     TestServiceContext {
