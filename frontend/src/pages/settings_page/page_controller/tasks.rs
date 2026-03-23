@@ -73,7 +73,7 @@ pub(super) fn spawn_save_settings(
     let toast_store = controller.toast_store.clone();
     let mut loaded_config = controller.loaded_config;
     let mut form = controller.form;
-    let on_site_name_updated = controller.on_site_name_updated.clone();
+    let on_site_name_updated = controller.on_site_name_updated;
     let mut error_message = controller.error_message;
 
     spawn_tracked_action(controller.is_saving, controller.error_message, async move {

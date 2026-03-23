@@ -21,7 +21,7 @@ enum AppShellState {
     Bootstrap(BootstrapStatusResponse),
     Install {
         bootstrap: BootstrapStatusResponse,
-        status: InstallStatusResponse,
+        status: Box<InstallStatusResponse>,
     },
     Dashboard,
     Login {
@@ -30,6 +30,17 @@ enum AppShellState {
     InitError {
         message: &'static str,
     },
+}
+
+struct AppShellBootstrapContext {
+    install_service: InstallService,
+    auth_service: AuthService,
+    auth_store: AuthStore,
+    toast_store: ToastStore,
+    bootstrap_status: Signal<Option<BootstrapStatusResponse>>,
+    site_name: Signal<String>,
+    install_status: Signal<Option<InstallStatusResponse>>,
+    is_boot_ready: Signal<bool>,
 }
 
 /// 应用程序入口组件
@@ -62,20 +73,18 @@ pub fn App() -> Element {
         let auth_store = auth_store.clone();
         let toast_store = toast_store.clone();
         let bootstrap_status = bootstrap_status;
-        let site_name = site_name;
-        let install_status = install_status;
         let boot_ready_signal = is_boot_ready;
         move || {
-            initialize_app_shell(
-                install_service.clone(),
-                auth_service.clone(),
-                auth_store.clone(),
-                toast_store.clone(),
+            initialize_app_shell(AppShellBootstrapContext {
+                install_service: install_service.clone(),
+                auth_service: auth_service.clone(),
+                auth_store: auth_store.clone(),
+                toast_store: toast_store.clone(),
                 bootstrap_status,
                 site_name,
                 install_status,
-                boot_ready_signal,
-            )
+                is_boot_ready: boot_ready_signal,
+            })
         }
     });
 
@@ -151,16 +160,18 @@ pub fn App() -> Element {
     }
 }
 
-async fn initialize_app_shell(
-    install_service: InstallService,
-    auth_service: AuthService,
-    auth_store: AuthStore,
-    toast_store: ToastStore,
-    mut bootstrap_status: Signal<Option<BootstrapStatusResponse>>,
-    mut site_name: Signal<String>,
-    mut install_status: Signal<Option<InstallStatusResponse>>,
-    mut is_boot_ready: Signal<bool>,
-) {
+async fn initialize_app_shell(context: AppShellBootstrapContext) {
+    let AppShellBootstrapContext {
+        install_service,
+        auth_service,
+        auth_store,
+        toast_store,
+        mut bootstrap_status,
+        mut site_name,
+        mut install_status,
+        mut is_boot_ready,
+    } = context;
+
     let status = match install_service.get_install_status().await {
         Ok(status) => status,
         Err(err) => {
@@ -253,9 +264,10 @@ fn resolve_app_shell(
         (Some(bootstrap), _) if bootstrap.mode == "bootstrap" => {
             AppShellState::Bootstrap(bootstrap)
         }
-        (Some(bootstrap), Some(status)) if !status.installed => {
-            AppShellState::Install { bootstrap, status }
-        }
+        (Some(bootstrap), Some(status)) if !status.installed => AppShellState::Install {
+            bootstrap,
+            status: Box::new(status),
+        },
         (Some(_), Some(status)) | (None, Some(status)) => {
             if status.installed && is_authenticated {
                 AppShellState::Dashboard
@@ -278,8 +290,8 @@ fn should_show_navbar(
     bootstrap_status: Option<&BootstrapStatusResponse>,
     install_status: Option<&InstallStatusResponse>,
 ) -> bool {
-    !bootstrap_status.is_some_and(|status| status.mode == "bootstrap")
-        && !install_status.is_some_and(|status| !status.installed)
+    bootstrap_status.is_none_or(|status| status.mode != "bootstrap")
+        && install_status.is_none_or(|status| status.installed)
 }
 
 fn render_booting_shell() -> Element {
