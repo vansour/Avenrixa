@@ -7,6 +7,8 @@ use crate::common::{HealthState, StorageBackendKind, UserRole};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AdminSettingsConfig {
     pub site_name: String,
+    #[serde(default)]
+    pub favicon_configured: bool,
     pub storage_backend: StorageBackendKind,
     pub local_storage_path: String,
     pub mail_enabled: bool,
@@ -48,6 +50,10 @@ pub struct UpdateAdminSettingsConfigRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expected_settings_version: Option<String>,
     pub site_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub favicon_data_url: Option<String>,
+    #[serde(default)]
+    pub clear_favicon: bool,
     pub storage_backend: StorageBackendKind,
     pub local_storage_path: String,
     pub mail_enabled: bool,
@@ -182,6 +188,8 @@ pub struct BackgroundTaskMetrics {
 pub struct RuntimeBacklogMetrics {
     pub storage_cleanup_pending: i64,
     pub storage_cleanup_retrying: i64,
+    pub revoked_tokens_active: i64,
+    pub revoked_tokens_expired: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

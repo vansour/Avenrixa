@@ -189,11 +189,11 @@ impl AdminDomainService {
     pub(super) async fn collect_runtime_observability(
         &self,
     ) -> Result<RuntimeObservabilitySnapshot, AppError> {
-        let backlog = self.storage_cleanup_backlog().await?;
+        let backlog = self.runtime_backlog_metrics().await?;
         Ok(self.observability.snapshot(backlog))
     }
 
-    async fn storage_cleanup_backlog(&self) -> Result<RuntimeBacklogMetrics, AppError> {
+    async fn runtime_backlog_metrics(&self) -> Result<RuntimeBacklogMetrics, AppError> {
         match &self.database {
             DatabasePool::Postgres(pool) => Ok(RuntimeBacklogMetrics {
                 storage_cleanup_pending: sqlx::query_scalar(
@@ -203,6 +203,16 @@ impl AdminDomainService {
                 .await?,
                 storage_cleanup_retrying: sqlx::query_scalar(
                     "SELECT COUNT(*) FROM storage_cleanup_jobs WHERE attempts > 0 OR last_error IS NOT NULL",
+                )
+                .fetch_one(pool)
+                .await?,
+                revoked_tokens_active: sqlx::query_scalar(
+                    "SELECT COUNT(*) FROM revoked_tokens WHERE expires_at > NOW()",
+                )
+                .fetch_one(pool)
+                .await?,
+                revoked_tokens_expired: sqlx::query_scalar(
+                    "SELECT COUNT(*) FROM revoked_tokens WHERE expires_at <= NOW()",
                 )
                 .fetch_one(pool)
                 .await?,

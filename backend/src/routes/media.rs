@@ -1,11 +1,12 @@
 use crate::db::AppState;
 use crate::middleware::AuthUser;
-use axum::http::{StatusCode, header};
+use axum::http::{HeaderMap, StatusCode, header};
 use axum::{
     body::Body,
     extract::{Path, State},
     response::Response,
 };
+use tokio_util::io::ReaderStream;
 use tracing::error;
 
 const PRIVATE_MEDIA_CACHE_CONTROL: &str = "private, no-store, max-age=0";
@@ -23,20 +24,68 @@ fn is_valid_filename(value: &str) -> bool {
         && !value.contains("..")
 }
 
+#[cfg(test)]
 fn private_media_response(content_type: &str, etag: &str, body: Body) -> Response {
-    Response::builder()
-        .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, content_type)
+    private_media_response_with_status(StatusCode::OK, Some(content_type), etag, None, body)
+}
+
+fn private_media_streaming_response(
+    content_type: &str,
+    etag: &str,
+    content_length: u64,
+    body: Body,
+) -> Response {
+    private_media_response_with_status(
+        StatusCode::OK,
+        Some(content_type),
+        etag,
+        Some(content_length),
+        body,
+    )
+}
+
+fn private_media_not_modified_response(etag: &str) -> Response {
+    private_media_response_with_status(StatusCode::NOT_MODIFIED, None, etag, None, Body::empty())
+}
+
+fn private_media_response_with_status(
+    status: StatusCode,
+    content_type: Option<&str>,
+    etag: &str,
+    content_length: Option<u64>,
+    body: Body,
+) -> Response {
+    let mut builder = Response::builder()
+        .status(status)
         .header(header::CACHE_CONTROL, PRIVATE_MEDIA_CACHE_CONTROL)
         .header(header::VARY, PRIVATE_MEDIA_VARY)
         .header(header::ETAG, etag)
-        .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
-        .body(body)
-        .unwrap()
+        .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff");
+
+    if let Some(content_type) = content_type {
+        builder = builder.header(header::CONTENT_TYPE, content_type);
+    }
+
+    if let Some(content_length) = content_length {
+        builder = builder.header(header::CONTENT_LENGTH, content_length.to_string());
+    }
+
+    builder.body(body).unwrap()
+}
+
+fn if_none_match_matches(headers: &HeaderMap, etag: &str) -> bool {
+    headers
+        .get_all(header::IF_NONE_MATCH)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(','))
+        .map(str::trim)
+        .any(|candidate| candidate == "*" || candidate == etag)
 }
 
 pub(crate) async fn serve_thumbnail(
     Path(path_key): Path<String>,
+    headers: HeaderMap,
     auth_user: AuthUser,
     State(state): State<AppState>,
 ) -> Result<Response, StatusCode> {
@@ -66,15 +115,37 @@ pub(crate) async fn serve_thumbnail(
             }
         })?;
 
-    Ok(private_media_response(
+    if if_none_match_matches(&headers, &thumbnail.etag) {
+        return Ok(private_media_not_modified_response(&thumbnail.etag));
+    }
+
+    let handle = state
+        .storage_manager
+        .open_read(&thumbnail.file_key)
+        .await
+        .map_err(|error| {
+            error!(
+                "Failed to open thumbnail media stream for {}: {}",
+                thumbnail.file_key, error
+            );
+            match error {
+                crate::error::AppError::IoError(_) => StatusCode::NOT_FOUND,
+                crate::error::AppError::ValidationError(_) => StatusCode::UNPROCESSABLE_ENTITY,
+                _ => StatusCode::INTERNAL_SERVER_ERROR,
+            }
+        })?;
+
+    Ok(private_media_streaming_response(
         &thumbnail.content_type,
         &thumbnail.etag,
-        Body::from(thumbnail.data),
+        handle.content_length,
+        Body::from_stream(ReaderStream::new(handle.file)),
     ))
 }
 
 pub(crate) async fn serve_image(
     Path(filename): Path<String>,
+    headers: HeaderMap,
     auth_user: AuthUser,
     State(state): State<AppState>,
 ) -> Result<Response, StatusCode> {
@@ -96,16 +167,38 @@ pub(crate) async fn serve_image(
             }
         })?;
 
-    Ok(private_media_response(
+    if if_none_match_matches(&headers, &image.etag) {
+        return Ok(private_media_not_modified_response(&image.etag));
+    }
+
+    let handle = state
+        .storage_manager
+        .open_read(&image.file_key)
+        .await
+        .map_err(|error| {
+            error!(
+                "Failed to open image media stream for {}: {}",
+                filename, error
+            );
+            match error {
+                crate::error::AppError::IoError(_) => StatusCode::NOT_FOUND,
+                crate::error::AppError::ValidationError(_) => StatusCode::UNPROCESSABLE_ENTITY,
+                _ => StatusCode::INTERNAL_SERVER_ERROR,
+            }
+        })?;
+
+    Ok(private_media_streaming_response(
         &image.content_type,
         &image.etag,
-        Body::from(image.data),
+        handle.content_length,
+        Body::from_stream(ReaderStream::new(handle.file)),
     ))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::http::HeaderValue;
 
     #[test]
     fn private_media_response_uses_non_shared_cache_headers() {
@@ -130,6 +223,40 @@ mod tests {
         assert_eq!(
             response.headers().get(header::ETAG),
             Some(&axum::http::HeaderValue::from_static("\"etag-value\""))
+        );
+    }
+
+    #[test]
+    fn if_none_match_matches_exact_etag() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::IF_NONE_MATCH,
+            HeaderValue::from_static("\"etag-value\""),
+        );
+
+        assert!(if_none_match_matches(&headers, "\"etag-value\""));
+    }
+
+    #[test]
+    fn if_none_match_matches_wildcard() {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::IF_NONE_MATCH, HeaderValue::from_static("*"));
+
+        assert!(if_none_match_matches(&headers, "\"etag-value\""));
+    }
+
+    #[test]
+    fn private_media_not_modified_response_uses_304_and_etag() {
+        let response = private_media_not_modified_response("\"etag-value\"");
+
+        assert_eq!(response.status(), StatusCode::NOT_MODIFIED);
+        assert_eq!(
+            response.headers().get(header::ETAG),
+            Some(&HeaderValue::from_static("\"etag-value\""))
+        );
+        assert_eq!(
+            response.headers().get(header::CACHE_CONTROL),
+            Some(&HeaderValue::from_static(PRIVATE_MEDIA_CACHE_CONTROL))
         );
     }
 }

@@ -13,15 +13,24 @@ const config = {
   adminPassword: requiredEnv("ADMIN_PASSWORD"),
   adminNewPassword: process.env.ADMIN_NEW_PASSWORD || "Password123456!updated",
   siteName: process.env.SITE_NAME || "Browser Regression",
-  mysqlDatabaseUrl: requiredEnv("MYSQL_DATABASE_URL"),
+  bootstrapDatabaseUrl:
+    process.env.BROWSER_DATABASE_URL || process.env.POSTGRES_DATABASE_URL || "",
   backupFilename: process.env.BROWSER_BACKUP_FILENAME || "",
   storageStatePath: process.env.BROWSER_STORAGE_STATE_PATH || "",
   executablePath: process.env.BROWSER_EXECUTABLE_PATH || undefined,
   expectedDatabaseConnection: process.env.BROWSER_EXPECT_DATABASE_CONNECTION || "",
-  expectedCacheConnection: process.env.BROWSER_EXPECT_CACHE_CONNECTION || "",
   artifactDir:
     process.env.BROWSER_REGRESSION_ARTIFACT_DIR ||
     path.join(process.cwd(), "tmp", "browser-regression-artifacts"),
+};
+
+const UPLOAD_FIXTURE = {
+  name: "browser-regression-phase2.png",
+  mimeType: "image/png",
+  buffer: Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAAACklEQVR4nGNgAAAAAgABSK+kcQAAAABJRU5ErkJggg==",
+    "base64"
+  ),
 };
 
 function parseIntEnv(name, fallback) {
@@ -405,8 +414,31 @@ async function openSettingsPage(page) {
   await waitForHeading(page, "系统设置");
 }
 
-async function phaseBootstrapMysql(page) {
-  log("phase bootstrap-mysql");
+async function waitForImageCard(page, filename, timeout = PHASE_TIMEOUT_MS) {
+  const card = page.locator("article.image-card", {
+    has: page.getByText(filename, { exact: true }),
+  }).first();
+  await card.waitFor({ state: "visible", timeout });
+  return card;
+}
+
+async function waitForUploadedFilename(page, timeout = PHASE_TIMEOUT_MS) {
+  const title = page.locator(".upload-result-title").first();
+  await title.waitFor({ state: "visible", timeout });
+  const value = ((await title.textContent()) || "").trim();
+  assert.ok(value, "uploaded filename should be visible in upload result card");
+  return value;
+}
+
+async function waitForImageCardToDisappear(page, filename, timeout = PHASE_TIMEOUT_MS) {
+  const card = page.locator("article.image-card", {
+    has: page.getByText(filename, { exact: true }),
+  }).first();
+  await card.waitFor({ state: "hidden", timeout });
+}
+
+async function phaseBootstrapDatabase(page) {
+  log("phase bootstrap-database");
   await gotoRoot(page);
   const bodyText = await waitForText(page, /数据库引导|安装向导/, "数据库引导页或安装向导");
   if (bodyText.includes("安装向导")) {
@@ -414,13 +446,16 @@ async function phaseBootstrapMysql(page) {
     return { skipped: true };
   }
 
-  await selectOptionByLabel(page, "数据库类型", "mysql");
-  await fillInputByLabel(page, "数据库连接 URL", config.mysqlDatabaseUrl);
-  await clickButton(page, "保存 MySQL 配置");
+  assert.ok(
+    config.bootstrapDatabaseUrl,
+    "BROWSER_DATABASE_URL or POSTGRES_DATABASE_URL is required for bootstrap-database"
+  );
+  await fillInputByLabel(page, "数据库连接 URL", config.bootstrapDatabaseUrl);
+  await clickButton(page, "保存数据库配置");
   await waitForText(
     page,
-    "MySQL / MariaDB 配置已保存，请重启服务后继续安装",
-    "MySQL 数据库引导保存成功"
+    "数据库配置已保存，请重启服务后继续安装",
+    "PostgreSQL 数据库引导保存成功"
   );
   return {};
 }
@@ -429,77 +464,37 @@ async function phaseInstallAndBackup(page) {
   log("phase install-and-backup");
   await gotoRoot(page);
   await waitForText(page, "安装向导", "安装向导");
-  await waitForText(page, /当前(?:步骤|进行中)\s*1\/4/, "安装步骤进度");
-  await waitForText(page, "部署环境", "部署环境步骤");
-  await waitForText(page, "创建管理员账号", "管理员步骤");
+  await waitForText(page, "数据库来源", "安装页数据库摘要");
 
-  const environmentItems = page.locator(".install-env-inline-item");
-  assert.equal(await environmentItems.count(), 2, "wizard should show database and cache summaries");
-
-  const databaseSummary = page
-    .locator(".install-env-inline-item", {
-      has: page.locator(".install-env-inline-label", { hasText: "数据库" }),
-    })
-    .first();
-  const cacheSummary = page
-    .locator(".install-env-inline-item", {
-      has: page.locator(".install-env-inline-label", { hasText: "缓存" }),
-    })
-    .first();
-  const databaseSummaryText = ((await databaseSummary.textContent()) || "").replace(/\s+/g, " ");
-  const cacheSummaryText = ((await cacheSummary.textContent()) || "").replace(/\s+/g, " ");
-
-  assert.match(
-    databaseSummaryText,
-    new RegExp(escapeRegExp(config.expectedDatabaseConnection)),
-    "database summary should match the masked runtime connection"
-  );
-  assert.match(
-    cacheSummaryText,
-    new RegExp(escapeRegExp(config.expectedCacheConnection)),
-    "cache summary should match the masked runtime connection"
-  );
+  if (config.expectedDatabaseConnection) {
+    await waitForText(page, config.expectedDatabaseConnection, "安装页数据库连接摘要");
+  }
 
   await fillInputByLabel(page, "管理员邮箱", config.adminEmail);
   await fillInputByLabel(page, "管理员密码", config.adminPassword);
-  await fillInputByLabel(page, "确认密码", config.adminPassword);
-  await clickAnyButton(page, ["下一步：配置站点信息", "下一步：站点信息"]);
-
-  await waitForText(page, /当前(?:步骤|进行中)\s*2\/4/, "站点信息步骤进度");
-  await fillInputByLabel(page, "网站名称", config.siteName);
-  await page
-    .locator('label.settings-check', { hasText: "启用邮件服务" })
-    .locator('input[type="checkbox"]')
-    .check();
-  assert.match(
-    await inputValueByAnyLabel(page, ["站点访问地址（用于邮件链接）", "站点访问地址（必填）"]),
-    new RegExp(`^(?:|${escapeRegExp(config.baseUrl)})$`),
-    "mail link base url should be blank or default to current origin"
-  );
-  await page
-    .locator('label.settings-check', { hasText: "启用邮件服务" })
-    .locator('input[type="checkbox"]')
-    .uncheck();
-  await clickAnyButton(page, ["下一步：确认存储方案", "下一步：存储后端"]);
-
-  await waitForText(page, /当前(?:步骤|进行中)\s*3\/4/, "存储后端步骤进度");
-  await selectOptionByLabel(page, "存储后端", "local");
-  await waitForText(page, "本地存储路径", "本地存储路径字段");
-  await clickAnyButton(page, ["浏览", "选择文件夹"]);
-  await waitForText(page, "选择本地存储目录", "本地目录选择器");
-  await selectInstallStorageDirectory(page);
-  await clickButton(page, "选择当前文件夹");
-  await clickAnyButton(page, ["下一步：检查并初始化", "下一步：最终确认"]);
-
-  await waitForText(page, /当前(?:步骤|进行中)\s*4\/4/, "最终确认步骤进度");
-  await clickAnyButton(page, ["完成安装并创建管理员", "完成安装"]);
+  await fillInputByLabel(page, "确认管理员密码", config.adminPassword);
+  await fillInputByLabel(page, "站点名称", config.siteName);
+  await fillInputByLabel(page, "本地存储路径", "/data/images");
+  await clickButton(page, "完成安装");
   await waitForAuthenticatedNav(page);
   log("install phase: install completed and authenticated nav is visible");
 
   await openSettingsPage(page);
-  await clickSettingsNav(page, "维护工具");
-  await waitForText(page, "数据库恢复状态", "维护工具恢复状态卡片");
-  await clickButton(page, "生成备份");
+  await clickSettingsNav(page, "基础设置");
+  assert.equal(
+    await inputValueByLabel(page, "网站名称"),
+    config.siteName,
+    "settings should retain the installed site name"
+  );
+  assert.equal(
+    await inputValueByLabel(page, "本地存储路径"),
+    "/data/images",
+    "settings should retain the installed storage path"
+  );
+
+  await clickSettingsNav(page, "维护");
+  await waitForText(page, "创建数据库备份", "维护页面备份卡片");
+  await clickButton(page, "创建备份");
 
   const backupFilename = await waitForBackupFilename(page);
   log(`captured backup filename: ${backupFilename}`);
@@ -510,17 +505,8 @@ async function phaseInstallAndBackup(page) {
   const backupRowText = (await backupRow.textContent()) || "";
   assert.match(
     backupRowText,
-    /仅支持下载或运维恢复/,
-    "backup row should explain that page restore is unavailable"
-  );
-
-  const restoreButton = backupRow
-    .getByRole("button", { name: /不支持页面恢复|暂不支持恢复/ })
-    .first();
-  assert.equal(
-    await restoreButton.isDisabled(),
-    true,
-    "backup row should expose a disabled restore button"
+    /逻辑备份仅供下载；恢复统一走运维脚本/,
+    "backup row should explain that restore is ops-only"
   );
 
   return { backupFilename };
@@ -546,10 +532,15 @@ async function phaseVerifyBackupAudit(page) {
   assert.ok(backupAudit, "audit logs should contain the created backup entry");
   log("verify-backup-audit phase: backup audit entry verified via API");
 
-  await clickSettingsNav(page, "维护工具");
-  await waitForText(page, config.backupFilename, "维护工具中的备份文件名");
-  await waitForText(page, /逻辑导出/, "维护工具数据库类型文案");
-  await waitForText(page, "仅支持下载或运维恢复", "维护工具恢复限制文案");
+  await clickSettingsNav(page, "维护");
+  await waitForText(page, config.backupFilename, "维护中的备份文件名");
+  await waitForText(page, /逻辑导出/, "维护中的数据库类型文案");
+  await waitForText(page, "逻辑备份仅供下载；恢复统一走运维脚本。", "维护中的恢复限制文案");
+
+  await clickNavButtonRobust(page, "API 接入");
+  await waitForText(page, "接入速查", "API 页面标题");
+  await waitForText(page, "HttpOnly Cookie Session", "API 认证文案");
+  await waitForText(page, "/api/v1/images?limit=20", "API 图片列表示例");
 
   return { backupFilename: config.backupFilename };
 }
@@ -561,8 +552,8 @@ async function phaseAuthSemantics(page) {
   await waitForAuthenticatedNav(page);
   log("auth phase: opened authenticated dashboard");
   await openSettingsPage(page);
-  await clickSettingsNav(page, "账号安全");
-  await waitForText(page, "修改密码", "账号安全分区");
+  await clickSettingsNav(page, "安全");
+  await waitForButton(page, "修改密码");
   log("auth phase: opened security settings");
 
   await fillInputByLabel(page, "当前密码", config.adminPassword);
@@ -574,7 +565,7 @@ async function phaseAuthSemantics(page) {
   log("auth phase: password change forced login page");
   await waitForText(
     page,
-    "注册和密码找回入口会在邮件能力启用后开放。",
+    "当前站点未启用邮件能力，仅支持已有账号直接登录。",
     "未启用邮件时的登录页能力提示"
   );
   assert.equal(
@@ -600,8 +591,15 @@ async function phaseAuthSemantics(page) {
   log("auth phase: relogin with new password succeeded");
 
   await openSettingsPage(page);
+  await clickSettingsNav(page, "用户管理");
+  await waitForText(page, config.adminEmail, "用户管理中的管理员邮箱");
+  await waitForText(page, "保存角色", "用户管理操作按钮");
+
   await clickSettingsNav(page, "系统状态");
   await waitForButton(page, "刷新状态");
+  await waitForText(page, "运行操作指标", "系统状态运行指标区块");
+  await waitForText(page, "运行积压", "系统状态运行积压区块");
+  await waitForText(page, "后台任务", "系统状态后台任务区块");
   log("auth phase: opened system status before session expiry test");
 
   await page.context().clearCookies();
@@ -610,52 +608,44 @@ async function phaseAuthSemantics(page) {
   log("auth phase: expired session redirected from system status");
 
   await login(page, config.adminNewPassword);
-  await openSettingsPage(page);
-  await clickSettingsNav(page, "系统状态");
-  await waitForButton(page, "刷新状态");
-  log("auth phase: reopened system status before self-demotion");
-
-  const usersResponse = await requestApi(page, "/api/v1/users");
-  assert.equal(usersResponse.status, 200, "admin session should load users before demotion");
-  const users = JSON.parse(usersResponse.text);
-  const currentAdmin = users.find((user) => user.email === config.adminEmail);
-  assert.ok(currentAdmin, "current admin should be present in users list");
-  assert.ok(
-    users.some(
-      (user) =>
-        user.email !== config.adminEmail &&
-        String(user.role || "").toLowerCase() === "admin"
-    ),
-    "demotion regression requires another admin account"
-  );
-
-  const demoteResponse = await requestApi(
-    page,
-    `/api/v1/users/${encodeURIComponent(currentAdmin.id)}`,
-    {
-      method: "PUT",
-      body: JSON.stringify({ role: "user" }),
-    }
-  );
-  assert.equal(demoteResponse.status, 200, "self-demotion should succeed when another admin exists");
-  log("auth phase: self-demotion request succeeded");
-
-  await clickButtonRobust(page, "刷新状态");
-  await waitForText(page, "登录控制台", "降权后访问后台返回登录页");
-  log("auth phase: demoted admin redirected from settings");
-
-  await login(page, config.adminNewPassword);
-  log("auth phase: relogin as demoted user succeeded");
   await gotoRoot(page);
   await waitForAuthenticatedNav(page);
-  log("auth phase: authenticated nav visible for demoted user");
+  log("auth phase: authenticated nav visible after relogin");
+
+  const uploadInput = page.locator("#upload-file");
+  await uploadInput.setInputFiles({
+    name: UPLOAD_FIXTURE.name,
+    mimeType: UPLOAD_FIXTURE.mimeType,
+    buffer: UPLOAD_FIXTURE.buffer,
+  });
+  await clickButton(page, "开始上传");
+  await waitForText(page, "上传成功:", "上传成功提示");
+  await waitForText(page, "本次上传", "上传结果区块");
+  const uploadedFilename = await waitForUploadedFilename(page);
+  log("auth phase: uploaded image through upload page");
+
   await clickNavButtonRobust(page, "历史图库");
-  log("auth phase: clicked history nav as non-admin");
-  await waitForText(page, "上传历史", "非管理员历史图库");
-  log("auth phase: opened history page as non-admin");
+  log("auth phase: clicked history nav");
+  await waitForText(page, "上传历史", "历史图库标题");
+  await waitForButton(page, "刷新");
+  await waitForImageCard(page, uploadedFilename);
+  log("auth phase: uploaded image appeared in history page");
+
+  page.once("dialog", (dialog) => dialog.accept());
+  const uploadedCard = await waitForImageCard(page, uploadedFilename);
+  await uploadedCard.getByRole("button", { name: "永久删除", exact: true }).click();
+  await waitForImageCardToDisappear(page, uploadedFilename);
+  log("auth phase: deleted uploaded image from history page");
+
+  await clickButton(page, "刷新");
+  await waitForText(page, "上传历史", "刷新后的历史图库标题");
+  await waitForImageCardToDisappear(page, uploadedFilename);
+  log("auth phase: history refresh kept deleted image absent");
+
+  log("auth phase: opened history page");
   await page.context().clearCookies();
-  await page.reload({ waitUntil: "domcontentloaded" });
-  await waitForText(page, "登录控制台", "非设置后台页会话失效后返回登录页");
+  await clickButton(page, "刷新");
+  await waitForText(page, "登录控制台", "历史图库会话失效后返回登录页");
   log("auth phase: expired session redirected from history page");
 
   return {};
@@ -663,8 +653,10 @@ async function phaseAuthSemantics(page) {
 
 async function runPhase(page) {
   switch (phase) {
+    case "bootstrap-postgres":
+      return phaseBootstrapDatabase(page);
     case "bootstrap-mysql":
-      return phaseBootstrapMysql(page);
+      return phaseBootstrapDatabase(page);
     case "install-and-backup":
       return phaseInstallAndBackup(page);
     case "verify-backup-audit":

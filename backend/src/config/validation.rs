@@ -20,11 +20,6 @@ impl Config {
                 }
             }
         }
-
-        if self.cache_backend.ttl == 0 {
-            return Err(ConfigError::InvalidTtl);
-        }
-
         if self.storage.path.trim().is_empty() {
             return Err(ConfigError::StoragePathEmpty);
         }
@@ -69,11 +64,7 @@ impl Config {
             return Err(ConfigError::InvalidCookieMaxAge);
         }
 
-        if self.cache_policy.list_ttl == 0 || self.cache_policy.detail_ttl == 0 {
-            return Err(ConfigError::InvalidTtl);
-        }
-
-        if self.rate_limit.requests_per_minute == 0 || self.rate_limit.burst_size == 0 {
+        if self.cache_policy.list_ttl == 0 {
             return Err(ConfigError::InvalidTtl);
         }
 

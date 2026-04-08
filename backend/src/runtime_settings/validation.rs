@@ -125,6 +125,8 @@ pub fn validate_raw_setting_update(
     let mut req = UpdateAdminSettingsConfigRequest {
         expected_settings_version: None,
         site_name: current.site_name.clone(),
+        favicon_data_url: None,
+        clear_favicon: false,
         storage_backend: storage_backend_kind_from_runtime(current.storage_backend),
         local_storage_path: current.local_storage_path.clone(),
         mail_enabled: current.mail_enabled,
@@ -216,6 +218,8 @@ mod tests {
         UpdateAdminSettingsConfigRequest {
             expected_settings_version: None,
             site_name: "New Site".to_string(),
+            favicon_data_url: None,
+            clear_favicon: false,
             storage_backend: StorageBackendKind::Local,
             local_storage_path: "/srv/images".to_string(),
             mail_enabled: false,

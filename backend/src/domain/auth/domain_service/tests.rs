@@ -3,7 +3,7 @@ use crate::domain::auth::mock_repository::MockAuthRepository;
 use crate::domain::auth::repository::AuthRepository;
 use crate::domain::auth::service::AuthService;
 use crate::error::AppError;
-use crate::models::{LoginRequest, RegisterRequest, UserRole};
+use crate::models::{LoginRequest, RegisterRequest, UpdateProfileRequest, UserRole};
 use uuid::Uuid;
 
 fn build_test_user() -> crate::models::User {
@@ -170,4 +170,108 @@ async fn test_login_rejects_unverified_user() {
         .await;
 
     assert!(matches!(result, Err(AppError::EmailNotVerified)));
+}
+
+#[tokio::test]
+async fn test_request_password_reset_hides_unknown_email() {
+    let repo = MockAuthRepository::new();
+    let service = AuthDomainService::new(repo);
+
+    let result = service
+        .request_password_reset("missing@example.com")
+        .await
+        .expect("request should succeed");
+
+    assert!(result.is_none());
+}
+
+#[tokio::test]
+async fn test_reset_password_by_token_rejects_reused_token() {
+    let repo = MockAuthRepository::new();
+    let test_user = build_test_user();
+    repo.users.lock().unwrap().push(test_user.clone());
+    let service = AuthDomainService::new(repo.clone());
+
+    let dispatch = service
+        .request_password_reset(&test_user.email)
+        .await
+        .expect("request should succeed")
+        .expect("dispatch should exist");
+
+    service
+        .reset_password_by_token(&dispatch.token, "new-password-123")
+        .await
+        .expect("first reset should succeed");
+
+    let error = service
+        .reset_password_by_token(&dispatch.token, "another-password-123")
+        .await
+        .expect_err("reused token should be rejected");
+
+    assert!(matches!(error, AppError::ResetTokenInvalid));
+}
+
+#[tokio::test]
+async fn test_register_existing_unverified_user_replaces_password_hash() {
+    let repo = MockAuthRepository::new();
+    let mut test_user = build_test_user();
+    test_user.email = "pending@example.com".to_string();
+    test_user.email_verified_at = None;
+    let original_hash = test_user.password_hash.clone();
+    let user_id = test_user.id;
+    repo.users.lock().unwrap().push(test_user);
+    let service = AuthDomainService::new(repo.clone());
+
+    let dispatch = service
+        .register(RegisterRequest {
+            email: "pending@example.com".to_string(),
+            password: "updated-password-123".to_string(),
+        })
+        .await
+        .expect("registration should update the pending user");
+
+    let updated_user = repo
+        .find_user_by_id(user_id)
+        .await
+        .expect("query should succeed")
+        .expect("user should exist");
+
+    assert_eq!(dispatch.user_id, user_id);
+    assert_ne!(updated_user.password_hash, original_hash);
+    assert!(
+        AuthService::verify_password("updated-password-123", &updated_user.password_hash)
+            .expect("password verification should succeed")
+    );
+}
+
+#[tokio::test]
+async fn test_change_password_rejects_short_admin_password() {
+    let repo = MockAuthRepository::new();
+    let test_user = build_test_user();
+    let user_id = test_user.id;
+    let original_hash = test_user.password_hash.clone();
+    repo.users.lock().unwrap().push(test_user);
+    let service = AuthDomainService::new(repo.clone());
+
+    let error = service
+        .change_password(
+            user_id,
+            UpdateProfileRequest {
+                current_password: "password".to_string(),
+                new_password: Some("short".to_string()),
+            },
+        )
+        .await
+        .expect_err("admin password shorter than 12 chars should be rejected");
+
+    assert!(
+        matches!(error, AppError::ValidationError(message) if message.contains("管理员密码至少需要 12 个字符"))
+    );
+
+    let unchanged_user = repo
+        .find_user_by_id(user_id)
+        .await
+        .expect("query should succeed")
+        .expect("user should exist");
+    assert_eq!(unchanged_user.password_hash, original_hash);
 }

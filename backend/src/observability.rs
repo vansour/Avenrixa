@@ -288,6 +288,8 @@ mod tests {
         let snapshot = observability.snapshot(RuntimeBacklogMetrics {
             storage_cleanup_pending: 0,
             storage_cleanup_retrying: 0,
+            revoked_tokens_active: 0,
+            revoked_tokens_expired: 0,
         });
 
         let names = snapshot
@@ -311,12 +313,16 @@ mod tests {
         let snapshot = observability.snapshot(RuntimeBacklogMetrics {
             storage_cleanup_pending: 3,
             storage_cleanup_retrying: 1,
+            revoked_tokens_active: 2,
+            revoked_tokens_expired: 1,
         });
 
         assert_eq!(snapshot.audit_writes.total_successes, 1);
         assert_eq!(snapshot.audit_writes.total_failures, 1);
         assert_eq!(snapshot.audit_writes.average_duration_ms, Some(30));
         assert_eq!(snapshot.backlog.storage_cleanup_pending, 3);
+        assert_eq!(snapshot.backlog.revoked_tokens_active, 2);
+        assert_eq!(snapshot.backlog.revoked_tokens_expired, 1);
         assert_eq!(
             snapshot.audit_writes.last_error.as_deref(),
             Some("db timeout")

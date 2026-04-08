@@ -292,6 +292,7 @@ compose_runtime_generate() {
   local cache_service_block=""
   local mailpit_service_block=""
   local volumes_block=$'volumes:\n  postgres_data:\n'
+  local app_database_kind
   local database_url
   local cache_url=""
   local jwt_secret
@@ -300,6 +301,7 @@ compose_runtime_generate() {
   local app_version
   local app_revision
   local build_date
+  local app_database_kind_yaml
   local database_url_yaml
   local cache_url_yaml
   local jwt_secret_yaml
@@ -326,7 +328,8 @@ compose_runtime_generate() {
     app_data_dir="${ROOT_DIR}/${app_data_dir}"
   fi
 
-  database_url="$(compose_variant_default_database_url)"
+  app_database_kind="${APP_DATABASE_KIND-postgresql}"
+  database_url="${APP_DATABASE_URL-$(compose_variant_default_database_url)}"
   jwt_secret="${JWT_SECRET:-your-secret-key-change-in-production}"
   auth_cookie_same_site="${AUTH_COOKIE_SAME_SITE:-Strict}"
   auth_cookie_secure="${AUTH_COOKIE_SECURE:-false}"
@@ -379,7 +382,7 @@ EOF
 
   case "${CACHE_MODE}" in
     dragonfly)
-      cache_url="${CACHE_URL:-dragonfly://cache:6379}"
+      cache_url="${APP_CACHE_URL-${CACHE_URL:-dragonfly://cache:6379}}"
       app_depends_on=$'    depends_on:\n      postgres:\n        condition: service_healthy\n      cache:\n        condition: service_healthy'
       cache_service_block=$(cat <<EOF
   cache:
@@ -425,6 +428,7 @@ EOF
     mailpit_service_block+=$'\n'
   fi
 
+  app_database_kind_yaml="$(yaml_double_quote "${app_database_kind}")"
   database_url_yaml="$(yaml_double_quote "${database_url}")"
   cache_url_yaml="$(yaml_double_quote "${cache_url}")"
   jwt_secret_yaml="$(yaml_double_quote "${jwt_secret}")"
@@ -452,7 +456,7 @@ ${volumes_block}services:
       - "${APP_HOST_PORT}:8080"
 ${app_depends_on}
     environment:
-      DATABASE_KIND: "postgresql"
+      DATABASE_KIND: ${app_database_kind_yaml}
       DATABASE_URL: ${database_url_yaml}
       CACHE_URL: ${cache_url_yaml}
       JWT_SECRET: ${jwt_secret_yaml}

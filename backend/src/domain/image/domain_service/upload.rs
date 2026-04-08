@@ -130,9 +130,6 @@ impl<I: ImageRepository> ImageDomainService<I> {
             return Err(error.into());
         }
 
-        let cache_hint = self.storage_manager.cache_hint(&stored_filename);
-        self.cache_image_path(image_id, &cache_hint).await?;
-
         record_audit_sync(
             &self.database,
             self.observability.as_ref(),

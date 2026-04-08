@@ -4,8 +4,14 @@ mod path;
 
 use crate::runtime_settings::RuntimeSettings;
 use std::sync::Arc;
+use tokio::fs::File;
 
 pub use cleanup::{enqueue_storage_cleanup_jobs, process_pending_storage_cleanup_jobs};
+
+pub struct StorageReadHandle {
+    pub file: File,
+    pub content_length: u64,
+}
 
 #[derive(Clone)]
 pub struct StorageManager {
@@ -116,10 +122,6 @@ impl StorageManager {
                 "配置=正常 | 路径访问=失败 | 读写=不可用".to_string(),
             )
         }
-    }
-
-    pub fn cache_hint(&self, _file_key: &str) -> String {
-        "storage://local".to_string()
     }
 }
 

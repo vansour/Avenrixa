@@ -39,7 +39,7 @@ pub struct ImageInfo {
 
 pub struct MediaAsset {
     pub content_type: String,
-    pub data: Vec<u8>,
+    pub file_key: String,
     pub etag: String,
 }
 

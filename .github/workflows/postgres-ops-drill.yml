@@ -46,6 +46,17 @@ jobs:
           ./scripts/compose-runtime.sh ps
           ./scripts/compose-runtime.sh logs --no-color --tail=300
 
+      - name: Upload PostgreSQL ops drill artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: postgres-ops-drill-artifacts
+          path: |
+            ops-backups/postgres-drill
+            data/backup
+          if-no-files-found: ignore
+          retention-days: 14
+
       - name: Cleanup PostgreSQL ops drill stack
         if: always()
         env:

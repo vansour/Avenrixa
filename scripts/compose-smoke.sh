@@ -453,11 +453,20 @@ run_postgres_auth_smoke() {
 run_postgres_image_smoke() {
   local upload_response
   local image_key
+  local image_filename
   local images_page
   local image_detail
   local expires_at
   local stats
   local health_payload
+  local original_headers
+  local original_status
+  local original_etag
+  local original_not_modified_status
+  local thumbnail_headers
+  local thumbnail_status
+  local thumbnail_etag
+  local thumbnail_not_modified_status
 
   log_step "Uploading image"
   upload_response="$(
@@ -467,7 +476,9 @@ run_postgres_image_smoke() {
       "${api_base}/upload"
   )"
   image_key="$(printf '%s' "${upload_response}" | jq -r '.image_key')"
+  image_filename="$(printf '%s' "${upload_response}" | jq -r '.filename')"
   expect_non_empty "${image_key}" "upload should return image_key"
+  expect_non_empty "${image_filename}" "upload should return stored filename"
 
   images_page="$(curl -fsS -b "${ADMIN_COOKIE_JAR}" "${api_base}/images?limit=20")"
   expect_eq \
@@ -480,6 +491,43 @@ run_postgres_image_smoke() {
     "$(printf '%s' "${image_detail}" | jq -r '.image_key')" \
     "${image_key}" \
     "image detail should return uploaded image"
+
+  log_step "Verifying private media responses"
+  original_headers="$(
+    curl -sS -D - -o /dev/null \
+      -b "${ADMIN_COOKIE_JAR}" \
+      "http://127.0.0.1:${APP_HOST_PORT}/images/${image_filename}"
+  )"
+  original_status="$(printf '%s' "${original_headers}" | awk 'toupper($1) ~ /^HTTP\// {print $2; exit}')"
+  expect_eq "${original_status}" "200" "private original media should be readable"
+  original_etag="$(printf '%s' "${original_headers}" | awk 'BEGIN{IGNORECASE=1} /^etag:/ {gsub("\r","",$2); print $2; exit}')"
+  expect_non_empty "${original_etag}" "private original media should emit an ETag"
+
+  original_not_modified_status="$(
+    curl -s -o /dev/null -w '%{http_code}' \
+      -b "${ADMIN_COOKIE_JAR}" \
+      -H "If-None-Match: ${original_etag}" \
+      "http://127.0.0.1:${APP_HOST_PORT}/images/${image_filename}"
+  )"
+  expect_eq "${original_not_modified_status}" "304" "private original media should honor If-None-Match"
+
+  thumbnail_headers="$(
+    curl -sS -D - -o /dev/null \
+      -b "${ADMIN_COOKIE_JAR}" \
+      "http://127.0.0.1:${APP_HOST_PORT}/thumbnails/${image_key}.webp"
+  )"
+  thumbnail_status="$(printf '%s' "${thumbnail_headers}" | awk 'toupper($1) ~ /^HTTP\// {print $2; exit}')"
+  expect_eq "${thumbnail_status}" "200" "private thumbnail media should be readable"
+  thumbnail_etag="$(printf '%s' "${thumbnail_headers}" | awk 'BEGIN{IGNORECASE=1} /^etag:/ {gsub("\r","",$2); print $2; exit}')"
+  expect_non_empty "${thumbnail_etag}" "private thumbnail media should emit an ETag"
+
+  thumbnail_not_modified_status="$(
+    curl -s -o /dev/null -w '%{http_code}' \
+      -b "${ADMIN_COOKIE_JAR}" \
+      -H "If-None-Match: ${thumbnail_etag}" \
+      "http://127.0.0.1:${APP_HOST_PORT}/thumbnails/${image_key}.webp"
+  )"
+  expect_eq "${thumbnail_not_modified_status}" "304" "private thumbnail media should honor If-None-Match"
 
   expires_at="$(date -u -d '+1 day' '+%Y-%m-%dT%H:%M:%SZ')"
   log_step "Setting image expiry"

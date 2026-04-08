@@ -5,7 +5,6 @@ use axum::{
     extract::{Query, State},
     http::HeaderMap,
 };
-use base64::Engine;
 use shared_types::auth::UserResponse as SharedUserResponse;
 
 use self::transactions::{
@@ -19,8 +18,10 @@ use crate::db::{
 };
 use crate::error::AppError;
 use crate::handlers::auth::common::{append_session_cookies, issue_session_tokens};
+use crate::handlers::settings_config::{
+    favicon_is_configured, runtime_settings_to_admin_config, validate_favicon_data_url,
+};
 use crate::handlers::storage_browser::{BrowseStorageDirectoriesQuery, browse_storage_directories};
-use crate::models::storage_backend_kind_from_runtime;
 use crate::models::{
     AdminSettingsConfig, InstallBootstrapRequest, InstallBootstrapResponse, InstallStatusResponse,
     StorageDirectoryBrowseResponse,
@@ -28,42 +29,13 @@ use crate::models::{
 use crate::runtime_settings::RuntimeSettings;
 use crate::runtime_settings::validate_and_merge;
 
-fn runtime_settings_to_admin_config(
-    settings: &RuntimeSettings,
-    restart_required: bool,
-) -> AdminSettingsConfig {
-    AdminSettingsConfig {
-        site_name: settings.site_name.clone(),
-        storage_backend: storage_backend_kind_from_runtime(settings.storage_backend),
-        local_storage_path: settings.local_storage_path.clone(),
-        mail_enabled: settings.mail_enabled,
-        mail_smtp_host: settings.mail_smtp_host.clone(),
-        mail_smtp_port: settings.mail_smtp_port,
-        mail_smtp_user: settings.mail_smtp_user.clone(),
-        mail_smtp_password_set: settings
-            .mail_smtp_password
-            .as_ref()
-            .map(|v| !v.trim().is_empty())
-            .unwrap_or(false),
-        mail_from_email: settings.mail_from_email.clone(),
-        mail_from_name: settings.mail_from_name.clone(),
-        mail_link_base_url: settings.mail_link_base_url.clone(),
-        restart_required,
-        settings_version: settings.settings_version(),
-    }
-}
-
-const MAX_FAVICON_BYTES: usize = 256 * 1024;
-
 pub async fn get_install_status(
     State(state): State<AppState>,
 ) -> Result<Json<InstallStatusResponse>, AppError> {
     let installed = is_app_installed(&state.database).await?;
     let has_admin = has_admin_account(&state.database).await?;
     let settings = state.runtime_settings.get_runtime_settings().await?;
-    let favicon_configured = get_setting_value(&state.database, SITE_FAVICON_DATA_URL_SETTING_KEY)
-        .await?
-        .is_some_and(|value| !value.trim().is_empty());
+    let favicon_configured = favicon_is_configured(&state.database).await?;
     let restart_required = if installed {
         state.storage_manager.restart_required(&settings)
     } else {
@@ -74,7 +46,12 @@ pub async fn get_install_status(
         installed,
         has_admin,
         favicon_configured,
-        config: public_install_status_config(&settings, installed, restart_required),
+        config: public_install_status_config(
+            &settings,
+            favicon_configured,
+            installed,
+            restart_required,
+        ),
     }))
 }
 
@@ -217,70 +194,22 @@ pub async fn bootstrap_installation(
             favicon_configured: favicon_data_url.is_some(),
             config: runtime_settings_to_admin_config(
                 &settings,
+                favicon_data_url.is_some(),
                 state.storage_manager.restart_required(&settings),
             ),
         }),
     ))
 }
 
-fn validate_favicon_data_url(value: Option<String>) -> Result<Option<String>, AppError> {
-    let Some(value) = value.map(|value| value.trim().to_string()) else {
-        return Ok(None);
-    };
-    if value.is_empty() {
-        return Ok(None);
-    }
-
-    let Some((mime_prefix, encoded)) = value.split_once(";base64,") else {
-        return Err(AppError::ValidationError(
-            "网站图标必须使用 data URL(base64) 格式上传".to_string(),
-        ));
-    };
-    let Some(mime) = mime_prefix.strip_prefix("data:") else {
-        return Err(AppError::ValidationError("网站图标格式无效".to_string()));
-    };
-
-    if !matches!(
-        mime,
-        "image/x-icon"
-            | "image/vnd.microsoft.icon"
-            | "image/png"
-            | "image/svg+xml"
-            | "image/jpeg"
-            | "image/webp"
-    ) {
-        return Err(AppError::ValidationError(
-            "网站图标仅支持 ico/png/svg/jpeg/webp".to_string(),
-        ));
-    }
-
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(encoded)
-        .map_err(|_| AppError::ValidationError("网站图标内容无法解析".to_string()))?;
-    if bytes.is_empty() {
-        return Err(AppError::ValidationError("网站图标不能为空".to_string()));
-    }
-    if bytes.len() > MAX_FAVICON_BYTES {
-        return Err(AppError::ValidationError(format!(
-            "网站图标不能超过 {} KB",
-            MAX_FAVICON_BYTES / 1024
-        )));
-    }
-
-    Ok(Some(format!(
-        "data:{};base64,{}",
-        mime,
-        base64::engine::general_purpose::STANDARD.encode(bytes)
-    )))
-}
-
 fn public_install_status_config(
     settings: &RuntimeSettings,
+    favicon_configured: bool,
     installed: bool,
     restart_required: bool,
 ) -> AdminSettingsConfig {
     let mut config = runtime_settings_to_admin_config(
         settings,
+        favicon_configured,
         if installed { false } else { restart_required },
     );
 
@@ -305,7 +234,6 @@ mod tests {
     use super::*;
     use crate::models::StorageBackendKind;
     use crate::runtime_settings::StorageBackend;
-    use base64::Engine;
 
     fn sample_runtime_settings() -> RuntimeSettings {
         RuntimeSettings {
@@ -325,7 +253,7 @@ mod tests {
 
     #[test]
     fn public_install_status_config_redacts_credentials_before_install() {
-        let config = public_install_status_config(&sample_runtime_settings(), false, false);
+        let config = public_install_status_config(&sample_runtime_settings(), false, false, false);
 
         assert!(config.local_storage_path.is_empty());
         assert!(config.mail_smtp_host.is_empty());
@@ -339,9 +267,10 @@ mod tests {
 
     #[test]
     fn public_install_status_config_redacts_runtime_details_after_install() {
-        let config = public_install_status_config(&sample_runtime_settings(), true, true);
+        let config = public_install_status_config(&sample_runtime_settings(), true, true, true);
 
         assert_eq!(config.site_name, "Avenrixa");
+        assert!(config.favicon_configured);
         assert_eq!(config.storage_backend, StorageBackendKind::Local);
         assert!(config.mail_enabled);
         assert!(config.local_storage_path.is_empty());
@@ -350,45 +279,5 @@ mod tests {
         assert!(config.mail_from_email.is_empty());
         assert!(!config.restart_required);
         assert!(config.settings_version.is_empty());
-    }
-
-    #[test]
-    fn validate_favicon_data_url_accepts_supported_payload_and_normalizes_output() {
-        let payload = base64::engine::general_purpose::STANDARD.encode([0_u8, 1, 2, 3]);
-        let normalized =
-            validate_favicon_data_url(Some(format!("data:image/png;base64,{payload}")))
-                .expect("favicon should validate")
-                .expect("favicon should be preserved");
-
-        assert_eq!(normalized, format!("data:image/png;base64,{payload}"));
-    }
-
-    #[test]
-    fn validate_favicon_data_url_rejects_unsupported_mime() {
-        let payload = base64::engine::general_purpose::STANDARD.encode([0_u8, 1, 2, 3]);
-        let err = validate_favicon_data_url(Some(format!("data:text/plain;base64,{payload}")))
-            .expect_err("unsupported mime should fail");
-
-        match err {
-            AppError::ValidationError(message) => {
-                assert!(message.contains("仅支持 ico/png/svg/jpeg/webp"));
-            }
-            other => panic!("expected validation error, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn validate_favicon_data_url_rejects_oversized_payload() {
-        let payload =
-            base64::engine::general_purpose::STANDARD.encode(vec![7_u8; MAX_FAVICON_BYTES + 1]);
-        let err = validate_favicon_data_url(Some(format!("data:image/png;base64,{payload}")))
-            .expect_err("oversized favicon should fail");
-
-        match err {
-            AppError::ValidationError(message) => {
-                assert!(message.contains("网站图标不能超过"));
-            }
-            other => panic!("expected validation error, got {other:?}"),
-        }
     }
 }

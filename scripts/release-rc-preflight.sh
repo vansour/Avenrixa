@@ -4,6 +4,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT_DIR}"
 
+source "${ROOT_DIR}/scripts/release-result-common.sh"
+
 workspace_package_version() {
   sed -n 's/^version = "\(.*\)"/\1/p' "${ROOT_DIR}/Cargo.toml" | head -n 1
 }
@@ -61,12 +63,72 @@ RELEASE_IMAGE_ADDITIONAL_TAGS="${RELEASE_IMAGE_ADDITIONAL_TAGS-}"
 RELEASE_RC_INCLUDE_GA_GATE="${RELEASE_RC_INCLUDE_GA_GATE:-1}"
 RELEASE_RC_INCLUDE_CHANGELOG="${RELEASE_RC_INCLUDE_CHANGELOG:-1}"
 RELEASE_RC_INCLUDE_VERSION_SMOKE="${RELEASE_RC_INCLUDE_VERSION_SMOKE:-1}"
+RELEASE_RC_ARTIFACT_DIR="${RELEASE_RC_ARTIFACT_DIR:-${ROOT_DIR}/dist/release/${RELEASE_VERSION}}"
+RELEASE_RC_RESULT_PATH="${RELEASE_RC_RESULT_PATH:-${RELEASE_RC_ARTIFACT_DIR}/release-rc-preflight-result.json}"
 PRESERVE_STACK_ON_FAILURE="${PRESERVE_STACK_ON_FAILURE:-0}"
+
+RELEASE_RC_STARTED_AT="$(release_result_timestamp_utc)"
+RELEASE_RC_COMPLETED_STEPS=()
 
 log_step() {
   echo
   echo "==> $1"
 }
+
+mark_release_rc_step_completed() {
+  RELEASE_RC_COMPLETED_STEPS+=("$1")
+}
+
+finalize_release_rc_result() {
+  local exit_code="$1"
+  local status="failed"
+  local summary="0.1 RC preflight failed"
+
+  if [[ "${exit_code}" -eq 0 ]]; then
+    status="passed"
+    summary="0.1 RC preflight passed"
+  fi
+
+  local metadata_json
+  metadata_json="$(
+    jq -n \
+      --arg release_version "${RELEASE_VERSION}" \
+      --arg release_revision "${RELEASE_BUILD_REVISION}" \
+      --arg release_build_date "${RELEASE_BUILD_DATE}" \
+      --arg release_image_ref "${RELEASE_IMAGE_REF}" \
+      --arg release_artifact_dir "${RELEASE_RC_ARTIFACT_DIR}" \
+      --arg result_path "${RELEASE_RC_RESULT_PATH}" \
+      --arg release_image_additional_tags "${RELEASE_IMAGE_ADDITIONAL_TAGS}" \
+      --argjson release_image_push "$([[ "${RELEASE_IMAGE_PUSH}" == "1" ]] && echo true || echo false)" \
+      --argjson include_ga_gate "$([[ "${RELEASE_RC_INCLUDE_GA_GATE}" == "1" ]] && echo true || echo false)" \
+      --argjson include_changelog "$([[ "${RELEASE_RC_INCLUDE_CHANGELOG}" == "1" ]] && echo true || echo false)" \
+      --argjson include_version_smoke "$([[ "${RELEASE_RC_INCLUDE_VERSION_SMOKE}" == "1" ]] && echo true || echo false)" \
+      '{
+        release_version: $release_version,
+        release_revision: $release_revision,
+        release_build_date: $release_build_date,
+        release_image_ref: $release_image_ref,
+        release_image_additional_tags: ($release_image_additional_tags | split(" ") | map(select(length > 0))),
+        release_image_push: $release_image_push,
+        include_ga_gate: $include_ga_gate,
+        include_changelog: $include_changelog,
+        include_version_smoke: $include_version_smoke,
+        release_artifact_dir: $release_artifact_dir,
+        result_path: $result_path
+      }'
+  )"
+
+  write_release_result_file \
+    "${RELEASE_RC_RESULT_PATH}" \
+    "${status}" \
+    "${RELEASE_RC_STARTED_AT}" \
+    "$(release_result_timestamp_utc)" \
+    "${summary}" \
+    "${metadata_json}" \
+    "${RELEASE_RC_COMPLETED_STEPS[@]}"
+}
+
+trap 'exit_code=$?; finalize_release_rc_result "${exit_code}"; exit "${exit_code}"' EXIT
 
 rolling_rc_image_ref_from_release_ref() {
   local image_ref="$1"
@@ -205,6 +267,7 @@ main() {
 
   require_commands
   assert_release_version_matches_workspace
+  mkdir -p "${RELEASE_RC_ARTIFACT_DIR}"
   apply_default_rolling_rc_tag
 
   log_step "Starting 0.1 RC preflight"
@@ -219,20 +282,25 @@ main() {
   if [[ "${RELEASE_RC_INCLUDE_CHANGELOG}" == "1" ]]; then
     log_step "Checking changelog entry"
     assert_changelog_has_release
+    mark_release_rc_step_completed "changelog"
   fi
 
   if [[ "${RELEASE_RC_INCLUDE_GA_GATE}" == "1" ]]; then
     run_ga_gate
+    mark_release_rc_step_completed "ga_gate"
   fi
 
   if [[ "${RELEASE_RC_INCLUDE_VERSION_SMOKE}" == "1" ]]; then
     run_version_smoke
+    mark_release_rc_step_completed "version_smoke"
     log_step "Checking image labels"
     assert_image_labels
+    mark_release_rc_step_completed "image_labels"
   fi
 
   if [[ "${RELEASE_IMAGE_PUSH}" == "1" ]]; then
     push_release_image
+    mark_release_rc_step_completed "image_push"
   fi
 
   echo
