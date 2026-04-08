@@ -1,7 +1,7 @@
 use super::types::{
     CacheBackendConfig, CachePolicyConfig, CleanupConfig, Config, CookieConfig, DatabaseConfig,
-    DatabaseKind, ImageConfig, MailConfig, RateLimitConfig, ServerConfig, StorageConfig,
-    default_frontend_dir, default_max_connections,
+    DatabaseKind, ImageConfig, MailConfig, ServerConfig, StorageConfig, default_frontend_dir,
+    default_max_connections,
 };
 
 impl Default for Config {
@@ -21,11 +21,7 @@ impl Default for Config {
                 url: String::new(),
                 max_connections: default_max_connections(),
             },
-            cache_backend: CacheBackendConfig {
-                url: None,
-                key_prefix: "img:".to_string(),
-                ttl: 3600,
-            },
+            cache_backend: CacheBackendConfig { url: None },
             storage: StorageConfig {
                 path: "/data/images".to_string(),
                 allowed_extensions: vec![
@@ -38,14 +34,7 @@ impl Default for Config {
                 ],
                 file_check_concurrent_threshold: 50,
             },
-            cache_policy: CachePolicyConfig {
-                list_ttl: 300,
-                detail_ttl: 1800,
-            },
-            rate_limit: RateLimitConfig {
-                requests_per_minute: 100,
-                burst_size: 30,
-            },
+            cache_policy: CachePolicyConfig { list_ttl: 300 },
             cleanup: CleanupConfig {
                 enabled: true,
                 expiry_check_interval_seconds: 3600,

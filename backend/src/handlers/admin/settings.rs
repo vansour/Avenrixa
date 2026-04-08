@@ -1,48 +1,98 @@
 use super::common::admin_service;
 use crate::audit::{AuditEvent, record_audit_sync};
-use crate::db::AppState;
-use crate::db::get_setting_value;
+use crate::db::{
+    AppState, SITE_FAVICON_DATA_URL_SETTING_KEY, delete_setting_tx, get_setting_value,
+    upsert_setting_tx,
+};
 use crate::error::AppError;
+use crate::handlers::settings_config::{
+    favicon_is_configured, runtime_settings_to_admin_config, validate_favicon_data_url,
+};
 use crate::handlers::storage_browser::{BrowseStorageDirectoriesQuery, browse_storage_directories};
 use crate::middleware::AdminUser;
 use crate::models::{
     AdminSettingsConfig, Setting, UpdateAdminSettingsConfigRequest, UpdateSettingRequest,
-    storage_backend_kind_from_runtime,
 };
 use crate::runtime_settings::{
     RuntimeSettings, SETTING_LOCAL_STORAGE_PATH, SETTING_MAIL_ENABLED, SETTING_MAIL_FROM_EMAIL,
     SETTING_MAIL_FROM_NAME, SETTING_MAIL_LINK_BASE_URL, SETTING_MAIL_SMTP_HOST,
-    SETTING_MAIL_SMTP_PASSWORD, SETTING_MAIL_SMTP_PORT, SETTING_MAIL_SMTP_USER, SETTING_SITE_NAME,
-    SETTING_STORAGE_BACKEND, admin_setting_policy, mask_admin_setting_value,
+    SETTING_MAIL_SMTP_PASSWORD, SETTING_MAIL_SMTP_PORT, SETTING_MAIL_SMTP_USER,
+    SETTING_SITE_FAVICON_DATA_URL, SETTING_SITE_NAME, SETTING_STORAGE_BACKEND,
+    admin_setting_policy, mask_admin_setting_value,
 };
 use axum::{
     Json,
     extract::{Path, Query, State},
 };
 
-fn runtime_settings_to_admin_config(
-    settings: &RuntimeSettings,
-    restart_required: bool,
-) -> AdminSettingsConfig {
-    AdminSettingsConfig {
-        site_name: settings.site_name.clone(),
-        storage_backend: storage_backend_kind_from_runtime(settings.storage_backend),
-        local_storage_path: settings.local_storage_path.clone(),
-        mail_enabled: settings.mail_enabled,
-        mail_smtp_host: settings.mail_smtp_host.clone(),
-        mail_smtp_port: settings.mail_smtp_port,
-        mail_smtp_user: settings.mail_smtp_user.clone(),
-        mail_smtp_password_set: settings
-            .mail_smtp_password
+enum FaviconMutation {
+    Unchanged,
+    Clear,
+    Set(String),
+}
+
+fn parse_favicon_mutation(
+    req: &UpdateAdminSettingsConfigRequest,
+) -> Result<FaviconMutation, AppError> {
+    if req.clear_favicon {
+        if req
+            .favicon_data_url
             .as_ref()
-            .map(|v| !v.trim().is_empty())
-            .unwrap_or(false),
-        mail_from_email: settings.mail_from_email.clone(),
-        mail_from_name: settings.mail_from_name.clone(),
-        mail_link_base_url: settings.mail_link_base_url.clone(),
-        restart_required,
-        settings_version: settings.settings_version(),
+            .is_some_and(|value| !value.trim().is_empty())
+        {
+            return Err(AppError::ValidationError(
+                "不能同时上传并清空网站图标".to_string(),
+            ));
+        }
+        return Ok(FaviconMutation::Clear);
     }
+
+    match validate_favicon_data_url(req.favicon_data_url.clone())? {
+        Some(data_url) => Ok(FaviconMutation::Set(data_url)),
+        None => Ok(FaviconMutation::Unchanged),
+    }
+}
+
+async fn apply_favicon_mutation(
+    database: &crate::db::DatabasePool,
+    mutation: &FaviconMutation,
+) -> Result<(), AppError> {
+    if matches!(mutation, FaviconMutation::Unchanged) {
+        return Ok(());
+    }
+
+    match database {
+        crate::db::DatabasePool::Postgres(pool) => {
+            let mut tx = pool.begin().await?;
+            match mutation {
+                FaviconMutation::Unchanged => {}
+                FaviconMutation::Clear => {
+                    delete_setting_tx(&mut tx, SITE_FAVICON_DATA_URL_SETTING_KEY).await?;
+                }
+                FaviconMutation::Set(data_url) => {
+                    upsert_setting_tx(&mut tx, SITE_FAVICON_DATA_URL_SETTING_KEY, data_url).await?;
+                }
+            }
+            tx.commit().await?;
+        }
+    }
+
+    Ok(())
+}
+
+async fn restore_previous_favicon(
+    database: &crate::db::DatabasePool,
+    previous_favicon: Option<&str>,
+) -> Result<(), AppError> {
+    let mutation = match previous_favicon
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        Some(value) => FaviconMutation::Set(value.to_string()),
+        None => FaviconMutation::Clear,
+    };
+
+    apply_favicon_mutation(database, &mutation).await
 }
 
 pub async fn get_settings_admin(
@@ -59,8 +109,10 @@ pub async fn get_admin_settings_config(
     _admin_user: AdminUser,
 ) -> Result<Json<AdminSettingsConfig>, AppError> {
     let settings = state.runtime_settings.get_runtime_settings().await?;
+    let favicon_configured = favicon_is_configured(&state.database).await?;
     Ok(Json(runtime_settings_to_admin_config(
         &settings,
+        favicon_configured,
         state.storage_manager.restart_required(&settings),
     )))
 }
@@ -80,12 +132,42 @@ pub async fn update_admin_settings_config(
     Json(req): Json<UpdateAdminSettingsConfigRequest>,
 ) -> Result<Json<AdminSettingsConfig>, AppError> {
     let current = state.runtime_settings.get_runtime_settings().await?;
-    let updated = state
+    let favicon_mutation = parse_favicon_mutation(&req)?;
+    let previous_favicon = if matches!(&favicon_mutation, FaviconMutation::Unchanged) {
+        None
+    } else {
+        Some(get_setting_value(&state.database, SITE_FAVICON_DATA_URL_SETTING_KEY).await?)
+    };
+
+    if !matches!(&favicon_mutation, FaviconMutation::Unchanged) {
+        apply_favicon_mutation(&state.database, &favicon_mutation).await?;
+    }
+
+    let updated = match state
         .runtime_settings
         .update_admin_settings_config(req, &state.storage_manager)
-        .await?;
+        .await
+    {
+        Ok(updated) => updated,
+        Err(error) => {
+            if let Some(previous_favicon) = previous_favicon.as_ref() {
+                let _ =
+                    restore_previous_favicon(&state.database, previous_favicon.as_deref()).await;
+            }
+            return Err(error);
+        }
+    };
+
+    let favicon_configured = match &favicon_mutation {
+        FaviconMutation::Unchanged => favicon_is_configured(&state.database).await?,
+        FaviconMutation::Clear => false,
+        FaviconMutation::Set(_) => true,
+    };
     let restart_required = state.storage_manager.restart_required(&updated);
-    let changed_keys = changed_setting_keys(&current, &updated);
+    let mut changed_keys = changed_setting_keys(&current, &updated);
+    if !matches!(&favicon_mutation, FaviconMutation::Unchanged) {
+        changed_keys.push(SETTING_SITE_FAVICON_DATA_URL);
+    }
     let has_high_risk_change = changed_keys.iter().any(|key| raw_setting_is_high_risk(key));
 
     if !changed_keys.is_empty() {
@@ -106,6 +188,7 @@ pub async fn update_admin_settings_config(
 
     Ok(Json(runtime_settings_to_admin_config(
         &updated,
+        favicon_configured,
         restart_required,
     )))
 }

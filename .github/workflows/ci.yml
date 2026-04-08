@@ -16,6 +16,31 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  frontend-checks:
+    name: Frontend Checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+
+      - name: Setup Node
+        uses: actions/setup-node@v6.0.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci --prefix frontend
+
+      - name: Frontend unit tests
+        run: npm run test --prefix frontend
+
+      - name: Frontend build
+        run: npm run build --prefix frontend
+
   rust-checks:
     name: Rust Checks
     runs-on: ubuntu-latest
@@ -86,3 +111,51 @@ jobs:
           DOCKER_BUILDKIT: "1"
           COMPOSE_DOCKER_CLI_BUILD: "1"
         run: ./scripts/compose-smoke.sh
+
+  browser-regression:
+    name: Browser Regression (${{ matrix.scenario }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario:
+          - runtime-mainline
+          - bootstrap-postgres
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+
+      - name: Setup Node
+        uses: actions/setup-node@v6.0.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: scripts/browser-regression/package-lock.json
+
+      - name: Show Docker versions
+        run: |
+          docker --version
+          docker compose version
+
+      - name: Run browser regression
+        env:
+          ADMIN_EMAIL: admin@example.com
+          ADMIN_PASSWORD: Password123456!
+          ADMIN_NEW_PASSWORD: Password123456!updated
+          SITE_NAME: Browser Regression
+          BROWSER_HEADLESS: "1"
+          BROWSER_PHASE_TIMEOUT_MS: "60000"
+          BROWSER_REGRESSION_ARTIFACT_DIR: ${{ runner.temp }}/browser-regression/${{ matrix.scenario }}
+          DOCKER_BUILDKIT: "1"
+          COMPOSE_DOCKER_CLI_BUILD: "1"
+        run: bash ./scripts/browser-regression-ci.sh "${{ matrix.scenario }}"
+
+      - name: Upload browser regression artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-regression-${{ matrix.scenario }}
+          path: ${{ runner.temp }}/browser-regression/${{ matrix.scenario }}
+          if-no-files-found: ignore

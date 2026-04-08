@@ -6,6 +6,17 @@ use crate::error::AppError;
 use crate::runtime_settings::{StorageBackend, StorageSettingsSnapshot};
 
 impl StorageManager {
+    pub async fn open_read(
+        &self,
+        file_key: &str,
+    ) -> Result<crate::storage_backend::StorageReadHandle, AppError> {
+        validate_file_key(file_key)?;
+        let settings = self.active_settings();
+        match settings.storage_backend {
+            StorageBackend::Local => local::open_read(&settings, file_key).await,
+        }
+    }
+
     pub async fn exists(&self, file_key: &str) -> Result<bool, AppError> {
         validate_file_key(file_key)?;
         let settings = self.active_settings();

@@ -76,19 +76,42 @@ async fn storage_entry_count<I: ImageRepository>(service: &ImageDomainService<I>
         return 0;
     }
 
-    let mut entries = tokio::fs::read_dir(storage_path)
-        .await
-        .expect("storage dir should be readable");
+    let mut stack = vec![storage_path.to_path_buf()];
     let mut count = 0;
-    while entries
-        .next_entry()
-        .await
-        .expect("storage dir iteration should succeed")
-        .is_some()
-    {
-        count += 1;
+
+    while let Some(path) = stack.pop() {
+        let mut entries = tokio::fs::read_dir(&path)
+            .await
+            .expect("storage dir should be readable");
+        while let Some(entry) = entries
+            .next_entry()
+            .await
+            .expect("storage dir iteration should succeed")
+        {
+            let file_type = entry
+                .file_type()
+                .await
+                .expect("file type lookup should succeed");
+            if file_type.is_dir() {
+                stack.push(entry.path());
+            } else if file_type.is_file() {
+                count += 1;
+            }
+        }
     }
+
     count
+}
+
+async fn storage_file_exists<I: ImageRepository>(
+    service: &ImageDomainService<I>,
+    file_key: &str,
+) -> bool {
+    service
+        .storage_manager
+        .exists(file_key)
+        .await
+        .expect("storage manager existence check should succeed")
 }
 
 struct FaultyImageRepository {
@@ -614,11 +637,8 @@ async fn test_upload_generates_persistent_thumbnail() {
         "thumbnail should use webp derivative"
     );
     assert!(
-        tokio::fs::try_exists(
-            std::path::Path::new(&service.config.storage.path).join(&thumbnail_key)
-        )
-        .await
-        .expect("thumbnail file existence check should succeed")
+        storage_file_exists(service, &thumbnail_key).await,
+        "thumbnail file existence check should succeed"
     );
 }
 
@@ -712,15 +732,12 @@ async fn test_hard_delete_preserves_shared_file_until_last_reference_is_removed(
 
     assert_eq!(first.filename, second.filename);
     assert_eq!(first.thumbnail, second.thumbnail);
-    let file_path = std::path::Path::new(&service.config.storage.path).join(&first.filename);
-    let thumbnail_path = std::path::Path::new(&service.config.storage.path).join(
-        first
-            .thumbnail
-            .clone()
-            .expect("uploaded image should have thumbnail"),
-    );
-    assert!(tokio::fs::try_exists(&file_path).await.unwrap());
-    assert!(tokio::fs::try_exists(&thumbnail_path).await.unwrap());
+    let thumbnail_key = first
+        .thumbnail
+        .clone()
+        .expect("uploaded image should have thumbnail");
+    assert!(storage_file_exists(service, &first.filename).await);
+    assert!(storage_file_exists(service, &thumbnail_key).await);
 
     service
         .delete_images(&[first.id], user_a)
@@ -728,11 +745,11 @@ async fn test_hard_delete_preserves_shared_file_until_last_reference_is_removed(
         .expect("first hard delete should succeed");
 
     assert!(
-        tokio::fs::try_exists(&file_path).await.unwrap(),
+        storage_file_exists(service, &first.filename).await,
         "shared file should remain while another record still references it"
     );
     assert!(
-        tokio::fs::try_exists(&thumbnail_path).await.unwrap(),
+        storage_file_exists(service, &thumbnail_key).await,
         "shared thumbnail should remain while another record still references it"
     );
 
@@ -742,11 +759,11 @@ async fn test_hard_delete_preserves_shared_file_until_last_reference_is_removed(
         .expect("second hard delete should succeed");
 
     assert!(
-        !tokio::fs::try_exists(&file_path).await.unwrap(),
+        !storage_file_exists(service, &first.filename).await,
         "shared file should be removed after last reference is deleted"
     );
     assert!(
-        !tokio::fs::try_exists(&thumbnail_path).await.unwrap(),
+        !storage_file_exists(service, &thumbnail_key).await,
         "shared thumbnail should be removed after last reference is deleted"
     );
 }
@@ -768,7 +785,6 @@ async fn test_delete_keeps_storage_when_repository_delete_fails() {
         &valid_hash(11),
         Utc::now(),
     );
-    let file_path = std::path::Path::new(&service.config.storage.path).join(&image.filename);
 
     service
         .image_repository
@@ -776,10 +792,9 @@ async fn test_delete_keeps_storage_when_repository_delete_fails() {
         .create_image(&image)
         .await
         .expect("image should be inserted into mock repository");
-    tokio::fs::create_dir_all(&service.config.storage.path)
-        .await
-        .expect("storage root should be created");
-    tokio::fs::write(&file_path, b"payload")
+    service
+        .storage_manager
+        .write(&image.filename, b"payload")
         .await
         .expect("physical object should exist before delete");
 
@@ -793,9 +808,7 @@ async fn test_delete_keeps_storage_when_repository_delete_fails() {
         AppError::DatabaseError(sqlx::Error::RowNotFound)
     ));
     assert!(
-        tokio::fs::try_exists(&file_path)
-            .await
-            .expect("file existence check should succeed"),
+        storage_file_exists(service, &image.filename).await,
         "physical object must remain when metadata delete fails"
     );
 }

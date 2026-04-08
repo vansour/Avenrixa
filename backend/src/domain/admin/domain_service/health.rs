@@ -255,9 +255,20 @@ fn observability_status(
             ));
         }
 
+        if snapshot.backlog.revoked_tokens_expired > 0 {
+            degraded_reasons.push(format!(
+                "过期吊销 token 待清理 {} 项",
+                snapshot.backlog.revoked_tokens_expired
+            ));
+        }
+
         summary.push(format!(
             "存储清理积压 {} 项",
             snapshot.backlog.storage_cleanup_pending
+        ));
+        summary.push(format!(
+            "有效吊销 token {} 项",
+            snapshot.backlog.revoked_tokens_active
         ));
         summary.push(format!("后台任务 {} 个", snapshot.background_tasks.len()));
         summary.push(format!(

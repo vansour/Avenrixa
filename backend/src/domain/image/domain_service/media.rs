@@ -19,14 +19,13 @@ impl<I: ImageRepository> ImageDomainService<I> {
         user_id: Uuid,
     ) -> Result<MediaAsset, AppError> {
         let image = self.get_image_by_filename(filename, user_id).await?;
-        let data = self.storage_manager.read(&image.filename).await?;
         let content_type = mime_guess::from_path(&image.filename)
             .first_or_octet_stream()
             .to_string();
 
         Ok(MediaAsset {
             content_type,
-            data,
+            file_key: image.filename,
             etag: format!("\"{}\"", image.hash),
         })
     }
@@ -38,11 +37,10 @@ impl<I: ImageRepository> ImageDomainService<I> {
     ) -> Result<MediaAsset, AppError> {
         let image = self.get_image_by_key(image_key, user_id).await?;
         let thumbnail_key = self.ensure_thumbnail_exists(&image).await?;
-        let data = self.storage_manager.read(&thumbnail_key).await?;
 
         Ok(MediaAsset {
             content_type: "image/webp".to_string(),
-            data,
+            file_key: thumbnail_key,
             etag: format!(
                 "\"thumb-{}-{}\"",
                 image.hash, self.config.image.thumbnail_size

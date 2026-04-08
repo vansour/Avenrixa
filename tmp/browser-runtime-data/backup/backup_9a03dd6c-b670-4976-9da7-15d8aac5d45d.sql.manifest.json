@@ -1,0 +1,27 @@
+{
+  "format_version": 2,
+  "filename": "backup_9a03dd6c-b670-4976-9da7-15d8aac5d45d.sql",
+  "created_at": "2026-04-07T13:07:53.545006453Z",
+  "database_kind": "postgresql",
+  "semantics": {
+    "database_family": "postgresql",
+    "backup_kind": "postgresql-logical-dump",
+    "backup_scope": "database-only",
+    "restore_mode": "download-only",
+    "artifact_layout": "single-file-plus-manifest",
+    "ui_restore_supported": false
+  },
+  "app_installed": true,
+  "has_admin": true,
+  "storage_signature": "36afccb71cfbfb2d29ca7694c021c6aa2ea6652fd1ddd3ab4556d0c7ad17cd08",
+  "storage": {
+    "storage_backend": "local",
+    "local_storage_path": "/data/images"
+  },
+  "object_rollback_anchor": {
+    "strategy": "local-directory-snapshot",
+    "checkpoint_at": "2026-04-07T13:07:53.545006453Z",
+    "local_storage_path": "/data/images",
+    "capture_error": null
+  }
+}

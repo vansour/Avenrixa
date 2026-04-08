@@ -58,20 +58,6 @@ impl Cache {
         Ok(())
     }
 
-    pub async fn set_raw(
-        conn: &CacheConnection,
-        key: impl AsRef<str>,
-        value: impl Into<String>,
-        ttl_seconds: u64,
-    ) -> Result<(), anyhow::Error> {
-        let key = prefixed_key(key);
-        let result = conn.set_string(&key, value, ttl_seconds).await;
-        if let Err(error) = result {
-            warn!("External cache set error (key: {}): {}", key, error);
-        }
-        Ok(())
-    }
-
     pub async fn del(conn: &CacheConnection, key: impl AsRef<str>) -> Result<(), anyhow::Error> {
         let key = prefixed_key(key);
         let result = conn.del(&key).await;

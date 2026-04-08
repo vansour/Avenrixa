@@ -4,6 +4,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT_DIR}"
 
+source "${ROOT_DIR}/scripts/release-result-common.sh"
+
 workspace_package_version() {
   sed -n 's/^version = "\(.*\)"/\1/p' "${ROOT_DIR}/Cargo.toml" | head -n 1
 }
@@ -75,12 +77,69 @@ RELEASE_IMAGE_ADDITIONAL_TAGS="${RELEASE_IMAGE_ADDITIONAL_TAGS:-}"
 RELEASE_GA_INCLUDE_RC_PREFLIGHT="${RELEASE_GA_INCLUDE_RC_PREFLIGHT:-1}"
 RELEASE_GA_INCLUDE_ASSET_BUNDLE="${RELEASE_GA_INCLUDE_ASSET_BUNDLE:-1}"
 RELEASE_ASSET_DIR="${RELEASE_ASSET_DIR:-${ROOT_DIR}/dist/release/${RELEASE_VERSION}}"
+RELEASE_GA_SHIP_RESULT_PATH="${RELEASE_GA_SHIP_RESULT_PATH:-${RELEASE_ASSET_DIR}/release-ga-ship-result.json}"
 PRESERVE_STACK_ON_FAILURE="${PRESERVE_STACK_ON_FAILURE:-0}"
+
+RELEASE_GA_STARTED_AT="$(release_result_timestamp_utc)"
+RELEASE_GA_COMPLETED_STEPS=()
 
 log_step() {
   echo
   echo "==> $1"
 }
+
+mark_release_ga_ship_step_completed() {
+  RELEASE_GA_COMPLETED_STEPS+=("$1")
+}
+
+finalize_release_ga_ship_result() {
+  local exit_code="$1"
+  local status="failed"
+  local summary="0.1 GA ship failed"
+
+  if [[ "${exit_code}" -eq 0 ]]; then
+    status="passed"
+    summary="0.1 GA ship passed"
+  fi
+
+  local metadata_json
+  metadata_json="$(
+    jq -n \
+      --arg release_version "${RELEASE_VERSION}" \
+      --arg release_revision "${RELEASE_BUILD_REVISION}" \
+      --arg release_build_date "${RELEASE_BUILD_DATE}" \
+      --arg release_image_ref "${RELEASE_IMAGE_REF}" \
+      --arg release_asset_dir "${RELEASE_ASSET_DIR}" \
+      --arg result_path "${RELEASE_GA_SHIP_RESULT_PATH}" \
+      --arg release_image_additional_tags "${RELEASE_IMAGE_ADDITIONAL_TAGS}" \
+      --argjson release_image_push "$([[ "${RELEASE_IMAGE_PUSH}" == "1" ]] && echo true || echo false)" \
+      --argjson include_rc_preflight "$([[ "${RELEASE_GA_INCLUDE_RC_PREFLIGHT}" == "1" ]] && echo true || echo false)" \
+      --argjson include_asset_bundle "$([[ "${RELEASE_GA_INCLUDE_ASSET_BUNDLE}" == "1" ]] && echo true || echo false)" \
+      '{
+        release_version: $release_version,
+        release_revision: $release_revision,
+        release_build_date: $release_build_date,
+        release_image_ref: $release_image_ref,
+        release_image_additional_tags: ($release_image_additional_tags | split(" ") | map(select(length > 0))),
+        release_image_push: $release_image_push,
+        include_rc_preflight: $include_rc_preflight,
+        include_asset_bundle: $include_asset_bundle,
+        release_asset_dir: $release_asset_dir,
+        result_path: $result_path
+      }'
+  )"
+
+  write_release_result_file \
+    "${RELEASE_GA_SHIP_RESULT_PATH}" \
+    "${status}" \
+    "${RELEASE_GA_STARTED_AT}" \
+    "$(release_result_timestamp_utc)" \
+    "${summary}" \
+    "${metadata_json}" \
+    "${RELEASE_GA_COMPLETED_STEPS[@]}"
+}
+
+trap 'exit_code=$?; finalize_release_ga_ship_result "${exit_code}"; exit "${exit_code}"' EXIT
 
 expect_toggle() {
   local value="$1"
@@ -275,6 +334,17 @@ create_release_bundle() {
   echo "Checksums: ${checksums_path}"
 }
 
+verify_release_assets() {
+  log_step "Verifying GA release assets"
+  local release_version="${RELEASE_VERSION}"
+  local release_asset_dir="${RELEASE_ASSET_DIR}"
+
+  env \
+    RELEASE_VERSION="${release_version}" \
+    RELEASE_ASSET_DIR="${release_asset_dir}" \
+    bash ./scripts/release-assets-verify.sh "${release_version}"
+}
+
 main() {
   local generated_at
 
@@ -299,15 +369,20 @@ main() {
 
   if [[ "${RELEASE_GA_INCLUDE_RC_PREFLIGHT}" == "1" ]]; then
     run_rc_preflight
+    mark_release_ga_ship_step_completed "rc_preflight"
   fi
 
   if [[ "${RELEASE_IMAGE_PUSH}" == "1" ]]; then
     push_release_image
+    mark_release_ga_ship_step_completed "image_push"
   fi
 
   if [[ "${RELEASE_GA_INCLUDE_ASSET_BUNDLE}" == "1" ]]; then
     log_step "Generating GA release assets"
     create_release_bundle "${generated_at}"
+    mark_release_ga_ship_step_completed "asset_bundle"
+    verify_release_assets
+    mark_release_ga_ship_step_completed "asset_verification"
   fi
 
   echo

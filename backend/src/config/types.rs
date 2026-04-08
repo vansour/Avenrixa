@@ -65,7 +65,6 @@ pub struct Config {
     pub storage: StorageConfig,
     #[serde(alias = "cache")]
     pub cache_policy: CachePolicyConfig,
-    pub rate_limit: RateLimitConfig,
     pub cleanup: CleanupConfig,
     pub cookie: CookieConfig,
     pub mail: MailConfig,
@@ -127,8 +126,6 @@ impl DatabaseKind {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CacheBackendConfig {
     pub url: Option<String>,
-    pub key_prefix: String,
-    pub ttl: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -146,13 +143,6 @@ pub(crate) fn default_file_check_concurrent_threshold() -> usize {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CachePolicyConfig {
     pub list_ttl: u64,
-    pub detail_ttl: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RateLimitConfig {
-    pub requests_per_minute: u32,
-    pub burst_size: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -220,7 +210,82 @@ mod tests {
         let parsed: Config =
             serde_json::from_value(Value::Object(object.clone())).expect("cache aliases work");
 
-        assert_eq!(parsed.cache_backend.key_prefix, "img:");
+        assert_eq!(parsed.cache_backend.url, None);
         assert_eq!(parsed.cache_policy.list_ttl, 300);
+    }
+
+    #[test]
+    fn config_ignores_legacy_unused_cache_and_rate_limit_fields() {
+        let value = serde_json::json!({
+            "server": {
+                "host": "0.0.0.0",
+                "port": 8080,
+                "max_upload_size": 52428800,
+                "rate_limit_per_second": 30,
+                "rate_limit_burst": 120,
+                "jwt_secret_min_length": 32,
+                "frontend_dir": "/app/frontend/dist"
+            },
+            "database": {
+                "kind": "postgresql",
+                "url": "postgresql://user:pass@localhost:5432/image",
+                "max_connections": 10
+            },
+            "dragonfly": {
+                "url": "dragonfly://cache:6379",
+                "key_prefix": "legacy:",
+                "ttl": 1200
+            },
+            "storage": {
+                "path": "/data/images",
+                "allowed_extensions": ["jpg", "png"],
+                "file_check_concurrent_threshold": 50
+            },
+            "cache": {
+                "list_ttl": 120,
+                "detail_ttl": 600
+            },
+            "rate_limit": {
+                "requests_per_minute": 100,
+                "burst_size": 30
+            },
+            "cleanup": {
+                "enabled": true,
+                "expiry_check_interval_seconds": 3600
+            },
+            "cookie": {
+                "secure": true,
+                "same_site": "Strict",
+                "path": "/",
+                "domain": null,
+                "max_age_seconds": 604800
+            },
+            "mail": {
+                "enabled": false,
+                "smtp_host": "",
+                "smtp_port": 0,
+                "smtp_user": null,
+                "smtp_password": null,
+                "from_email": "",
+                "from_name": "",
+                "reset_link_base_url": ""
+            },
+            "image": {
+                "max_width": 1920,
+                "max_height": 1080,
+                "thumbnail_size": 300,
+                "jpeg_quality": 85,
+                "dedup_strategy": "user"
+            }
+        });
+
+        let parsed: Config =
+            serde_json::from_value(value).expect("legacy fields should be ignored");
+
+        assert_eq!(
+            parsed.cache_backend.url.as_deref(),
+            Some("dragonfly://cache:6379")
+        );
+        assert_eq!(parsed.cache_policy.list_ttl, 120);
     }
 }

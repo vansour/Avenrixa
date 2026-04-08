@@ -2,13 +2,6 @@
 pub struct HashCache;
 
 impl HashCache {
-    pub fn image_hash(hash: &str, strategy: &str) -> String {
-        match strategy {
-            "global" => format!("hash:global:{}", hash),
-            _ => format!("hash:user:{}", hash),
-        }
-    }
-
     pub fn existing_info(hash: &str, strategy: &str, user_id: uuid::Uuid) -> String {
         match strategy {
             "global" => format!("hash:info:global:{}", hash),

@@ -1,50 +1,20 @@
 # Changelog
 
-## 0.1.2-rc.3 - 2026-03-23
+## 0.1.2-rc.3 - 2026-04-08
 
-- 收口 `0.1` 产品边界，移除页面内恢复入口与占位 API，统一改为“逻辑备份下载 + 运维脚本恢复”语义。
-- 重构登录页、设置页与应用壳层状态组织，拆分共享异步动作模式，降低页面控制器膨胀和重复鉴权错误处理。
-- 补齐安装、认证、设置冲突、图片删除/补偿与 fail-closed 启动等关键回归测试，并清理根目录无效占位测试。
-- 统一后台任务生命周期与审计写入策略，为清理任务、备份、审计、refresh、图片处理补充运行态指标、积压统计和系统页可观测性展示。
+### Changed
 
-## 0.1.2-rc.2 - 2026-03-22
+- 完成前端主链路收口，安装页与设置页已接通 `favicon` 配置和服务器目录浏览。
+- 拆分设置页控制器，按 `general / security / system / maintenance / users` 模块化整理前端状态逻辑。
+- 抽取后端 `runtime settings / favicon` 共享 helper，减少安装与管理员设置路径的重复实现。
+- 固化发布与运维入口矩阵，`release-ga-gate`、`release-rc-preflight`、`release-ga-ship` 现在会写出统一 JSON 结果文件。
 
-- 将 `0.1` 默认推荐缓存路径彻底收口到 `Dragonfly`，移除项目内 `Redis` / `REDIS_URL` 口径，并把底层缓存客户端替换为 `fred` 封装。
-- 清理 Compose、发布脚本、安装向导与运行时配置中的历史多数据库/多缓存残留，默认主链路统一到 `PostgreSQL + Dragonfly + 本地存储`。
-- 修复 `cargo check`、`cargo clippy --workspace --all-targets -- -D warnings` 与 `cargo test --workspace` 中的遗留错误，删除需要 Docker 的旧迁移升级测试，确保候选版冻结时三条 Rust 门禁全绿。
-- 修正 RC 发布准备链路中的版本冻结与测试覆盖细节，包括缓存 TLS 初始化、备份语义断言和 fail-closed 启动测试。
+### Verified
 
-## 0.1.2-rc.1 - 2026-03-17
+- `cargo test --workspace`
+- `npm test --prefix frontend`
+- `npm run build --prefix frontend`
 
-- 收口 PostgreSQL 备份与 S3 健康探测链路，降低大库备份内存峰值，并把远端桶可达性纳入健康状态。
-- 修正设置保存与安装后的运行时应用一致性，补齐失败回滚与并发安装保护。
-- 将缩略图改为“上传预生成 + 首次访问懒回填持久化”，媒体路由下沉到领域服务，并补齐 `ETag` / `nosniff` 私有响应头。
-- 统一图片原图与缩略图的引用判断、删除清理和补偿逻辑，避免共享衍生图被提前清理。
-- RC 预发布镜像现在默认同时发布 `:<version>` 与 `:dev` 标签，方便预览环境持续跟进候选版。
+### Notes
 
-## 0.1.1-rc.1 - 2026-03-16
-
-- 调整运行时版本展示，正式版与预发布版 UI 主展示只保留版本号，revision 仅保留在镜像 labels、发布元数据和调试链路。
-- 精简系统设置页与 API 接入页，统一压缩状态卡、指标卡、接口列表与示例区的高度和说明文字。
-- 升级 `tempfile` 到 `3.27`，并修复浏览器回归脚本与 RC 预检中的版本一致性校验，避免候选版工作流误报。
-
-## 0.1.1 - 2026-03-16
-
-- 收口安装向导与系统设置的信息架构，移除冗余说明、收紧步骤表达，并统一 General / Storage / Review 等关键配置流。
-- 增加共享 `shared-types` crate，迁移 bootstrap、backup/restore、审计与管理侧纯协议类型，进一步清晰前后端边界。
-- 完善对象存储配置体验：新增 provider preset、保存前 S3 连通性测试、R2/S3 状态摘要与更稳定的设置页配置加载逻辑。
-- 优化上传中心、历史图库与 API 接入页，包括多图网格、图片复制面板、代码块可读性、系统设置精简及若干布局修复。
-
-## 0.1.0 - 2026-03-12
-
-- 固化 `0.1` 支持范围，只把 `PostgreSQL + Redis 8 + 本地存储` 作为默认 GA 推荐栈。
-- 增加统一的 `release-ga-gate`，串行执行 Rust checks、默认 PostgreSQL smoke、PostgreSQL 物理恢复演练和两种 PITR 演练。
-- 收敛 PostgreSQL 页面备份语义为“下载型逻辑导出”，企业主恢复统一走物理备份 / PITR 运维脚本。
-- 补齐 `release-rc-preflight` 与 `release-ga-ship`，把正式版版本、发布说明、镜像元数据和校验和收进统一发版入口。
-
-## 0.1.0-rc.1 - 2026-03-12
-
-- 固化 `0.1` 支持范围，只把 `PostgreSQL + Redis 8 + 本地存储` 作为默认 GA 推荐栈。
-- 增加统一的 `release-ga-gate`，串行执行 Rust checks、默认 PostgreSQL smoke、PostgreSQL 物理恢复演练和两种 PITR 演练。
-- 收敛 PostgreSQL 页面备份语义为“下载型逻辑导出”，企业主恢复统一走物理备份 / PITR 运维脚本。
-- 补齐 `Release 0.1 RC Preflight`，校验 changelog、镜像元数据以及 `/health` 暴露的候选版版本信息。
+- 当前 RC 仍围绕 `PostgreSQL + Dragonfly + 本地存储` 主链路准备，不扩大支持矩阵。
