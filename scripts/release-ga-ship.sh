@@ -336,9 +336,13 @@ create_release_bundle() {
 
 verify_release_assets() {
   log_step "Verifying GA release assets"
-  RELEASE_VERSION="${RELEASE_VERSION}" \
-  RELEASE_ASSET_DIR="${RELEASE_ASSET_DIR}" \
-  bash ./scripts/release-assets-verify.sh "${RELEASE_VERSION}"
+  local release_version="${RELEASE_VERSION}"
+  local release_asset_dir="${RELEASE_ASSET_DIR}"
+
+  env \
+    RELEASE_VERSION="${release_version}" \
+    RELEASE_ASSET_DIR="${release_asset_dir}" \
+    bash ./scripts/release-assets-verify.sh "${release_version}"
 }
 
 main() {
