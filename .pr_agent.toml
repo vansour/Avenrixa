@@ -1,0 +1,6 @@
+[config]
+model = "gpt-5.4"
+fallback_models = ["gpt-5.3-codex"]
+
+[litellm]
+api_base = "https://newapi.vansour.net/v1"
