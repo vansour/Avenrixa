@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 
+const MAX_FAVICON_BYTES = 256 * 1024;
+
 const props = withDefaults(
   defineProps<{
     selectedDataUrl: string | null;
@@ -79,6 +81,14 @@ async function handleFileChange(event: Event): Promise<void> {
   const input = event.target as HTMLInputElement;
   const file = input.files?.[0] ?? null;
   if (!file) {
+    return;
+  }
+
+  if (file.size > MAX_FAVICON_BYTES) {
+    emit('error', `网站图标不能超过 ${MAX_FAVICON_BYTES / 1024} KB`);
+    if (fileInput.value) {
+      fileInput.value.value = '';
+    }
     return;
   }
 

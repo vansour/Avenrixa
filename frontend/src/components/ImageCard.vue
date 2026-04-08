@@ -43,7 +43,7 @@ const emit = defineEmits<{
       </div>
       <ImageCopyPanel :image="props.image" />
       <div class="image-actions">
-        <a class="btn btn-card btn-card-primary" :href="imageUrl(props.image)" target="_blank" rel="noreferrer" @click.prevent="emit('view')">
+        <a class="btn btn-card btn-card-primary" :href="imageUrl(props.image)" target="_blank" rel="noreferrer" @click="emit('view')">
           查看原图
         </a>
         <button class="btn btn-card btn-card-danger" type="button" @click="emit('delete')">

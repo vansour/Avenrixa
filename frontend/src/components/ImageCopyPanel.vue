@@ -37,7 +37,9 @@ async function copyText(text: string, label: string): Promise<void> {
     await navigator.clipboard.writeText(text);
     toastStore.showSuccess(`已复制${label}`);
   } catch (error) {
-    toastStore.showError(`复制失败: ${String(error)}`);
+    toastStore.showError(
+      `复制失败: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
 }
 </script>

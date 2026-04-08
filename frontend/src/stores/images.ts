@@ -104,20 +104,29 @@ export const useImagesStore = defineStore('images', {
     },
     toggleAllVisibleActive() {
       const visibleIds = this.active.images.map((image) => image.image_key);
+      const visibleIdSet = new Set(visibleIds);
+      const selectedIdSet = new Set(this.active.selectedIds);
       const isAllSelected =
         visibleIds.length > 0 &&
-        visibleIds.every((imageKey) => this.active.selectedIds.includes(imageKey));
+        visibleIds.every((imageKey) => selectedIdSet.has(imageKey));
 
       if (isAllSelected) {
         this.active.selectedIds = this.active.selectedIds.filter(
-          (id) => !visibleIds.includes(id),
+          (id) => !visibleIdSet.has(id),
         );
         return;
       }
 
-      this.active.selectedIds = Array.from(
-        new Set([...this.active.selectedIds, ...visibleIds]),
-      );
+      const nextSelectedIds = [...this.active.selectedIds];
+
+      for (const imageKey of visibleIds) {
+        if (!selectedIdSet.has(imageKey)) {
+          selectedIdSet.add(imageKey);
+          nextSelectedIds.push(imageKey);
+        }
+      }
+
+      this.active.selectedIds = nextSelectedIds;
     },
   },
 });
